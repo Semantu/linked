@@ -1,8 +1,12 @@
 {
   "name": "@_linked/core",
   "version": "0.0.0",
-  "license": "MPL-2.0",
+  "license": "MIT",
   "description": "Linked.js core query and SHACL shape DSL (copy-then-prune baseline)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Semantu/linked.git"
+  },
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
   "exports": {
@@ -24,6 +28,16 @@
       ]
     }
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "npx rimraf ./lib && npx tsc -p tsconfig-cjs.json && npx tsc -p tsconfig-esm.json && node ./scripts/dual-package.js",
     "compile": "echo '💫 Compiling CJS' && npx tsc -p tsconfig-cjs.json && echo '💫 Compiling ESM' && npx tsc -p tsconfig-esm.json",
@@ -31,6 +45,8 @@
     "test": "npx jest --config jest.config.js"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.5.2",
+    "@changesets/cli": "^2.29.8",
     "@jest/globals": "^29.7.0",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.12.7",
