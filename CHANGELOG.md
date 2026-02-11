@@ -3,11 +3,6 @@
 ## 1.0.0
 
 ### Major Changes
-
-- [#1](https://github.com/Semantu/linked/pull/1) [`0938ede`](https://github.com/Semantu/linked/commit/0938edec623e9d611767ae150b8d60270035ffeb) Thanks [@flyon](https://github.com/flyon)! - first major release
-
-### 1.0.0 (from LINCD.js)
-
 This is a rebranding + extraction release. It moves the core query/shape system into `@_linked/core` and removes RDF models and React-specific code.
 
 Key changes:
