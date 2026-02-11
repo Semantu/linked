@@ -1,22 +1,29 @@
 # Changelog
 
+## 1.0.0
+
+### Major Changes
+
+- [#1](https://github.com/Semantu/linked/pull/1) [`0938ede`](https://github.com/Semantu/linked/commit/0938edec623e9d611767ae150b8d60270035ffeb) Thanks [@flyon](https://github.com/flyon)! - first major release
+
 ### 1.0.0 (from LINCD.js)
 
 This is a rebranding + extraction release. It moves the core query/shape system into `@_linked/core` and removes RDF models and React-specific code.
 
 Key changes:
+
 - **New package name:** import from `@_linked/core` instead of `lincd`.
 - **Node references everywhere:** use `NodeReferenceValue = {id: string}` everywhere. `NamedNode` does not exist in this package.
   - **Before (LINCD.js):**
     ```typescript
-    import {NamedNode} from 'lincd/models';
-    const name = NamedNode.getOrCreate('https://schema.org/name');
+    import { NamedNode } from "lincd/models";
+    const name = NamedNode.getOrCreate("https://schema.org/name");
     ```
   - **After (`@_linked/core`):**
     ```typescript
-    import {createNameSpace} from '@_linked/core/utils/NameSpace';
-    const schema = createNameSpace('https://schema.org/');
-    const name = schema('name'); // {id: 'https://schema.org/name'}
+    import { createNameSpace } from "@_linked/core/utils/NameSpace";
+    const schema = createNameSpace("https://schema.org/");
+    const name = schema("name"); // {id: 'https://schema.org/name'}
     ```
 - **Decorator paths:** property decorators now require `NodeReferenceValue` paths (no strings, no `NamedNode`).
   - **Before:**
@@ -40,11 +47,11 @@ Key changes:
 - **Query context:** context values are `NodeReferenceValue` (or QResults) instead of RDF nodes.
   - **Before:**
     ```typescript
-    setQueryContext('user', NamedNode.getOrCreate(userId), Person);
+    setQueryContext("user", NamedNode.getOrCreate(userId), Person);
     ```
   - **After:**
     ```typescript
-    setQueryContext('user', {id: userId}, Person);
+    setQueryContext("user", { id: userId }, Person);
     ```
 - **No RDF models in core:** `NamedNode`, `Literal`, `BlankNode`, `Quad`, `Graph`, and all RDF collections are not available in `@_linked/core`. Use a store package (e.g. `@_linked/rdf-mem-store`) if you need RDF models or quad-level access.
 - **Shape instances:** shape classes no longer carry RDF nodes or instance graph APIs. Decorated accessors register SHACL metadata but do not implement runtime get/set behavior.
