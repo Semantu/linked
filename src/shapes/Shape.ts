@@ -14,7 +14,6 @@ import {
   QueryBuildFn,
   QueryResponseToResultType,
   QueryShape,
-  SelectAllQueryResponse,
   SelectQueryFactory,
 } from '../queries/SelectQuery.js';
 import type {IQueryParser} from '../interfaces/IQueryParser.js';
@@ -204,47 +203,6 @@ export abstract class Shape {
       });
     });
     return query.patchResultPromise<ResultType>(p);
-  }
-
-  /**
-   * Select all decorated properties of this shape.
-   * Returns a single result if a single subject is provided, or an array of results if no subject is provided.
-   */
-  static selectAll<
-    ShapeType extends Shape,
-    ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
-    >[],
-  >(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
-  static selectAll<
-    ShapeType extends Shape,
-    ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
-    >,
-  >(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
-    subject: ShapeType | QResult<ShapeType>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
-  static selectAll<
-    ShapeType extends Shape,
-    ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
-    >[],
-  >(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
-    subject?: ShapeType | QResult<ShapeType>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType> {
-    const propertyLabels = (this as any)
-      .shape.getUniquePropertyShapes()
-      .map((propertyShape: PropertyShape) => propertyShape.label);
-    return (this as any).select(subject as any, (shape: ShapeType) =>
-      propertyLabels.map((label) => (shape as any)[label]),
-    ) as Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
   }
 
   static update<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
