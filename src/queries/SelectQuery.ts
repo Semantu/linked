@@ -144,6 +144,18 @@ export type QueryShapeProps<
   [P in keyof T]: ToQueryBuilderObject<T[P], QShape<T, Source, Property>, P>;
 };
 
+export type SelectAllQueryResponse<T extends Shape> = Array<
+  QueryShapeProps<T, null, ''>[Exclude<
+    Extract<
+      {
+        [K in keyof T]-?: T[K] extends (...args: any[]) => any ? never : K;
+      }[keyof T],
+      string
+    >,
+    Extract<keyof Shape, string>
+  >]
+>;
+
 /**
  * This type states that the ShapeSet has access to the same methods as the shape of all the items in the set
  * (this is enabled with the QueryShapeSet.proxifyShapeSet method)
@@ -1207,6 +1219,20 @@ export class QueryShapeSet<
     return subQuery as any;
   }
 
+  selectAll(): SelectQueryFactory<
+    S,
+    SelectAllQueryResponse<S>,
+    QueryShapeSet<S, Source, Property>
+  > {
+    let leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
+    const propertyLabels = leastSpecificShape.shape
+      .getUniquePropertyShapes()
+      .map((propertyShape) => propertyShape.label);
+    return this.select((shape) =>
+      propertyLabels.map((label) => (shape as any)[label]),
+    );
+  }
+
   some(validation: WhereClause<S>): SetEvaluation {
     return this.someOrEvery(validation, WhereMethods.SOME);
   }
@@ -1363,6 +1389,22 @@ export class QueryShape<
     );
     subQuery.parentQueryPath = this.getPropertyPath();
     return subQuery as any;
+  }
+
+  selectAll(): SelectQueryFactory<
+    S,
+    SelectAllQueryResponse<S>,
+    QueryShape<S, Source, Property>
+  > {
+    let leastSpecificShape = getShapeClass(
+      (this.getOriginalValue() as Shape).nodeShape.id,
+    );
+    const propertyLabels = leastSpecificShape.shape
+      .getUniquePropertyShapes()
+      .map((propertyShape) => propertyShape.label);
+    return this.select((shape) =>
+      propertyLabels.map((label) => (shape as any)[label]),
+    );
   }
 
   // count(countable: QueryBuilderObject, resultKey?: string): SetSize<this> {

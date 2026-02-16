@@ -31,8 +31,11 @@ export const hasPet = prop('hasPet');
 export const guardDogLevel = prop('guardDogLevel');
 export const pluralTestProp = prop('pluralTestProp');
 export const personClass = type('Person');
+export const employeeClass = type('Employee');
 export const petClass = type('Pet');
 export const dogClass = type('Dog');
+export const employeeName = prop('employeeName');
+export const employeeDepartment = prop('employeeDepartment');
 
 @linkedShape
 export class Pet extends Shape {
@@ -109,6 +112,26 @@ export class Person extends Shape {
   }
 }
 
+@linkedShape
+export class Employee extends Person {
+  static targetClass = employeeClass;
+
+  @literalProperty({path: employeeName, maxCount: 1})
+  get name(): string {
+    return '';
+  }
+
+  @objectProperty({path: bestFriend, maxCount: 1, shape: Employee})
+  get bestFriend(): Employee {
+    return null;
+  }
+
+  @literalProperty({path: employeeDepartment, maxCount: 1})
+  get department(): string {
+    return '';
+  }
+}
+
 const componentQuery = Person.query((p) => ({name: p.name}));
 const componentLike = {query: componentQuery};
 
@@ -172,6 +195,7 @@ export const queryFactories = {
       p.friends.where((f) => f.name.equals('Jinx').or(f.hobby.equals('Jogging'))),
     ),
   selectAll: () => Person.select(),
+  selectAllProperties: () => Person.selectAll(),
   selectWhereNameSemmy: () =>
     Person.select().where((p) => p.name.equals('Semmy')),
   whereAndOrAnd: () =>
@@ -225,6 +249,10 @@ export const queryFactories = {
     Person.select((p) =>
       p.friends.select((f) => ({name: f.name, hobby: f.hobby})),
     ),
+  subSelectAllProperties: () =>
+    Person.select((p) => p.friends.selectAll()),
+  subSelectAllPropertiesSingle: () =>
+    Person.select((p) => p.bestFriend.selectAll()),
   doubleNestedSubSelect: () =>
     Person.select((p) =>
       p.friends.select((p2) =>
@@ -249,6 +277,7 @@ export const queryFactories = {
     Person.select((p) => [p.bestFriend, p.friends]),
   selectShapeAs: () =>
     Person.select((p) => p.firstPet.as(Dog).guardDogLevel),
+  selectAllEmployeeProperties: () => Employee.selectAll(),
   selectOne: () =>
     Person.select((p) => p.name).where((p) => p.equals(entity('p1'))).one(),
   nestedQueries2: () =>
