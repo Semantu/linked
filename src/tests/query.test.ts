@@ -9,7 +9,7 @@ import {UpdateQueryFactory} from '../queries/UpdateQuery';
 import {CreateQueryFactory} from '../queries/CreateQuery';
 import {DeleteQueryFactory} from '../queries/DeleteQuery';
 import {NodeId} from '../queries/MutationQuery';
-import {Dog, Employee, Person, Pet, queryFactories, name as namePath, tmpEntityBase} from '../test-helpers/query-fixtures';
+import {Dog, Person, Pet, queryFactories, name as namePath, tmpEntityBase} from '../test-helpers/query-fixtures';
 import {setQueryContext} from '../queries/QueryContext';
 
 class QueryCaptureStore implements IQueryParser {
@@ -54,7 +54,6 @@ const store = new QueryCaptureStore();
 Person.queryParser = store;
 Pet.queryParser = store;
 Dog.queryParser = store;
-Employee.queryParser = store;
 
 const captureQuery = async (runner: () => Promise<unknown>) => {
   store.lastQuery = undefined;
@@ -220,37 +219,6 @@ describe('3. Filtering (Where Clauses)', () => {
     expectSelectQuery(query);
   });
 
-  test('select all properties of the shape', async () => {
-    const query = await captureQuery(() => queryFactories.selectAllProperties());
-
-    expectSelectQuery(query);
-    const labels = query?.select?.map((path: any) => path?.[0]?.property?.label);
-    expect(labels).toEqual(expect.arrayContaining([
-      'name',
-      'hobby',
-      'nickNames',
-      'birthDate',
-      'isRealPerson',
-      'bestFriend',
-      'friends',
-      'pets',
-      'firstPet',
-      'pluralTestProp',
-    ]));
-  });
-
-  test('select all uses subclass overrides once', async () => {
-    const query = await captureQuery(() => queryFactories.selectAllEmployeeProperties());
-
-    expectSelectQuery(query);
-    const labels = query?.select?.map((path: any) => path?.[0]?.property?.label);
-    expect(labels?.filter((label: string) => label === 'name')).toHaveLength(1);
-    expect(labels?.filter((label: string) => label === 'bestFriend')).toHaveLength(1);
-    const nameStep = query?.select?.find((path: any) => path?.[0]?.property?.label === 'name');
-    expect(nameStep?.[0]?.property?.path?.id).toBe('linked://tmp/props/employeeName');
-    expect(labels).toContain('department');
-  });
-
   test('empty select with where', async () => {
     const query = await captureQuery(() => queryFactories.selectWhereNameSemmy());
 
@@ -381,34 +349,6 @@ describe('4. Aggregation & Sub-Select', () => {
     const query = await captureQuery(() => queryFactories.subSelectPluralCustom());
 
     expectSelectQuery(query);
-  });
-
-  test('sub select all properties on a shape set', async () => {
-    const query = await captureQuery(() =>
-      queryFactories.subSelectAllProperties(),
-    );
-
-    expectSelectQuery(query);
-    expect(query?.select?.[0]?.[0]?.property?.label).toBe('friends');
-    const nestedPaths = query?.select?.[0]?.[1] as any[];
-    const nestedLabels = nestedPaths?.map((path: any) =>
-      path?.[0]?.property?.label,
-    );
-    expect(nestedLabels).toEqual(expect.arrayContaining(['name', 'hobby']));
-  });
-
-  test('sub select all properties on a single shape', async () => {
-    const query = await captureQuery(() =>
-      queryFactories.subSelectAllPropertiesSingle(),
-    );
-
-    expectSelectQuery(query);
-    expect(query?.select?.[0]?.[0]?.property?.label).toBe('bestFriend');
-    const nestedPaths = query?.select?.[0]?.[1] as any[];
-    const nestedLabels = nestedPaths?.map((path: any) =>
-      path?.[0]?.property?.label,
-    );
-    expect(nestedLabels).toEqual(expect.arrayContaining(['name', 'hobby']));
   });
 
   test('double nested sub select', async () => {

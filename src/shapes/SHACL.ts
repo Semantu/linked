@@ -198,10 +198,6 @@ export interface PropertyShapeConfig {
   sortBy?: PropertyPathInputList;
 }
 
-const EXPLICIT_NODE_KIND_SYMBOL = Symbol('explicitNodeKind');
-const EXPLICIT_MIN_COUNT_SYMBOL = Symbol('explicitMinCount');
-const EXPLICIT_MAX_COUNT_SYMBOL = Symbol('explicitMaxCount');
-
 export interface ParameterConfig {
   optional?: number;
 }
@@ -257,18 +253,6 @@ export class NodeShape extends Shape {
       shapeClass = Object.getPrototypeOf(shapeClass);
     }
     return res;
-  }
-
-  getUniquePropertyShapes(): PropertyShape[] {
-    const uniquePropertyShapes: PropertyShape[] = [];
-    const seen = new Set<string>();
-    this.getPropertyShapes(true).forEach((propertyShape) => {
-      if (!seen.has(propertyShape.label)) {
-        seen.add(propertyShape.label);
-        uniquePropertyShapes.push(propertyShape);
-      }
-    });
-    return uniquePropertyShapes;
   }
 
   getPropertyShape(
@@ -439,20 +423,7 @@ export function registerPropertyShape(
   shape: NodeShape,
   propertyShape: PropertyShape,
 ) {
-  const inherited = shape.getPropertyShape(propertyShape.label, true);
   const existing = shape.getPropertyShape(propertyShape.label, false);
-  if (!existing && inherited) {
-    if (!(propertyShape as any)[EXPLICIT_MIN_COUNT_SYMBOL]) {
-      propertyShape.minCount = inherited.minCount;
-    }
-    if (!(propertyShape as any)[EXPLICIT_MAX_COUNT_SYMBOL]) {
-      propertyShape.maxCount = inherited.maxCount;
-    }
-    if (!(propertyShape as any)[EXPLICIT_NODE_KIND_SYMBOL]) {
-      propertyShape.nodeKind = inherited.nodeKind;
-    }
-    validateOverrideTightening(shape, inherited, propertyShape);
-  }
   if (existing) {
     Object.assign(existing, propertyShape);
     return existing;
@@ -461,85 +432,6 @@ export function registerPropertyShape(
   shape.addPropertyShape(propertyShape);
   return propertyShape;
 }
-
-const ATOMIC_NODE_KINDS = [
-  shacl.BlankNode.id,
-  shacl.IRI.id,
-  shacl.Literal.id,
-];
-
-const nodeKindToAtomics = (nodeKind?: NodeReferenceValue): Set<string> => {
-  if (!nodeKind?.id) {
-    return new Set();
-  }
-  switch (nodeKind.id) {
-    case shacl.BlankNode.id:
-    case shacl.IRI.id:
-    case shacl.Literal.id:
-      return new Set([nodeKind.id]);
-    case shacl.BlankNodeOrIRI.id:
-      return new Set([shacl.BlankNode.id, shacl.IRI.id]);
-    case shacl.IRIOrLiteral.id:
-      return new Set([shacl.IRI.id, shacl.Literal.id]);
-    case shacl.BlankNodeOrLiteral.id:
-      return new Set([shacl.BlankNode.id, shacl.Literal.id]);
-    default:
-      return new Set(ATOMIC_NODE_KINDS);
-  }
-};
-
-const throwOverrideError = (
-  shape: NodeShape,
-  propertyShape: PropertyShape,
-  message: string,
-) => {
-  throw new Error(
-    `Invalid override for ${shape.label}.${propertyShape.label}: ${message}`,
-  );
-};
-
-const validateOverrideTightening = (
-  shape: NodeShape,
-  base: PropertyShape,
-  override: PropertyShape,
-) => {
-  if (
-    typeof base.minCount === 'number' &&
-    typeof override.minCount === 'number' &&
-    override.minCount < base.minCount
-  ) {
-    throwOverrideError(
-      shape,
-      override,
-      `minCount cannot be lowered (${base.minCount} -> ${override.minCount}).`,
-    );
-  }
-
-  if (
-    typeof base.maxCount === 'number' &&
-    typeof override.maxCount === 'number' &&
-    override.maxCount > base.maxCount
-  ) {
-    throwOverrideError(
-      shape,
-      override,
-      `maxCount cannot be increased (${base.maxCount} -> ${override.maxCount}).`,
-    );
-  }
-
-  if (base.nodeKind && override.nodeKind) {
-    const baseKinds = nodeKindToAtomics(base.nodeKind);
-    const overrideKinds = nodeKindToAtomics(override.nodeKind);
-    const widensNodeKind = [...overrideKinds].some((kind) => !baseKinds.has(kind));
-    if (widensNodeKind) {
-      throwOverrideError(
-        shape,
-        override,
-        `nodeKind cannot be widened (${base.nodeKind.id} -> ${override.nodeKind.id}).`,
-      );
-    }
-  }
-};
 
 export function createPropertyShape<
   Config extends LiteralPropertyShapeConfig | ObjectPropertyShapeConfig,
@@ -562,17 +454,13 @@ export function createPropertyShape<
 
   if (config.required) {
     propertyShape.minCount = 1;
-  } else if (config.minCount !== undefined) {
+  } else if (config.minCount) {
     propertyShape.minCount = config.minCount;
   }
-  (propertyShape as any)[EXPLICIT_MIN_COUNT_SYMBOL] =
-    config.required === true || config.minCount !== undefined;
 
-  if (config.maxCount !== undefined) {
+  if (config.maxCount) {
     propertyShape.maxCount = config.maxCount;
   }
-  (propertyShape as any)[EXPLICIT_MAX_COUNT_SYMBOL] =
-    config.maxCount !== undefined;
   if ((config as LiteralPropertyShapeConfig).datatype) {
     propertyShape.datatype = toPlainNodeRef(
       (config as LiteralPropertyShapeConfig).datatype,
@@ -605,8 +493,6 @@ export function createPropertyShape<
   }
 
   propertyShape.nodeKind = normalizeNodeKind(config.nodeKind, defaultNodeKind);
-  (propertyShape as any)[EXPLICIT_NODE_KIND_SYMBOL] =
-    config.nodeKind !== undefined;
 
   if (shapeClass) {
     onShapeSetup(shapeClass, (shape: NodeShape) => {

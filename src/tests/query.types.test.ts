@@ -205,16 +205,6 @@ describe.skip('query result type inference (compile only)', () => {
     expectType<string | undefined>(first.id);
   });
 
-  test('select all properties of the shape', () => {
-    const promise = queryFactories.selectAllProperties();
-    type Result = Awaited<typeof promise>;
-    const first = (null as unknown as Result)[0];
-    expectType<string | undefined>(first.id);
-    expectType<string | null | undefined>(first.name);
-    type HasNodeShape = 'nodeShape' extends keyof typeof first ? true : false;
-    expectType<false>(null as unknown as HasNodeShape);
-  });
-
   test('empty select with where', () => {
     const promise = queryFactories.selectWhereNameSemmy();
     type Result = Awaited<typeof promise>;
@@ -334,24 +324,6 @@ describe.skip('query result type inference (compile only)', () => {
     const first = (null as unknown as Result)[0];
     expectType<string | null | undefined>(first.friends[0].name);
     expectType<string | null | undefined>(first.friends[0].hobby);
-  });
-
-  test('sub select all properties on a shape set', () => {
-    const promise = queryFactories.subSelectAllProperties();
-    type Result = Awaited<typeof promise>;
-    const first = (null as unknown as Result)[0];
-    expectType<string | undefined>(first.friends[0].id);
-    expectType<string | null | undefined>(first.friends[0].name);
-    expectType<string | null | undefined>(first.friends[0].hobby);
-  });
-
-  test('sub select all properties on a single shape', () => {
-    const promise = queryFactories.subSelectAllPropertiesSingle();
-    type Result = Awaited<typeof promise>;
-    const first = (null as unknown as Result)[0];
-    expectType<string | undefined>(first.bestFriend.id);
-    expectType<string | null | undefined>(first.bestFriend.name);
-    expectType<string | null | undefined>(first.bestFriend.hobby);
   });
 
   test('double nested sub select', () => {
