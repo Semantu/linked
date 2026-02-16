@@ -22,8 +22,6 @@ ls docs/                # list all docs
 head -4 docs/*.md       # get summaries (or replace * with a specific file)
 ```
 
-Each package also has a `README.md` with API docs and a `## Changelog` at the bottom.
-
 ## Planning and implementation workflow
 
 ### When to plan
@@ -33,7 +31,7 @@ Any task that changes package code requires a plan. Simple checks, info gatherin
 ### Creating a plan
 
 1. **Inspect the relevant code thoroughly** before writing anything. Read the source files, tests, and existing docs that relate to the task.
-2. Create a new doc in `docs/` with the next 3-digit prefix (e.g. `005-add-filter-support.md`). Start with YAML frontmatter.
+2. Create a new doc in `docs/` with the next 3-digit prefix (e.g. `005-add-filter-support.md`) **for new feature/PR scope**. For follow-ups in the same thread/PR scope, update the existing plan doc. Start with YAML frontmatter.
 3. Write the plan with these sections:
    - **Key considerations and choices** — tradeoffs, open questions, alternatives
    - **Potential problems** — what could go wrong, edge cases
@@ -56,4 +54,4 @@ Any task that changes package code requires a plan. Simple checks, info gatherin
 Before committing final changes or preparing a PR:
 
 1. **Consolidate the plan doc** — collapse alternatives into the choices that were made, summarize implementation details and breaking changes, keep a brief problems section if relevant, remove anything redundant for future readers.
-2. **Update `## Changelog`** in each affected package's `README.md` — user-facing entry covering behavior changes, new APIs, breaking changes, and migration steps.
+2. **Run changesets** Ask the user if this is a patch/minor/major change, then run `npx changesets/cli` and provide an appropriate changelog message covering behavior changes, new APIs, breaking changes, and migration steps.
