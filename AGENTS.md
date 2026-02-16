@@ -33,7 +33,7 @@ Any task that changes package code requires a plan. Simple checks, info gatherin
 ### Creating a plan
 
 1. **Inspect the relevant code thoroughly** before writing anything. Read the source files, tests, and existing docs that relate to the task.
-2. Create a new doc in `docs/` with the next 3-digit prefix (e.g. `005-add-filter-support.md`). Start with YAML frontmatter.
+2. Create a new doc in `docs/` with the next 3-digit prefix (e.g. `005-add-filter-support.md`) **for new feature/PR scope**. For follow-ups in the same thread/PR scope, update the existing plan doc. Start with YAML frontmatter.
 3. Write the plan with these sections:
    - **Key considerations and choices** — tradeoffs, open questions, alternatives
    - **Potential problems** — what could go wrong, edge cases

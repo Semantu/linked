@@ -85,41 +85,35 @@ export class Person extends Shape {
 ## Queries: Create, Select, Update, Delete
 
 Queries are expressed with the same Shape classes and compile to a query object that a store executes.
+Use this section as a quick start. Detailed query variations are documented in `Query examples` below.
 
+A few quick examples:
+
+**1) Select one field for all matching nodes**
 ```typescript
-/* Result: Array<{id: string; name: string}> */
 const names = await Person.select((p) => p.name);
+/* names: {id: string; name: string}[] */
+```
 
+**2) Select all decorated fields of nested related nodes**
+```typescript
+const allFriends = await Person.select((p) => p.knows.selectAll());
+/* allFriends: {
+  id?: string; 
+  knows: {
+    id?: string; 
+    ...all decorated Person fields...
+  }[]
+	}[] */
+```
+
+**3) Apply a simple mutation**
+```typescript
 const myNode = {id: 'https://my.app/node1'};
-/* Result: {id: string; name: string} | null */
-const person = await Person.select(myNode, (p) => p.name);
-const missing = await Person.select({id: 'https://my.app/missing'}, (p) => p.name); // null
-
-/* Result: {id: string} & UpdatePartial<Person> */
-const created = await Person.create({
-  name: 'Alice',
-  knows: [{id: 'https://my.app/node2'}],
-});
-
 const updated = await Person.update(myNode, {
   name: 'Alicia',
 });
-
-// Overwrite a multi-value property
-const overwriteFriends = await Person.update(myNode, {
-  knows: [{id: 'https://my.app/node2'}],
-});
-
-// Add/remove items in a multi-value property
-const addRemoveFriends = await Person.update(myNode, {
-  knows: {
-    add: [{id: 'https://my.app/node3'}],
-    remove: [{id: 'https://my.app/node2'}],
-  },
-});
-
-/* Result: {deleted: Array<{id: string}>, count: number} */
-await Person.delete(myNode);
+/* updated: {id: string} & UpdatePartial<Person> */
 ```
 
 ## Storage configuration
@@ -172,10 +166,13 @@ Result types are inferred from your Shape definitions and the selected paths. Ex
 
 #### Basic selection
 ```typescript
-/* Result: Array<{id: string; name: string}> */
+/* names: {id: string; name: string}[] */
 const names = await Person.select((p) => p.name);
 
-/* Result: Array<{id: string; knows: Array<{id: string}>}> */
+/* friends: {
+  id: string; 
+  knows: { id: string }[]
+}[] */
 const friends = await Person.select((p) => p.knows);
 
 const dates = await Person.select((p) => [p.birthDate, p.name]);
@@ -201,6 +198,12 @@ const deep = await Person.select((p) => p.knows.bestFriend.name);
 ```typescript
 const detailed = await Person.select((p) =>
   p.knows.select((f) => f.name),
+);
+
+const allPeople = await Person.selectAll();
+
+const detailedAll = await Person.select((p) =>
+  p.knows.selectAll(),
 );
 ```
 
@@ -261,7 +264,9 @@ const custom = await Person.select((p) => ({
 }));
 ```
 
-#### Query As (type casting)
+#### Query As (type casting to a sub shape)
+If person.pets returns an array of Pets. And Dog extends Pet.
+And you want to select properties of those pets that are dogs:
 ```typescript
 const guards = await Person.select((p) => p.pets.as(Dog).guardDogLevel);
 ```
@@ -293,28 +298,130 @@ const preloaded = await Person.select((p) => [
 ]);
 ```
 
-#### Create / Update / Delete
+#### Create
+
 ```typescript
 /* Result: {id: string} & UpdatePartial<Person> */
 const created = await Person.create({name: 'Alice'});
+```
+Where UpdatePartial<Shape> reflects the created properties.
 
+#### Update
+
+Update will patch any property that you send as payload and leave the rest untouched.
+```typescript
+/* Result: {id: string} & UpdatePartial<Person> */
 const updated = await Person.update({id: 'https://my.app/node1'}, {name: 'Alicia'});
+```
+Returns:
+```json
+{
+  id:"https://my.app/node1",
+  name:"Alicia"
+}
+```
 
-// Overwrite a multi-value property
-const overwriteFriends = await Person.update({id: 'https://my.app/node1'}, {
-  knows: [{id: 'https://my.app/node2'}],
+**Updating multi-value properties**
+When updating a property that holds multiple values (one that returns an array in the results), you can either overwrite all the values with a new explicit array of values, or delete from/add to the current values.
+
+To overwrite all values:
+```typescript
+// Overwrite the full set of "knows" values.
+const overwriteFriends = await Person.update({id: 'https://my.app/person1'}, {
+  knows: [{id: 'https://my.app/person2'}],
 });
-
-// Add/remove items in a multi-value property
-const addRemoveFriends = await Person.update({id: 'https://my.app/node1'}, {
+```
+The result will contain an object with `updatedTo`, to indicate that previous values were overwritten to this new set of values:
+```json
+{
+  id: "https://my.app/person1",
   knows: {
-    add: [{id: 'https://my.app/node3'}],
-    remove: [{id: 'https://my.app/node2'}],
+    updatedTo: [{id:"https://my.app/person2"}],
+  }
+}
+``` 
+
+To make incremental changes to the current set of values you can provide an object with `add` and/or `remove` keys:
+```typescript
+// Add one value and remove one value without replacing the whole set.
+const addRemoveFriends = await Person.update({id: 'https://my.app/person1'}, {
+  knows: {
+    add: [{id: 'https://my.app/person2'}],
+    remove: [{id: 'https://my.app/person3'}],
   },
 });
-
-await Person.delete({id: 'https://my.app/node1'});
 ```
+This returns an object with the added and removed items
+```json
+{
+  id: "https://my.app/person1",
+  knows: {
+    added?: [{id:"https://my.app/person2"},
+    removed?: [{id:"https://my.app/person3"}],
+  }
+}
+```
+
+
+#### Delete
+To delete a node entirely:
+
+```typescript
+/* Result: {deleted: Array<{id: string}>, count: number} */
+const deleted = await Person.delete({id: 'https://my.app/node1'});
+```
+Returns
+```json
+{
+  deleted:[
+    {id:"https://my.app/node1"}
+  ],
+  count:1
+}
+```
+
+To delete multiple nodes pass an array:
+
+```typescript
+/* Result: {deleted: Array<{id: string}>, count: number} */
+const deleted = await Person.delete([{id: 'https://my.app/node1'},{id: 'https://my.app/node2'}]);
+```
+
+
+## Extending shapes
+
+Shape classes can extend other shape classes. Subclasses inherit property shapes from their superclasses and may override them.
+This example assumes `Person` from the `Shapes` section above.
+
+```typescript
+import {literalProperty} from '@_linked/core/shapes/SHACL';
+import {createNameSpace} from '@_linked/core/utils/NameSpace';
+import {linkedShape} from './package';
+
+const schema = createNameSpace('https://schema.org/');
+const EmployeeClass = schema('Employee');
+const name = schema('name');
+const employeeId = schema('employeeId');
+
+@linkedShape
+export class Employee extends Person {
+  static targetClass = EmployeeClass;
+
+  // Override inherited "name" with stricter constraints (still maxCount: 1)
+  @literalProperty({path: name, required: true, minLength: 2, maxCount: 1})
+  declare name: string;
+
+  @literalProperty({path: employeeId, required: true, maxCount: 1})
+  declare employeeId: string;
+}
+```
+
+Override behavior:
+
+- `NodeShape.getUniquePropertyShapes()` returns one property shape per label, with subclass overrides taking precedence.
+- Overrides must be tighten-only for `minCount`, `maxCount`, and `nodeKind` (widening is rejected at registration time).
+- If an override omits `minCount`, `maxCount`, or `nodeKind`, inherited values are kept.
+- Current scope: compatibility checks for `datatype`, `class`, and `pattern` are not enforced yet.
 
 ## TODO
 
@@ -322,5 +429,11 @@ await Person.delete({id: 'https://my.app/node1'});
 - Make and expose functions for auto syncing shapes to the graph.
 
 ## Changelog
+
+- Added `Shape.selectAll()` to select all decorated property shapes of a shape in one call.
+- Updated `selectAll()` to deduplicate inherited overridden property labels so subclass overrides are selected once.
+- Added `NodeShape.getUniquePropertyShapes()` to expose deduplicated inherited property shapes directly on the shape metadata API.
+- Simplified `NodeShape.getUniquePropertyShapes()` to always resolve across the inheritance chain.
+- Added registration-time override guards so subclass overrides cannot widen `minCount`/`maxCount`/`nodeKind` constraints.
 
 See [CHANGELOG.md](./CHANGELOG.md).
