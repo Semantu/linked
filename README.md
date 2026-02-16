@@ -430,10 +430,4 @@ Override behavior:
 
 ## Changelog
 
-- Added `Shape.selectAll()` to select all decorated property shapes of a shape in one call.
-- Updated `selectAll()` to deduplicate inherited overridden property labels so subclass overrides are selected once.
-- Added `NodeShape.getUniquePropertyShapes()` to expose deduplicated inherited property shapes directly on the shape metadata API.
-- Simplified `NodeShape.getUniquePropertyShapes()` to always resolve across the inheritance chain.
-- Added registration-time override guards so subclass overrides cannot widen `minCount`/`maxCount`/`nodeKind` constraints.
-
 See [CHANGELOG.md](./CHANGELOG.md).
