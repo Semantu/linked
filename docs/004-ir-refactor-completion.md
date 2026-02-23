@@ -171,7 +171,7 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 ---
 
-## Phase 5 — Wire production: SelectQuery IS the IR
+## Phase 5 — Wire production: SelectQuery IS the IR [DONE]
 
 **Goal**: `getQueryObject()` emits IR. The production path naturally flows IR to stores.
 
@@ -188,6 +188,13 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 **Modify:** `src/queries/SelectQuery.ts`, `src/queries/CreateQuery.ts`, `src/queries/UpdateQuery.ts`, `src/queries/DeleteQuery.ts`, `src/queries/QueryParser.ts`, `src/utils/LinkedStorage.ts`, `src/interfaces/IQuadStore.ts`, `src/tests/query.test.ts`, `src/tests/store-routing.test.ts`
 
 **Validation:** `npm test` passes. `npx tsc --noEmit` passes (compile-time type assertions green). `getQueryObject()` returns `IRSelectQuery`. Production path emits IR.
+
+**Report:**
+- **What was done:** Wired the production execution path to IR end-to-end through parser/storage boundaries. `QueryParser.selectQuery()` now sends `query.getIR()` to storage. Mutation parser methods now lower legacy mutation objects to canonical IR mutations before dispatch. `LinkedStorage` now routes/accepts IR query types (`IRSelectQuery`, `IRCreateMutation`, `IRUpdateMutation`, `IRDeleteMutation`) and resolves select stores from `query.root.shape.shapeId`. `IQuadStore` signatures were updated to IR query types. Updated routing/delegation tests (`src/tests/store-routing.test.ts`, `src/tests/core-utils.test.ts`) to assert IR `kind` contracts.
+- **Deviations:** Did **not** change `SelectQueryFactory.getQueryObject()` (and mutation factory `getQueryObject()` methods) to return IR yet; they still return legacy query objects and are lowered by parser before dispatch. Also did not migrate `src/tests/query.test.ts` assertions to IR shape in this phase.
+- **Problems:** No blocking implementation issues. A small type-integration issue in `LinkedStorage` was resolved by accepting `shapeId`-based IR refs in routing and tightening generic return typing.
+- **Validation:** `npm test -- --no-coverage` => 11 passed suites, 224 passed tests, 0 failed (2 suites skipped by design). `npx tsc --noEmit` => pass.
+- **Next step:** Complete remaining Phase 5 items (factory `getQueryObject()` IR emission + query test migration), then proceed to Phase 6 alias removal.
 
 ---
 

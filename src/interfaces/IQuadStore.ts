@@ -1,7 +1,10 @@
-import {CreateQuery} from '../queries/CreateQuery.js';
-import {DeleteQuery, DeleteResponse} from '../queries/DeleteQuery.js';
-import {SelectQuery} from '../queries/SelectQuery.js';
-import {UpdateQuery} from '../queries/UpdateQuery.js';
+import {DeleteResponse} from '../queries/DeleteQuery.js';
+import {
+  IRCreateMutation,
+  IRDeleteMutation,
+  IRSelectQuery,
+  IRUpdateMutation,
+} from '../queries/IntermediateRepresentation.js';
 
 export interface IQuadStore {
   /**
@@ -9,8 +12,8 @@ export interface IQuadStore {
    */
   init?(): Promise<any>;
 
-  selectQuery<ResultType>(query: SelectQuery<any>): Promise<ResultType>;
-  updateQuery?<RType>(q: UpdateQuery<RType>): Promise<RType>;
-  createQuery?<R>(q: CreateQuery<R>): Promise<R>;
-  deleteQuery?(query: DeleteQuery): Promise<DeleteResponse>;
+  selectQuery<ResultType>(query: IRSelectQuery): Promise<ResultType>;
+  updateQuery?<RType>(q: IRUpdateMutation): Promise<RType>;
+  createQuery?<R>(q: IRCreateMutation): Promise<R>;
+  deleteQuery?(query: IRDeleteMutation): Promise<DeleteResponse>;
 }

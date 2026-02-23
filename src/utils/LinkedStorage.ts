@@ -1,10 +1,13 @@
 import {CoreMap} from '../collections/CoreMap.js';
 import {CoreSet} from '../collections/CoreSet.js';
 import {IQuadStore} from '../interfaces/IQuadStore.js';
-import {CreateQuery} from '../queries/CreateQuery.js';
-import {DeleteQuery, DeleteResponse} from '../queries/DeleteQuery.js';
-import {SelectQuery} from '../queries/SelectQuery.js';
-import {UpdateQuery} from '../queries/UpdateQuery.js';
+import {
+  IRCreateMutation,
+  IRDeleteMutation,
+  IRSelectQuery,
+  IRUpdateMutation,
+} from '../queries/IntermediateRepresentation.js';
+import {DeleteResponse} from '../queries/DeleteQuery.js';
 import {Shape, ShapeType} from '../shapes/Shape.js';
 import {getShapeClass} from './ShapeClass.js';
 
@@ -63,7 +66,7 @@ export abstract class LinkedStorage {
   }
 
   private static resolveStoreForQueryShape(
-    shape?: {id?: string} | typeof Shape | ShapeType | null,
+    shape?: {id?: string; shapeId?: string} | typeof Shape | ShapeType | null,
   ): IQuadStore {
     if (!shape) {
       return this.defaultStore;
@@ -71,15 +74,16 @@ export abstract class LinkedStorage {
     if (typeof shape === 'function') {
       return this.getStoreForShapeClass(shape as typeof Shape);
     }
-    if (shape.id) {
-      const shapeClass = getShapeClass(shape.id);
+    const shapeId = shape.id || shape.shapeId;
+    if (shapeId) {
+      const shapeClass = getShapeClass(shapeId);
       return this.getStoreForShapeClass(shapeClass);
     }
     return this.defaultStore;
   }
 
-  static selectQuery<ResultType>(query: SelectQuery<any>): Promise<ResultType> {
-    const store = this.resolveStoreForQueryShape(query?.shape);
+  static selectQuery<ResultType>(query: IRSelectQuery): Promise<ResultType> {
+    const store = this.resolveStoreForQueryShape(query?.root?.shape);
     if (!store?.selectQuery) {
       return Promise.reject(
         new Error('No query store configured. Call LinkedStorage.setDefaultStore().'),
@@ -88,27 +92,27 @@ export abstract class LinkedStorage {
     return store.selectQuery(query);
   }
 
-  static updateQuery<ResponseType>(query: UpdateQuery<ResponseType>) {
+  static updateQuery<ResponseType>(query: IRUpdateMutation): Promise<ResponseType> {
     const store = this.resolveStoreForQueryShape(query?.shape);
     if (!store?.updateQuery) {
       return Promise.reject(
         new Error('No update handler configured on the query store.'),
       );
     }
-    return store.updateQuery(query);
+    return store.updateQuery(query) as Promise<ResponseType>;
   }
 
-  static createQuery<ResponseType>(query: CreateQuery<ResponseType>) {
+  static createQuery<ResponseType>(query: IRCreateMutation): Promise<ResponseType> {
     const store = this.resolveStoreForQueryShape(query?.shape);
     if (!store?.createQuery) {
       return Promise.reject(
         new Error('No create handler configured on the query store.'),
       );
     }
-    return store.createQuery(query);
+    return store.createQuery(query) as Promise<ResponseType>;
   }
 
-  static deleteQuery(query: DeleteQuery): Promise<DeleteResponse> {
+  static deleteQuery(query: IRDeleteMutation): Promise<DeleteResponse> {
     const store = this.resolveStoreForQueryShape(query?.shape);
     if (!store?.deleteQuery) {
       return Promise.reject(

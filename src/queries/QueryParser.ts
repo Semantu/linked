@@ -11,6 +11,11 @@ import {UpdateQueryFactory} from './UpdateQuery.js';
 import {CreateQueryFactory, CreateResponse} from './CreateQuery.js';
 import {DeleteQueryFactory, DeleteResponse} from './DeleteQuery.js';
 import {NodeId} from './MutationQuery.js';
+import {
+  buildCanonicalCreateMutationIR,
+  buildCanonicalDeleteMutationIR,
+  buildCanonicalUpdateMutationIR,
+} from './IRMutation.js';
 
 @staticImplements<IQueryParser>() /* this class implements this interface with static methods */
 export class QueryParser {
@@ -26,8 +31,7 @@ export class QueryParser {
     query: SelectQueryFactory<ShapeType, ResponseType, Source>,
   ): Promise<ResultType> {
     try {
-      const queryObject = query.getQueryObject();
-      return LinkedStorage.selectQuery(queryObject);
+      return LinkedStorage.selectQuery(query.getIR());
     } catch (e) {
       return Promise.reject(e);
     }
@@ -46,8 +50,8 @@ export class QueryParser {
       id,
       updateObjectOrFn,
     );
-    let queryObject = query.getQueryObject();
-    return LinkedStorage.updateQuery(queryObject);
+    const irQuery = buildCanonicalUpdateMutationIR(query.getQueryObject());
+    return LinkedStorage.updateQuery(irQuery);
   }
 
   static createQuery<
@@ -59,8 +63,8 @@ export class QueryParser {
         shapeClass,
         updateObjectOrFn,
       );
-      let queryObject = query.getQueryObject();
-      return LinkedStorage.createQuery(queryObject);
+      const irQuery = buildCanonicalCreateMutationIR(query.getQueryObject());
+      return LinkedStorage.createQuery(irQuery);
     } catch (e) {
       console.warn(e);
     }
@@ -71,8 +75,8 @@ export class QueryParser {
     shapeClass: typeof Shape,
   ): Promise<DeleteResponse> {
     const query = new DeleteQueryFactory<Shape, {}>(shapeClass, id);
-    let queryObject = query.getQueryObject();
-    return LinkedStorage.deleteQuery(queryObject);
+    const irQuery = buildCanonicalDeleteMutationIR(query.getQueryObject());
+    return LinkedStorage.deleteQuery(irQuery);
   }
 }
 

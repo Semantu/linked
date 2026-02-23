@@ -64,9 +64,14 @@ describe('LinkedStorage store routing', () => {
     LinkedStorage.setStoreForShapes(personStore.store, RoutedPerson);
 
     await LinkedStorage.selectQuery({
-      type: 'select',
-      select: [],
-      shape: RoutedPerson,
+      kind: 'select_query',
+      root: {
+        kind: 'shape_scan',
+        alias: 'a0',
+        shape: {shapeId: RoutedPerson.shape.id},
+      },
+      patterns: [],
+      projection: [],
     } as any);
 
     expect(personStore.calls.select).toBe(1);
@@ -78,9 +83,14 @@ describe('LinkedStorage store routing', () => {
     LinkedStorage.setDefaultStore(defaultStore.store);
 
     await LinkedStorage.selectQuery({
-      type: 'select',
-      select: [],
-      shape: RoutedPet,
+      kind: 'select_query',
+      root: {
+        kind: 'shape_scan',
+        alias: 'a0',
+        shape: {shapeId: RoutedPet.shape.id},
+      },
+      patterns: [],
+      projection: [],
     } as any);
 
     expect(defaultStore.calls.select).toBe(1);
@@ -93,9 +103,14 @@ describe('LinkedStorage store routing', () => {
     LinkedStorage.setStoreForShapes(personStore.store, RoutedPerson);
 
     await LinkedStorage.selectQuery({
-      type: 'select',
-      select: [],
-      shape: RoutedEmployee,
+      kind: 'select_query',
+      root: {
+        kind: 'shape_scan',
+        alias: 'a0',
+        shape: {shapeId: RoutedEmployee.shape.id},
+      },
+      patterns: [],
+      projection: [],
     } as any);
 
     expect(personStore.calls.select).toBe(1);
@@ -109,20 +124,20 @@ describe('LinkedStorage store routing', () => {
     LinkedStorage.setStoreForShapes(personStore.store, RoutedPerson);
 
     await LinkedStorage.updateQuery({
-      type: 'update',
+      kind: 'update_mutation',
       id: 'p1',
-      shape: RoutedPerson.shape,
-      updates: {},
+      shape: {shapeId: RoutedPerson.shape.id},
+      updates: {shape: {shapeId: RoutedPerson.shape.id}, fields: []},
     } as any);
     await LinkedStorage.createQuery({
-      type: 'create',
-      shape: RoutedPerson.shape,
-      updates: {},
+      kind: 'create_mutation',
+      shape: {shapeId: RoutedPerson.shape.id},
+      description: {shape: {shapeId: RoutedPerson.shape.id}, fields: []},
     } as any);
     await LinkedStorage.deleteQuery({
-      type: 'delete',
+      kind: 'delete_mutation',
       ids: [{id: 'p1'}],
-      shape: RoutedPerson.shape,
+      shape: {shapeId: RoutedPerson.shape.id},
     } as any);
 
     expect(personStore.calls.update).toBe(1);
