@@ -32,7 +32,7 @@ class QueryCaptureStore implements IQueryParser {
     shapeClass: typeof Shape,
   ): Promise<CreateResponse<U>> {
     const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
+    this.lastQuery = factory.getLegacyQueryObject();
     return {} as CreateResponse<U>;
   }
 
@@ -42,7 +42,7 @@ class QueryCaptureStore implements IQueryParser {
     shapeClass: typeof Shape,
   ): Promise<AddId<U>> {
     const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
+    this.lastQuery = factory.getLegacyQueryObject();
     return {} as AddId<U>;
   }
 
@@ -52,7 +52,7 @@ class QueryCaptureStore implements IQueryParser {
   ): Promise<DeleteResponse> {
     const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
     const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.getQueryObject();
+    this.lastQuery = factory.getLegacyQueryObject();
     return {deleted: [], count: 0};
   }
 }

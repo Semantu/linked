@@ -18,7 +18,7 @@ class QueryCaptureStore implements IQueryParser {
   lastQuery?: any;
 
   async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.getQueryObject();
+    this.lastQuery = query.getLegacyQueryObject();
     return [] as ResultType;
   }
 

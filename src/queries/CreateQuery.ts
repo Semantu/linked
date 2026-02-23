@@ -3,6 +3,8 @@ import {NodeShape} from '../shapes/SHACL.js';
 import {LinkedQuery} from './SelectQuery.js';
 import {AddId, NodeDescriptionValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory} from './MutationQuery.js';
+import {IRCreateMutation} from './IntermediateRepresentation.js';
+import {buildCanonicalCreateMutationIR} from './IRMutation.js';
 
 export interface CreateQuery<ResponseType = null> extends LinkedQuery {
   type: 'create';
@@ -31,11 +33,15 @@ export class CreateQueryFactory<
     );
   }
 
-  getQueryObject(): CreateQuery<AddId<U, true>> {
+  getLegacyQueryObject(): CreateQuery<AddId<U, true>> {
     return {
       type: 'create',
       shape: this.shapeClass.shape,
       description: this.description,
     };
+  }
+
+  getQueryObject(): IRCreateMutation {
+    return buildCanonicalCreateMutationIR(this.getLegacyQueryObject());
   }
 }

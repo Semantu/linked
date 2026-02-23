@@ -9,9 +9,7 @@ import {NodeReferenceValue,Prettify,QueryFactory,ShapeReferenceValue} from './Qu
 import {xsd} from '../ontologies/xsd.js';
 import {
   buildSelectQueryIR,
-  buildCanonicalSelectIR,
   SelectQueryIR,
-  CanonicalSelectIR,
 } from './IRPipeline.js';
 
 /**
@@ -69,7 +67,8 @@ export type SortByPath = {
  * @todo add | UpdateQuery and others
  */
 export interface LinkedQuery {
-  type: string;
+  type?: string;
+  kind?: string;
 }
 
 export type SubQueryPaths = SelectPath;
@@ -948,7 +947,7 @@ export class BoundComponent<
   getPropertyPath() {
     let sourcePath: ComponentQueryPath = this.source.getPropertyPath();
     let requestQuery = this.getParentQueryFactory();
-    let compSelectQuery = requestQuery.getQueryObject().select;
+    let compSelectQuery = requestQuery.getLegacyQueryObject().select;
 
     if (Array.isArray(sourcePath)) {
       sourcePath.push(
@@ -1745,7 +1744,7 @@ export class SelectQueryFactory<
   /**
    * Turns the LinkedQuery into a SelectQuery, which is a plain JS object that can be serialized to JSON
    */
-  getQueryObject(): SelectQuery<S> {
+  getLegacyQueryObject(): SelectQuery<S> {
     try {
       let queryPaths = this.getQueryPaths();
       let selectQuery = {
@@ -1775,13 +1774,12 @@ export class SelectQueryFactory<
     }
   }
 
-  getIR(): SelectQueryIR {
-    return buildSelectQueryIR(this.getQueryObject());
+  getQueryObject(): SelectQueryIR {
+    return this.getIR();
   }
 
-  // Temporary compatibility alias during naming migration
-  getCanonicalIR(): CanonicalSelectIR {
-    return buildCanonicalSelectIR(this.getQueryObject());
+  getIR(): SelectQueryIR {
+    return buildSelectQueryIR(this.getLegacyQueryObject());
   }
 
   // applyTo(subject) {
@@ -1877,7 +1875,7 @@ export class SelectQueryFactory<
   }
 
   isValidResult(qResult: QResult<any>) {
-    let select = this.getQueryObject().select;
+    let select = this.getLegacyQueryObject().select;
     if (Array.isArray(select)) {
       return this.isValidQueryPathsResult(qResult, select);
     } else if (typeof select === 'object') {

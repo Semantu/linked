@@ -3,6 +3,8 @@ import {NodeShape} from '../shapes/SHACL.js';
 import {LinkedQuery} from './SelectQuery.js';
 import {NodeReferenceValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory, NodeId} from './MutationQuery.js';
+import {IRDeleteMutation} from './IntermediateRepresentation.js';
+import {buildCanonicalDeleteMutationIR} from './IRMutation.js';
 
 export interface DeleteQuery extends LinkedQuery {
   type: 'delete';
@@ -44,11 +46,15 @@ export class DeleteQueryFactory<
     this.ids = this.convertNodeReferences(ids);
   }
 
-  getQueryObject(): DeleteQuery {
+  getLegacyQueryObject(): DeleteQuery {
     return {
       type: 'delete',
       shape: this.shapeClass.shape,
       ids: this.ids,
     };
+  }
+
+  getQueryObject(): IRDeleteMutation {
+    return buildCanonicalDeleteMutationIR(this.getLegacyQueryObject());
   }
 }

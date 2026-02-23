@@ -8,6 +8,8 @@ import {
 } from './QueryFactory.js';
 import {NodeShape} from '../shapes/SHACL.js';
 import {MutationQueryFactory} from './MutationQuery.js';
+import {IRUpdateMutation} from './IntermediateRepresentation.js';
+import {buildCanonicalUpdateMutationIR} from './IRMutation.js';
 
 export type UpdateQuery<ResponseType = null> = {
   type: 'update';
@@ -36,12 +38,16 @@ export class UpdateQueryFactory<
     );
   }
 
-  getQueryObject(): UpdateQuery<AddId<U>> {
+  getLegacyQueryObject(): UpdateQuery<AddId<U>> {
     return {
       type: 'update',
       id: this.id,
       shape: this.shapeClass.shape,
       updates: this.fields,
     };
+  }
+
+  getQueryObject(): IRUpdateMutation {
+    return buildCanonicalUpdateMutationIR(this.getLegacyQueryObject());
   }
 }

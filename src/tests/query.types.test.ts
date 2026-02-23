@@ -14,7 +14,7 @@ import {setQueryContext} from '../queries/QueryContext';
 
 class QueryCaptureStore implements IQueryParser {
   async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    query.getQueryObject();
+    query.getLegacyQueryObject();
     return [] as ResultType;
   }
 
