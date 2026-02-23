@@ -9,17 +9,21 @@ import {
 import {
   DesugaredSelection,
   DesugaredSelectionPath,
+  DesugaredStep,
   DesugaredWhereArg,
 } from './IRDesugar.js';
 import {
   IRExpression,
   IRGraphPattern,
   IROrderByItem,
+  IRProjectionItem,
+  IRResultMapEntry,
   IRSelectQuery,
   IRShapeScanPattern,
   IRTraversePattern,
 } from './IntermediateRepresentation.js';
-import {buildCanonicalProjection, lowerSelectionPathExpression} from './IRProjection.js';
+import {canonicalizeWhere} from './IRCanonicalize.js';
+import {lowerSelectionPathExpression, projectionKeyFromPath} from './IRProjection.js';
 import {IRAliasScope} from './IRAliasScope.js';
 import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
 
@@ -182,8 +186,25 @@ const lowerWhere = (
   }
 };
 
-const extractSelectionPaths = (selections: DesugaredSelection[]): DesugaredSelectionPath[] =>
-  selections.filter((s): s is DesugaredSelectionPath => s.kind === 'selection_path');
+type ProjectionSeed =
+  | {
+      kind: 'path';
+      path: DesugaredSelectionPath;
+      key?: string;
+    }
+  | {
+      kind: 'expression';
+      expression: IRExpression;
+      key: string;
+    };
+
+const combineWithParentPath = (
+  parentPath: DesugaredStep[],
+  path: DesugaredSelectionPath,
+): DesugaredSelectionPath => ({
+  kind: 'selection_path',
+  steps: [...parentPath, ...path.steps],
+});
 
 export const lowerSelectQuery = (
   canonical: CanonicalDesugaredSelectQuery,
@@ -201,10 +222,92 @@ export const lowerSelectQuery = (
     alias: ctx.rootAlias,
   };
 
-  const selectionPaths = extractSelectionPaths(canonical.selections);
+  const aliasAfterPath = (steps: DesugaredStep[]): string => {
+    let currentAlias = pathOptions.rootAlias;
+    for (const step of steps) {
+      if (step.kind === 'property_step') {
+        currentAlias = pathOptions.resolveTraversal(currentAlias, step.propertyShapeId);
+      }
+    }
+    return currentAlias;
+  };
+
+  const collectProjectionSeeds = (
+    selection: DesugaredSelection,
+    key?: string,
+    parentPath: DesugaredStep[] = [],
+  ): ProjectionSeed[] => {
+    if (selection.kind === 'selection_path') {
+      return [{
+        kind: 'path',
+        path: combineWithParentPath(parentPath, selection),
+        key,
+      }];
+    }
+
+    if (selection.kind === 'sub_select') {
+      return collectProjectionSeeds(
+        selection.selections,
+        key,
+        [...parentPath, ...selection.parentPath],
+      );
+    }
+
+    if (selection.kind === 'custom_object_select') {
+      return selection.entries.flatMap((entry) =>
+        collectProjectionSeeds(entry.value, entry.key, parentPath),
+      );
+    }
+
+    if (selection.kind === 'multi_selection') {
+      return selection.selections.map((path) => ({
+        kind: 'path' as const,
+        path: combineWithParentPath(parentPath, path),
+        key,
+      }));
+    }
+
+    if (selection.kind === 'evaluation_select') {
+      const canonicalWhere = canonicalizeWhere(selection.where);
+      return [{
+        kind: 'expression',
+        key: key || 'value',
+        expression: lowerWhere(canonicalWhere, ctx, {
+          rootAlias: aliasAfterPath(parentPath),
+          resolveTraversal: pathOptions.resolveTraversal,
+        }),
+      }];
+    }
+
+    return [];
+  };
+
+  const projectionSeeds = canonical.selections.flatMap((selection) =>
+    collectProjectionSeeds(selection),
+  );
+
   const projectionScope = new IRAliasScope('projection');
   projectionScope.registerAlias(ctx.rootAlias, 'root');
-  const projection = buildCanonicalProjection(selectionPaths, pathOptions, projectionScope);
+  const projection: IRProjectionItem[] = [];
+  const resultMapEntries: IRResultMapEntry[] = [];
+
+  for (const seed of projectionSeeds) {
+    const key = seed.kind === 'path'
+      ? (seed.key || projectionKeyFromPath(seed.path))
+      : seed.key;
+    const alias = projectionScope.generateAlias(key).alias;
+    projection.push({
+      kind: 'projection_item' as const,
+      alias,
+      expression: seed.kind === 'path'
+        ? lowerSelectionPathExpression(seed.path, pathOptions)
+        : seed.expression,
+    });
+    resultMapEntries.push({
+      key,
+      alias,
+    });
+  }
 
   const where = canonical.where ? lowerWhere(canonical.where, ctx, pathOptions) : undefined;
 
@@ -220,13 +323,13 @@ export const lowerSelectQuery = (
     kind: 'select_query',
     root,
     patterns: ctx.getPatterns(),
-    projection: projection.projection,
+    projection,
     where,
     orderBy,
     limit: canonical.limit,
     offset: canonical.offset,
     subjectId: canonical.subjectId,
     singleResult: canonical.singleResult,
-    resultMap: projection.resultMap,
+    resultMap: {kind: 'result_map', entries: resultMapEntries},
   };
 };

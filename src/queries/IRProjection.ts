@@ -17,7 +17,14 @@ export type CanonicalProjectionResult = {
   resultMap?: IRResultMap;
 };
 
-const defaultKeyFromPath = (path: DesugaredSelectionPath): string => {
+export type ProjectionPathInput =
+  | DesugaredSelectionPath
+  | {
+      path: DesugaredSelectionPath;
+      key?: string;
+    };
+
+export const projectionKeyFromPath = (path: DesugaredSelectionPath): string => {
   if (!path.steps.length) return 'value';
   const lastStep = path.steps[path.steps.length - 1];
   if (lastStep.kind === 'property_step') return lastStep.propertyShapeId;
@@ -70,22 +77,25 @@ export const lowerSelectionPathExpression = (
 };
 
 export const buildCanonicalProjection = (
-  selections: DesugaredSelectionPath[],
+  selections: ProjectionPathInput[],
   options: ProjectionPathLoweringOptions,
   scope = new IRAliasScope('projection'),
 ): CanonicalProjectionResult => {
   const projection: IRProjectionItem[] = [];
   const entries: CanonicalResultMapEntry[] = [];
 
-  selections.forEach((path) => {
-    const binding = scope.generateAlias(defaultKeyFromPath(path));
+  selections.forEach((selection) => {
+    const path = 'path' in selection ? selection.path : selection;
+    const key = 'path' in selection ? selection.key : undefined;
+    const resultKey = key || projectionKeyFromPath(path);
+    const binding = scope.generateAlias(resultKey);
     projection.push({
       kind: 'projection_item',
       alias: binding.alias,
       expression: lowerSelectionPathExpression(path, options),
     });
     entries.push({
-      key: defaultKeyFromPath(path),
+      key: resultKey,
       alias: binding.alias,
     });
   });

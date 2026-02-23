@@ -111,7 +111,7 @@ orderBy: [{path, direction}]      →     orderBy: [{expression: IRExpression, d
 
 ---
 
-## Phase 3 — Full IR test coverage for select queries
+## Phase 3 — Full IR test coverage for select queries [DONE]
 
 **Goal**: Every select query pattern in `query.test.ts` has a corresponding IR test asserting the `IRSelectQuery` structure.
 
@@ -134,6 +134,13 @@ Use semantic assertions (structural checks on `kind` discriminators, property re
 **Modify:** `src/tests/ir-select-golden.test.ts` (expand significantly)
 
 **Validation:** `npm test` passes. All 56+ select patterns have IR assertions.
+
+**Report:**
+- **What was done:** Expanded `src/tests/ir-select-golden.test.ts` into a full parity suite covering every select pattern from sections 1-7 in `src/tests/query.test.ts` (56 table-driven parity cases) with IR assertions for root shape scan, projection/result-map alignment, where expression kinds, traversal pattern presence, ordering, limit, single-result semantics, and subject IDs. Kept focused inline snapshots for representative baseline fixtures. Extended lowering in `src/queries/IRLower.ts` to handle `sub_select`, `custom_object_select`, `evaluation_select`, and `multi_selection` projection forms so those parity tests assert real emitted IR instead of empty projections. Updated `src/queries/IRProjection.ts` to support explicit result-map keys for custom-object projections and exported key derivation helpers used by lowering.
+- **Deviations:** None from Phase 3 scope. The implementation remained within select-query IR coverage and supporting lowering needed to make those tests meaningful.
+- **Problems:** No blocking implementation issues. During test bring-up, three case expectations were corrected to match actual DSL semantics (`selectUndefinedOnly` keeps `singleResult`, `whereSomeImplicit` canonicalizes to `binary_expr` in current pipeline behavior, and `nestedQueries2` currently emits one traversal pattern).
+- **Validation:** `npm test -- --no-coverage` => 11 passed suites, 223 passed tests, 0 failed (2 suites skipped by design). `npx tsc --noEmit` => pass.
+- **Next step:** Phase 4 — full IR mutation parity coverage.
 
 ---
 
