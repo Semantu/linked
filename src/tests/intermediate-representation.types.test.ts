@@ -19,6 +19,7 @@ describe.skip('intermediate representation type contracts (compile only)', () =>
         shape: {shapeId: 'shape:Person'},
         alias: 'p',
       },
+      patterns: [],
       projection: [
         {
           kind: 'projection_item',

@@ -67,10 +67,14 @@ describe('IR projection canonicalization (Phase 7)', () => {
     const paths = desugared.selections.filter(
       (s): s is DesugaredSelectionPath => s.kind === 'selection_path',
     );
-    const projection = buildCanonicalProjection(paths);
+    const projection = buildCanonicalProjection(paths, {
+      rootAlias: 'a0',
+      resolveTraversal: (fromAlias, propertyShapeId) => `${fromAlias}:${propertyShapeId}`,
+    });
 
     expect(projection.projection).toHaveLength(3);
     expect(projection.projection.every((item) => item.kind === 'projection_item')).toBe(true);
+    expect(projection.projection.every((item) => item.expression.kind === 'property_expr')).toBe(true);
   });
 
   test('keeps deterministic alias order for same query', async () => {
@@ -80,8 +84,13 @@ describe('IR projection canonicalization (Phase 7)', () => {
       (s): s is DesugaredSelectionPath => s.kind === 'selection_path',
     );
 
-    const p1 = buildCanonicalProjection(paths);
-    const p2 = buildCanonicalProjection(paths);
+    const options = {
+      rootAlias: 'a0',
+      resolveTraversal: (fromAlias: string, propertyShapeId: string) => `${fromAlias}:${propertyShapeId}`,
+    };
+
+    const p1 = buildCanonicalProjection(paths, options);
+    const p2 = buildCanonicalProjection(paths, options);
 
     expect(p1.projection.map((p) => p.alias)).toEqual(p2.projection.map((p) => p.alias));
     expect(p1.projection.map((p) => p.alias)).toEqual(['a0', 'a1', 'a2']);
@@ -93,7 +102,10 @@ describe('IR projection canonicalization (Phase 7)', () => {
     const paths = desugared.selections.filter(
       (s): s is DesugaredSelectionPath => s.kind === 'selection_path',
     );
-    const projection = buildCanonicalProjection(paths);
+    const projection = buildCanonicalProjection(paths, {
+      rootAlias: 'a0',
+      resolveTraversal: (fromAlias, propertyShapeId) => `${fromAlias}:${propertyShapeId}`,
+    });
 
     expect(projection.resultMap?.kind).toBe('result_map');
     expect(projection.resultMap?.entries).toHaveLength(3);

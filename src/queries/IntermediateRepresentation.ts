@@ -18,11 +18,14 @@ export type IRQuery = IRSelectQuery | IRCreateMutation | IRUpdateMutation | IRDe
 export type IRSelectQuery = {
   kind: 'select_query';
   root: IRShapeScanPattern;
+  patterns: IRGraphPattern[];
   projection: IRProjectionItem[];
   where?: IRExpression;
   orderBy?: IROrderByItem[];
   limit?: number;
   offset?: number;
+  subjectId?: string;
+  singleResult?: boolean;
   resultMap?: IRResultMap;
 };
 
@@ -159,6 +162,7 @@ export type IRAggregateExpression = {
 export type IRExistsExpression = {
   kind: 'exists_expr';
   pattern: IRGraphPattern;
+  filter?: IRExpression;
 };
 
 export type IRCreateMutation = {

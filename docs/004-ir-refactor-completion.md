@@ -71,7 +71,7 @@ This plan completes the refactor: expand the IR to handle all query patterns, li
 
 ---
 
-## Phase 2 — Lift pipeline output to full IR AST types
+## Phase 2 — Lift pipeline output to full IR AST types [DONE]
 
 **Goal**: `buildSelectQueryIR()` returns a proper `IRSelectQuery` with graph patterns and expression nodes — not the current flat structure.
 
@@ -101,6 +101,13 @@ orderBy: [{path, direction}]      →     orderBy: [{expression: IRExpression, d
 **Modify:** New `src/queries/IRLower.ts`, `src/queries/IRPipeline.ts`, `src/queries/IRProjection.ts`, `src/queries/IntermediateRepresentation.ts`, `src/tests/ir-select-golden.test.ts`
 
 **Validation:** `npm test` passes. `buildSelectQueryIR()` returns objects conforming to `IRSelectQuery`. Type contract tests pass.
+
+**Report:**
+- **What was done:** Completed the partial implementation by finishing substeps 4-5 and tightening lowering internals. `IRPipeline.ts` now routes through `IRLower` (already done before handoff). `IRLower.ts` now emits full `IRSelectQuery` AST and delegates path/projection expression lowering to `IRProjection.ts`. `IRProjection.ts` was upgraded from flat `path` output to `IRProjectionItem.expression: IRExpression` output. Added/kept query-level semantics on `IRSelectQuery` (`subjectId`, `singleResult`) and required `patterns`. Updated IR golden tests and type-contract tests to assert the new AST structure (`root`, `patterns`, `property_expr`, `binary_expr`, `logical_expr`, `exists_expr`, `aggregate_expr`).
+- **Deviations:** Kept the existing `buildCanonicalProjection` function name for continuity, but changed its contract to output expression-based projection items (AST shape) instead of legacy path objects.
+- **Problems:** The previous implementation left tests in mixed old/new states (`projection[].path` assumptions and missing `patterns` in type contracts). Also replaced a brittle `any`-based root alias override in exists lowering with explicit path-lowering options.
+- **Validation:** `npm test -- --no-coverage` => 11 passed suites, 171 passed tests, 0 failed (2 suites skipped by design). `npx tsc --noEmit` => pass. Updated inline snapshots in `src/tests/ir-select-golden.test.ts`.
+- **Next step:** Phase 3 — full IR select-query parity coverage against `query.test.ts`.
 
 ---
 

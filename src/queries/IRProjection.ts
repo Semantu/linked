@@ -1,10 +1,10 @@
-import {DesugaredSelectionPath, DesugaredStep} from './IRDesugar.js';
+import {DesugaredSelectionPath} from './IRDesugar.js';
 import {IRAliasScope} from './IRAliasScope.js';
+import {IRExpression, IRProjectionItem, IRResultMap} from './IntermediateRepresentation.js';
 
-export type CanonicalProjectionItem = {
-  kind: 'projection_item';
-  alias: string;
-  path: DesugaredSelectionPath;
+export type ProjectionPathLoweringOptions = {
+  rootAlias: string;
+  resolveTraversal: (fromAlias: string, propertyShapeId: string) => string;
 };
 
 export type CanonicalResultMapEntry = {
@@ -13,11 +13,8 @@ export type CanonicalResultMapEntry = {
 };
 
 export type CanonicalProjectionResult = {
-  projection: CanonicalProjectionItem[];
-  resultMap?: {
-    kind: 'result_map';
-    entries: CanonicalResultMapEntry[];
-  };
+  projection: IRProjectionItem[];
+  resultMap?: IRResultMap;
 };
 
 const defaultKeyFromPath = (path: DesugaredSelectionPath): string => {
@@ -29,11 +26,55 @@ const defaultKeyFromPath = (path: DesugaredSelectionPath): string => {
   return 'value';
 };
 
+export const lowerSelectionPathExpression = (
+  path: DesugaredSelectionPath,
+  options: ProjectionPathLoweringOptions,
+): IRExpression => {
+  if (path.steps.length === 0) {
+    return {kind: 'alias_expr', alias: options.rootAlias};
+  }
+
+  let currentAlias = options.rootAlias;
+
+  for (let i = 0; i < path.steps.length; i++) {
+    const step = path.steps[i];
+    const isLast = i === path.steps.length - 1;
+
+    if (step.kind === 'property_step') {
+      if (isLast) {
+        return {
+          kind: 'property_expr',
+          sourceAlias: currentAlias,
+          property: {propertyShapeId: step.propertyShapeId},
+        };
+      }
+
+      currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId);
+      continue;
+    }
+
+    if (step.kind === 'count_step') {
+      return {
+        kind: 'aggregate_expr',
+        name: 'count',
+        args: step.path.map((propertyStep) => ({
+          kind: 'property_expr',
+          sourceAlias: currentAlias,
+          property: {propertyShapeId: propertyStep.propertyShapeId},
+        })),
+      };
+    }
+  }
+
+  return {kind: 'alias_expr', alias: currentAlias};
+};
+
 export const buildCanonicalProjection = (
   selections: DesugaredSelectionPath[],
+  options: ProjectionPathLoweringOptions,
   scope = new IRAliasScope('projection'),
 ): CanonicalProjectionResult => {
-  const projection: CanonicalProjectionItem[] = [];
+  const projection: IRProjectionItem[] = [];
   const entries: CanonicalResultMapEntry[] = [];
 
   selections.forEach((path) => {
@@ -41,7 +82,7 @@ export const buildCanonicalProjection = (
     projection.push({
       kind: 'projection_item',
       alias: binding.alias,
-      path,
+      expression: lowerSelectionPathExpression(path, options),
     });
     entries.push({
       key: defaultKeyFromPath(path),

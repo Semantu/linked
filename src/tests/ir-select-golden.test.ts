@@ -89,31 +89,36 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
     expect(actual).toMatchInlineSnapshot(`
       {
         "kind": "select_query",
+        "patterns": [],
         "projection": [
           {
-            "alias": "a0",
-            "kind": "projection_item",
-            "path": {
-              "kind": "selection_path",
-              "steps": [
-                {
-                  "kind": "property_step",
-                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-                },
-              ],
+            "alias": "a1",
+            "expression": {
+              "kind": "property_expr",
+              "property": {
+                "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+              },
+              "sourceAlias": "a0",
             },
+            "kind": "projection_item",
           },
         ],
         "resultMap": {
           "entries": [
             {
-              "alias": "a0",
+              "alias": "a1",
               "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
             },
           ],
           "kind": "result_map",
         },
-        "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "root": {
+          "alias": "a0",
+          "kind": "shape_scan",
+          "shape": {
+            "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+          },
+        },
         "singleResult": false,
       }
     `);
@@ -127,39 +132,53 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
     expect(actual).toMatchInlineSnapshot(`
       {
         "kind": "select_query",
+        "patterns": [
+          {
+            "from": "a0",
+            "kind": "traverse",
+            "property": {
+              "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+            },
+            "to": "a1",
+          },
+          {
+            "from": "a1",
+            "kind": "traverse",
+            "property": {
+              "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+            },
+            "to": "a2",
+          },
+        ],
         "projection": [
           {
-            "alias": "a0",
-            "kind": "projection_item",
-            "path": {
-              "kind": "selection_path",
-              "steps": [
-                {
-                  "kind": "property_step",
-                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-                },
-                {
-                  "kind": "property_step",
-                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-                },
-                {
-                  "kind": "property_step",
-                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-                },
-              ],
+            "alias": "a1",
+            "expression": {
+              "kind": "property_expr",
+              "property": {
+                "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+              },
+              "sourceAlias": "a2",
             },
+            "kind": "projection_item",
           },
         ],
         "resultMap": {
           "entries": [
             {
-              "alias": "a0",
+              "alias": "a1",
               "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
             },
           ],
           "kind": "result_map",
         },
-        "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "root": {
+          "alias": "a0",
+          "kind": "shape_scan",
+          "shape": {
+            "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+          },
+        },
         "singleResult": false,
       }
     `);
@@ -170,43 +189,48 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
       queryFactories.whereSomeExplicit()
     );
 
-    expect(actual.where?.kind).toBe("where_exists");
+    expect(actual.where?.kind).toBe("exists_expr");
     expect(actual).toMatchInlineSnapshot(`
       {
         "kind": "select_query",
+        "patterns": [],
         "projection": [],
         "resultMap": {
           "entries": [],
           "kind": "result_map",
         },
-        "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "root": {
+          "alias": "a0",
+          "kind": "shape_scan",
+          "shape": {
+            "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+          },
+        },
         "singleResult": false,
         "where": {
-          "kind": "where_exists",
-          "path": {
-            "kind": "selection_path",
-            "steps": [
-              {
-                "kind": "property_step",
-                "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-              },
-            ],
-          },
-          "predicate": {
-            "kind": "where_binary",
+          "filter": {
+            "kind": "binary_expr",
             "left": {
-              "kind": "selection_path",
-              "steps": [
-                {
-                  "kind": "property_step",
-                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-                },
-              ],
+              "kind": "property_expr",
+              "property": {
+                "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+              },
+              "sourceAlias": "a1",
             },
             "operator": "=",
-            "right": [
-              "Moa",
-            ],
+            "right": {
+              "kind": "literal_expr",
+              "value": "Moa",
+            },
+          },
+          "kind": "exists_expr",
+          "pattern": {
+            "from": "a0",
+            "kind": "traverse",
+            "property": {
+              "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+            },
+            "to": "a1",
           },
         },
       }
@@ -218,48 +242,55 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
       queryFactories.countNestedFriends()
     );
 
-    expect(actual.projection[0].path.steps.map((step) => step.kind)).toEqual([
-      "property_step",
-      "count_step",
-    ]);
+    expect(actual.projection[0].expression.kind).toBe("aggregate_expr");
     expect(actual).toMatchInlineSnapshot(`
       {
         "kind": "select_query",
+        "patterns": [
+          {
+            "from": "a0",
+            "kind": "traverse",
+            "property": {
+              "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+            },
+            "to": "a1",
+          },
+        ],
         "projection": [
           {
-            "alias": "a0",
-            "kind": "projection_item",
-            "path": {
-              "kind": "selection_path",
-              "steps": [
+            "alias": "a1",
+            "expression": {
+              "args": [
                 {
-                  "kind": "property_step",
-                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-                },
-                {
-                  "kind": "count_step",
-                  "label": "friends",
-                  "path": [
-                    {
-                      "kind": "property_step",
-                      "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-                    },
-                  ],
+                  "kind": "property_expr",
+                  "property": {
+                    "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+                  },
+                  "sourceAlias": "a1",
                 },
               ],
+              "kind": "aggregate_expr",
+              "name": "count",
             },
+            "kind": "projection_item",
           },
         ],
         "resultMap": {
           "entries": [
             {
-              "alias": "a0",
+              "alias": "a1",
               "key": "friends",
             },
           ],
           "kind": "result_map",
         },
-        "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "root": {
+          "alias": "a0",
+          "kind": "shape_scan",
+          "shape": {
+            "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+          },
+        },
         "singleResult": false,
       }
     `);
@@ -271,73 +302,76 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
     );
 
     expect(actual.limit).toBe(1);
-    expect(actual.where?.kind).toBe("where_logical");
+    expect(actual.where?.kind).toBe("logical_expr");
     expect(actual).toMatchInlineSnapshot(`
       {
         "kind": "select_query",
         "limit": 1,
+        "patterns": [],
         "projection": [
           {
-            "alias": "a0",
-            "kind": "projection_item",
-            "path": {
-              "kind": "selection_path",
-              "steps": [
-                {
-                  "kind": "property_step",
-                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-                },
-              ],
+            "alias": "a1",
+            "expression": {
+              "kind": "property_expr",
+              "property": {
+                "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+              },
+              "sourceAlias": "a0",
             },
+            "kind": "projection_item",
           },
         ],
         "resultMap": {
           "entries": [
             {
-              "alias": "a0",
+              "alias": "a1",
               "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
             },
           ],
           "kind": "result_map",
         },
-        "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "root": {
+          "alias": "a0",
+          "kind": "shape_scan",
+          "shape": {
+            "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
+          },
+        },
         "singleResult": false,
         "where": {
           "expressions": [
             {
-              "kind": "where_binary",
+              "kind": "binary_expr",
               "left": {
-                "kind": "selection_path",
-                "steps": [
-                  {
-                    "kind": "property_step",
-                    "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-                  },
-                ],
+                "kind": "property_expr",
+                "property": {
+                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+                },
+                "sourceAlias": "a0",
               },
               "operator": "=",
-              "right": [
-                "Semmy",
-              ],
+              "right": {
+                "kind": "literal_expr",
+                "value": "Semmy",
+              },
             },
             {
-              "kind": "where_binary",
+              "kind": "binary_expr",
               "left": {
-                "kind": "selection_path",
-                "steps": [
-                  {
-                    "kind": "property_step",
-                    "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-                  },
-                ],
+                "kind": "property_expr",
+                "property": {
+                  "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+                },
+                "sourceAlias": "a0",
               },
               "operator": "=",
-              "right": [
-                "Moa",
-              ],
+              "right": {
+                "kind": "literal_expr",
+                "value": "Moa",
+              },
             },
           ],
-          "kind": "where_logical",
+          "kind": "logical_expr",
           "operator": "or",
         },
       }
@@ -351,15 +385,13 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
       {
         kind: "order_by_item",
         direction: "ASC",
-        path: {
-          kind: "selection_path",
-          steps: [
-            {
-              kind: "property_step",
-              propertyShapeId:
-                "https://data.lincd.org/module/-_linked-core/shape/person/name",
-            },
-          ],
+        expression: {
+          kind: "property_expr",
+          sourceAlias: "a0",
+          property: {
+            propertyShapeId:
+              "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          },
         },
       },
     ]);
@@ -372,15 +404,13 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
       {
         kind: "order_by_item",
         direction: "DESC",
-        path: {
-          kind: "selection_path",
-          steps: [
-            {
-              kind: "property_step",
-              propertyShapeId:
-                "https://data.lincd.org/module/-_linked-core/shape/person/name",
-            },
-          ],
+        expression: {
+          kind: "property_expr",
+          sourceAlias: "a0",
+          property: {
+            propertyShapeId:
+              "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          },
         },
       },
     ]);
