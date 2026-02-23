@@ -144,7 +144,7 @@ Use semantic assertions (structural checks on `kind` discriminators, property re
 
 ---
 
-## Phase 4 — Full IR test coverage for mutation queries
+## Phase 4 — Full IR test coverage for mutation queries [DONE]
 
 **Goal**: Every mutation pattern in `query.test.ts` has a corresponding IR test.
 
@@ -161,6 +161,13 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 **Modify:** `src/tests/ir-mutation-parity.test.ts` (expand)
 
 **Validation:** `npm test` passes. All 18 mutation patterns have IR assertions.
+
+**Report:**
+- **What was done:** Expanded `src/tests/ir-mutation-parity.test.ts` from 3 narrow checks to full mutation parity coverage mapped to all mutation patterns from `src/tests/query.test.ts` (3 create + 4 delete + 11 update). Added assertions for unset handling (`undefined`/`null` normalization), nested object updates, ID-reference normalization, set modification semantics (`add`/`remove`), predefined nested IDs, and Date round-tripping.
+- **Deviations:** None from Phase 4 scope.
+- **Problems:** No blocking issues. Two expectations were corrected to match current canonical mutation behavior: fixed IDs are normalized to full entity IDs, and null unsets normalize to `undefined` in emitted update fields.
+- **Validation:** `npm test -- --no-coverage` => 11 passed suites, 224 passed tests, 0 failed (2 suites skipped by design). `npx tsc --noEmit` => pass.
+- **Next step:** Phase 5 — wire production so `SelectQuery` is the IR on the main query path.
 
 ---
 
