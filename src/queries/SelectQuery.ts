@@ -7,6 +7,12 @@ import {CoreMap} from '../collections/CoreMap.js';
 import {getPropertyShapeByLabel,getShapeClass} from '../utils/ShapeClass.js';
 import {NodeReferenceValue,Prettify,QueryFactory,ShapeReferenceValue} from './QueryFactory.js';
 import {xsd} from '../ontologies/xsd.js';
+import {
+  buildSelectQueryIR,
+  buildCanonicalSelectIR,
+  SelectQueryIR,
+  CanonicalSelectIR,
+} from './IRPipeline.js';
 
 /**
  * ###################################
@@ -1767,6 +1773,15 @@ export class SelectQueryFactory<
       console.error('Error in getQueryObject', err);
       throw err;
     }
+  }
+
+  getIR(): SelectQueryIR {
+    return buildSelectQueryIR(this.getQueryObject());
+  }
+
+  // Temporary compatibility alias during naming migration
+  getCanonicalIR(): CanonicalSelectIR {
+    return buildCanonicalSelectIR(this.getQueryObject());
   }
 
   // applyTo(subject) {

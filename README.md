@@ -27,6 +27,10 @@ import {linkedPackage} from '@_linked/core/utils/Package';
 - `@_linked/rdf-mem-store`: in-memory RDF store that implements `IQuadStore`.
 - `@_linked/react`: React bindings for Linked queries and shapes.
 
+## Documentation
+
+- [Intermediate Representation (IR)](./documentation/intermediate-representation.md)
+
 ## Linked Package Setup
 
 Linked packages expose shapes, utilities, and ontologies through a small `package.ts` file. This makes module exports discoverable across Linked modules and enables linked decorators.
