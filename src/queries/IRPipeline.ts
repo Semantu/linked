@@ -1,5 +1,5 @@
 import {SelectQuery} from './SelectQuery.js';
-import {DesugaredSelectionPath, desugarSelectQuery} from './IRDesugar.js';
+import {DesugaredSelection, DesugaredSelectionPath, desugarSelectQuery} from './IRDesugar.js';
 import {
   canonicalizeDesugaredSelectQuery,
   CanonicalWhereExpression,
@@ -40,10 +40,13 @@ const toOrderBy = (
   }));
 };
 
+const extractSelectionPaths = (selections: DesugaredSelection[]): DesugaredSelectionPath[] =>
+  selections.filter((s): s is DesugaredSelectionPath => s.kind === 'selection_path');
+
 export const buildSelectQueryIR = (query: SelectQuery): SelectQueryIR => {
   const desugared = desugarSelectQuery(query);
   const canonical = canonicalizeDesugaredSelectQuery(desugared);
-  const projection = buildCanonicalProjection(canonical.selections);
+  const projection = buildCanonicalProjection(extractSelectionPaths(canonical.selections));
 
   return {
     kind: 'select_query',

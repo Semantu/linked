@@ -14,10 +14,7 @@ import { CreateQueryFactory } from "../queries/CreateQuery";
 import { DeleteQueryFactory } from "../queries/DeleteQuery";
 import { NodeId } from "../queries/MutationQuery";
 import { Person, queryFactories } from "../test-helpers/query-fixtures";
-import {
-  SelectQueryIR,
-  buildSelectQueryIR,
-} from "../queries/IRPipeline";
+import { SelectQueryIR, buildSelectQueryIR } from "../queries/IRPipeline";
 
 class QueryCaptureStore implements IQueryParser {
   lastQuery?: any;
@@ -221,11 +218,9 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
       queryFactories.countNestedFriends()
     );
 
-    expect(
-      actual.projection[0].path.steps.map((step) => step.propertyShapeId)
-    ).toEqual([
-      "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-      "count",
+    expect(actual.projection[0].path.steps.map((step) => step.kind)).toEqual([
+      "property_step",
+      "count_step",
     ]);
     expect(actual).toMatchInlineSnapshot(`
       {
@@ -242,8 +237,14 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
                   "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
                 },
                 {
-                  "kind": "property_step",
-                  "propertyShapeId": "count",
+                  "kind": "count_step",
+                  "label": "friends",
+                  "path": [
+                    {
+                      "kind": "property_step",
+                      "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+                    },
+                  ],
                 },
               ],
             },
@@ -253,7 +254,7 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
           "entries": [
             {
               "alias": "a0",
-              "key": "count",
+              "key": "friends",
             },
           ],
           "kind": "result_map",
@@ -355,7 +356,8 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
           steps: [
             {
               kind: "property_step",
-              propertyShapeId: "https://data.lincd.org/module/-_linked-core/shape/person/name",
+              propertyShapeId:
+                "https://data.lincd.org/module/-_linked-core/shape/person/name",
             },
           ],
         },
@@ -375,12 +377,12 @@ describe("select canonical IR golden fixtures (Phase 9)", () => {
           steps: [
             {
               kind: "property_step",
-              propertyShapeId: "https://data.lincd.org/module/-_linked-core/shape/person/name",
+              propertyShapeId:
+                "https://data.lincd.org/module/-_linked-core/shape/person/name",
             },
           ],
         },
       },
     ]);
   });
-
 });

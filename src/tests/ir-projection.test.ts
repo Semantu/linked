@@ -10,7 +10,7 @@ import {CreateQueryFactory} from '../queries/CreateQuery';
 import {DeleteQueryFactory} from '../queries/DeleteQuery';
 import {NodeId} from '../queries/MutationQuery';
 import {Person, queryFactories} from '../test-helpers/query-fixtures';
-import {desugarSelectQuery} from '../queries/IRDesugar';
+import {desugarSelectQuery, DesugaredSelectionPath} from '../queries/IRDesugar';
 import {buildCanonicalProjection} from '../queries/IRProjection';
 
 class QueryCaptureStore implements IQueryParser {
@@ -64,7 +64,10 @@ describe('IR projection canonicalization (Phase 7)', () => {
   test('builds flat projection items from selections', async () => {
     const query = await captureQuery(() => queryFactories.selectMultiplePaths());
     const desugared = desugarSelectQuery(query);
-    const projection = buildCanonicalProjection(desugared.selections);
+    const paths = desugared.selections.filter(
+      (s): s is DesugaredSelectionPath => s.kind === 'selection_path',
+    );
+    const projection = buildCanonicalProjection(paths);
 
     expect(projection.projection).toHaveLength(3);
     expect(projection.projection.every((item) => item.kind === 'projection_item')).toBe(true);
@@ -73,9 +76,12 @@ describe('IR projection canonicalization (Phase 7)', () => {
   test('keeps deterministic alias order for same query', async () => {
     const query = await captureQuery(() => queryFactories.selectMultiplePaths());
     const desugared = desugarSelectQuery(query);
+    const paths = desugared.selections.filter(
+      (s): s is DesugaredSelectionPath => s.kind === 'selection_path',
+    );
 
-    const p1 = buildCanonicalProjection(desugared.selections);
-    const p2 = buildCanonicalProjection(desugared.selections);
+    const p1 = buildCanonicalProjection(paths);
+    const p2 = buildCanonicalProjection(paths);
 
     expect(p1.projection.map((p) => p.alias)).toEqual(p2.projection.map((p) => p.alias));
     expect(p1.projection.map((p) => p.alias)).toEqual(['a0', 'a1', 'a2']);
@@ -84,7 +90,10 @@ describe('IR projection canonicalization (Phase 7)', () => {
   test('adds optional resultMap entries', async () => {
     const query = await captureQuery(() => queryFactories.selectMultiplePaths());
     const desugared = desugarSelectQuery(query);
-    const projection = buildCanonicalProjection(desugared.selections);
+    const paths = desugared.selections.filter(
+      (s): s is DesugaredSelectionPath => s.kind === 'selection_path',
+    );
+    const projection = buildCanonicalProjection(paths);
 
     expect(projection.resultMap?.kind).toBe('result_map');
     expect(projection.resultMap?.entries).toHaveLength(3);

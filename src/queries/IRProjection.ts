@@ -1,4 +1,4 @@
-import {DesugaredSelectionPath} from './IRDesugar.js';
+import {DesugaredSelectionPath, DesugaredStep} from './IRDesugar.js';
 import {IRAliasScope} from './IRAliasScope.js';
 
 export type CanonicalProjectionItem = {
@@ -22,7 +22,11 @@ export type CanonicalProjectionResult = {
 
 const defaultKeyFromPath = (path: DesugaredSelectionPath): string => {
   if (!path.steps.length) return 'value';
-  return path.steps[path.steps.length - 1].propertyShapeId;
+  const lastStep = path.steps[path.steps.length - 1];
+  if (lastStep.kind === 'property_step') return lastStep.propertyShapeId;
+  if (lastStep.kind === 'count_step') return lastStep.label || 'count';
+  if (lastStep.kind === 'type_cast_step') return lastStep.shapeId;
+  return 'value';
 };
 
 export const buildCanonicalProjection = (

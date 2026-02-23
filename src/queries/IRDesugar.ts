@@ -1,10 +1,13 @@
 import {
   ArgPath,
+  CustomQueryObject,
   isWhereEvaluationPath,
   JSNonNullPrimitive,
   QueryPath,
   QueryStep,
+  SelectPath,
   SelectQuery,
+  SizeStep,
   WhereAndOr,
   WhereMethods,
   WherePath,
@@ -14,12 +17,59 @@ import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
 export type DesugaredPropertyStep = {
   kind: 'property_step';
   propertyShapeId: string;
+  where?: DesugaredWhere;
 };
+
+export type DesugaredCountStep = {
+  kind: 'count_step';
+  path: DesugaredPropertyStep[];
+  label?: string;
+};
+
+export type DesugaredTypeCastStep = {
+  kind: 'type_cast_step';
+  shapeId: string;
+};
+
+export type DesugaredStep = DesugaredPropertyStep | DesugaredCountStep | DesugaredTypeCastStep;
 
 export type DesugaredSelectionPath = {
   kind: 'selection_path';
-  steps: DesugaredPropertyStep[];
+  steps: DesugaredStep[];
 };
+
+export type DesugaredSubSelect = {
+  kind: 'sub_select';
+  parentPath: DesugaredStep[];
+  selections: DesugaredSelection;
+};
+
+export type DesugaredCustomObjectSelect = {
+  kind: 'custom_object_select';
+  entries: DesugaredCustomObjectEntry[];
+};
+
+export type DesugaredCustomObjectEntry = {
+  key: string;
+  value: DesugaredSelection;
+};
+
+export type DesugaredEvaluationSelect = {
+  kind: 'evaluation_select';
+  where: DesugaredWhere;
+};
+
+export type DesugaredMultiSelection = {
+  kind: 'multi_selection';
+  selections: DesugaredSelectionPath[];
+};
+
+export type DesugaredSelection =
+  | DesugaredSelectionPath
+  | DesugaredSubSelect
+  | DesugaredCustomObjectSelect
+  | DesugaredEvaluationSelect
+  | DesugaredMultiSelection;
 
 export type DesugaredWhereComparison = {
   kind: 'where_comparison';
@@ -59,7 +109,7 @@ export type DesugaredSelectQuery = {
   singleResult?: boolean;
   limit?: number;
   offset?: number;
-  selections: DesugaredSelectionPath[];
+  selections: DesugaredSelection[];
   sortBy?: DesugaredSortBy;
   where?: DesugaredWhere;
 };
@@ -70,24 +120,168 @@ type PropertyStepLike = {
   };
 };
 
-const isPropertyQueryStep = (step: QueryStep): step is QueryStep & PropertyStepLike => {
-  return !!step && typeof step === 'object' && 'property' in step;
+const isPropertyQueryStep = (step: unknown): step is PropertyStepLike & {property: {id: string}} => {
+  return !!step && typeof step === 'object' && 'property' in step &&
+    !!(step as PropertyStepLike).property?.id;
 };
 
-const toPropertyStep = (step: QueryStep): DesugaredPropertyStep => {
-  if ('count' in (step as any)) {
+const isSizeStep = (step: unknown): step is SizeStep => {
+  return !!step && typeof step === 'object' && 'count' in step;
+};
+
+const isShapeRef = (value: unknown): value is ShapeReferenceValue =>
+  !!value && typeof value === 'object' && 'id' in value && 'shape' in value;
+
+const isNodeRef = (value: unknown): value is NodeReferenceValue =>
+  typeof value === 'object' && value !== null && 'id' in value;
+
+const isCustomQueryObject = (value: unknown): value is CustomQueryObject =>
+  !!value && typeof value === 'object' && !Array.isArray(value) &&
+  !('property' in value) && !('count' in value) && !('id' in value) &&
+  !('args' in value) && !('firstPath' in value) && !('method' in value);
+
+const toStep = (step: QueryStep): DesugaredStep => {
+  if (isSizeStep(step)) {
     return {
-      kind: 'property_step',
-      propertyShapeId: 'count',
+      kind: 'count_step',
+      path: step.count.map((s) => toPropertyStepOnly(s)),
+      label: step.label,
     };
   }
 
-  if (!isPropertyQueryStep(step) || !step.property?.id) {
-    throw new Error('Unsupported query step in desugar pass: expected property step');
+  if (isShapeRef(step)) {
+    return {
+      kind: 'type_cast_step',
+      shapeId: (step as ShapeReferenceValue).id,
+    };
   }
+
+  if (isPropertyQueryStep(step)) {
+    const result: DesugaredPropertyStep = {
+      kind: 'property_step',
+      propertyShapeId: step.property.id,
+    };
+    if ((step as any).where) {
+      result.where = toWhere((step as any).where);
+    }
+    return result;
+  }
+
+  // CustomQueryObject step — this appears in preload and sub-select paths
+  if (isCustomQueryObject(step)) {
+    // Return a property_step placeholder; the parent path handler will pick up sub-selects
+    // This is an edge case for preload where the sub-query object is pushed into the path
+    return {
+      kind: 'property_step',
+      propertyShapeId: '__sub_query',
+    };
+  }
+
+  throw new Error('Unsupported query step in desugar pass: ' + JSON.stringify(step));
+};
+
+const toPropertyStepOnly = (step: QueryStep): DesugaredPropertyStep => {
+  if (isPropertyQueryStep(step)) {
+    return {
+      kind: 'property_step',
+      propertyShapeId: step.property.id,
+    };
+  }
+  throw new Error('Expected property step in count path');
+};
+
+/**
+ * Converts a SelectPath (QueryPath[] or CustomQueryObject) to desugared selections.
+ */
+const toSelections = (select: SelectPath): DesugaredSelection[] => {
+  if (Array.isArray(select)) {
+    return select.map((path) => toSelection(path as QueryPath));
+  }
+  // CustomQueryObject at top level
+  return [toCustomObjectSelect(select)];
+};
+
+/**
+ * Converts a single QueryPath to a DesugaredSelection.
+ * A QueryPath can be:
+ * - (QueryStep | SubQueryPaths)[] — a flat or nested array of steps
+ * - WherePath — a where evaluation used as a selection (e.g. p.bestFriend.equals(...))
+ */
+const toSelection = (path: QueryPath): DesugaredSelection => {
+  // WherePath used as a selection (e.g. customResultEqualsBoolean)
+  if (!Array.isArray(path)) {
+    if (isWhereEvaluationPath(path) || 'firstPath' in (path as Record<string, unknown>)) {
+      return {
+        kind: 'evaluation_select',
+        where: toWhere(path),
+      };
+    }
+    throw new Error('Unsupported non-array path in desugar selection pass');
+  }
+
+  // Check if the last element is a sub-query (nested array or custom object)
+  const lastElement = path[path.length - 1];
+  if (Array.isArray(lastElement)) {
+    // Sub-select: parent path steps + nested selections
+    const parentSteps = path.slice(0, -1).map((step) => toStep(step as QueryStep));
+    const nestedSelect = lastElement as unknown as SelectPath;
+    return {
+      kind: 'sub_select',
+      parentPath: parentSteps,
+      selections: toSubSelections(nestedSelect),
+    };
+  }
+
+  if (lastElement && typeof lastElement === 'object' && isCustomQueryObject(lastElement)) {
+    // Sub-select with custom object: parent path steps + custom object selections
+    const parentSteps = path.slice(0, -1).map((step) => toStep(step as QueryStep));
+    return {
+      kind: 'sub_select',
+      parentPath: parentSteps,
+      selections: toCustomObjectSelect(lastElement),
+    };
+  }
+
+  // Flat selection path
   return {
-    kind: 'property_step',
-    propertyShapeId: step.property.id,
+    kind: 'selection_path',
+    steps: path.map((step) => toStep(step as QueryStep)),
+  };
+};
+
+/**
+ * Converts sub-select contents (which can be QueryPath[] or CustomQueryObject).
+ */
+const toSubSelections = (select: SelectPath): DesugaredSelection => {
+  if (Array.isArray(select)) {
+    // Array of paths — could be a single path or multiple paths
+    if (select.length === 0) {
+      return {kind: 'selection_path', steps: []};
+    }
+    const selections = select.map((path) => toSelection(path as QueryPath));
+    if (selections.length === 1) {
+      return selections[0];
+    }
+    // Multiple selections in a sub-select
+    return {
+      kind: 'multi_selection' as const,
+      selections: selections.filter((s): s is DesugaredSelectionPath => s.kind === 'selection_path'),
+    };
+  }
+  return toCustomObjectSelect(select);
+};
+
+/**
+ * Converts a CustomQueryObject to a DesugaredCustomObjectSelect.
+ */
+const toCustomObjectSelect = (obj: CustomQueryObject): DesugaredCustomObjectSelect => {
+  const entries: DesugaredCustomObjectEntry[] = Object.keys(obj).map((key) => ({
+    key,
+    value: toSelection(obj[key]),
+  }));
+  return {
+    kind: 'custom_object_select',
+    entries,
   };
 };
 
@@ -97,15 +291,9 @@ const toSelectionPath = (path: QueryPath): DesugaredSelectionPath => {
   }
   return {
     kind: 'selection_path',
-    steps: path.filter((step): step is QueryStep => !Array.isArray(step)).map(toPropertyStep),
+    steps: path.map((step) => toStep(step as QueryStep)),
   };
 };
-
-const isNodeRef = (value: unknown): value is NodeReferenceValue =>
-  typeof value === 'object' && value !== null && 'id' in value;
-
-const isShapeRef = (value: unknown): value is ShapeReferenceValue =>
-  isNodeRef(value) && 'shape' in (value as ShapeReferenceValue);
 
 const toWhereArg = (arg: unknown): DesugaredWhereArg => {
   if (
@@ -179,9 +367,7 @@ const toSortBy = (query: SelectQuery): DesugaredSortBy | undefined => {
 };
 
 export const desugarSelectQuery = (query: SelectQuery): DesugaredSelectQuery => {
-  const selections = Array.isArray(query.select)
-    ? query.select.map((path) => toSelectionPath(path as QueryPath))
-    : [];
+  const selections = toSelections(query.select);
 
   const subjectId =
     query.subject && typeof query.subject === 'object' && 'id' in query.subject

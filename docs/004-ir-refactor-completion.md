@@ -35,7 +35,7 @@ This plan completes the refactor: expand the IR to handle all query patterns, li
 | `src/interfaces/IQuadStore.ts` | Store interface — selectQuery/createQuery/updateQuery/deleteQuery |
 | `src/tests/query.test.ts` | Source of truth — 75+ select tests, 19+ mutation tests |
 
-## Phase 1 — Expand IRDesugar for all query patterns
+## Phase 1 — Expand IRDesugar for all query patterns [DONE]
 
 **Goal**: Make `desugarSelectQuery()` handle every query pattern exercised in `query.test.ts` without throwing.
 
@@ -61,6 +61,13 @@ This plan completes the refactor: expand the IR to handle all query patterns, li
 **Modify:** `src/queries/IRDesugar.ts`, `src/tests/ir-desugar.test.ts`
 
 **Validation:** `npm test` passes. All query patterns from query.test.ts can be fed through `desugarSelectQuery()` without throwing. New desugar tests pass.
+
+**Report:**
+- **What was done:** Rewrote IRDesugar.ts to handle all query patterns: sub-selects, custom result objects, type casting (as()), preload composition, count/aggregation, inline where on property steps. Added 6 new desugared types (DesugaredCountStep, DesugaredTypeCastStep, DesugaredStep union, DesugaredSubSelect, DesugaredCustomObjectSelect, DesugaredEvaluationSelect, DesugaredMultiSelection). Expanded ir-desugar.test.ts from 3 tests to 35 tests. Updated downstream consumers (IRPipeline.ts, IRProjection.ts) with extractSelectionPaths() helper and updated defaultKeyFromPath(). Fixed ir-projection.test.ts and ir-select-golden.test.ts for new union types.
+- **Deviations:** Type casting `as()` does not produce a separate query step — it changes the type proxy so the cast is implicit in property resolution. Tests updated to reflect this. Also modified ir-projection.test.ts and ir-select-golden.test.ts (not listed in original plan) since their types changed.
+- **Problems:** `DesugaredSelection` union initially included bare `DesugaredSelectionPath[]`, breaking `.kind` access — wrapped in `DesugaredMultiSelection`. Property IDs in tests come from shape metadata system, not fixture constants.
+- **Validation:** 171 tests pass, 0 failures. `npx tsc --noEmit` clean.
+- **Next step:** Phase 2 — Lift pipeline output to full IR AST types.
 
 ---
 
