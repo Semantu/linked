@@ -198,7 +198,7 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 ---
 
-## Phase 6 — Remove compatibility aliases and legacy code
+## Phase 6 — Remove compatibility aliases and legacy code [DONE]
 
 **Goal**: Clean up all transitional constructs.
 
@@ -215,6 +215,13 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 **Modify:** `src/queries/IRPipeline.ts`, `src/queries/SelectQuery.ts`, `src/tests/ir-pipeline-parity.test.ts`, `src/queries/IRProjection.ts`, `src/queries/IRCanonicalize.ts`
 
 **Validation:** `npm test` passes. grep confirms no stale references.
+
+**Report:**
+- **What was done:** Removed compatibility alias surface from pipeline and select factory: deleted `CanonicalSelectIR`, `buildCanonicalSelectIR`, `LegacyParityView`, `toLegacyParityView`, `toCanonicalParityView`, and `SelectQueryFactory.getCanonicalIR()`. Reworked `src/tests/ir-pipeline-parity.test.ts` to validate current behavior (legacy-to-IR lowering, `getIR`/`getQueryObject` IR parity, and IR pass-through) without legacy alias contracts.
+- **Deviations:** Kept the legacy `SelectQuery` interface/type for internal lowering/desugar compatibility; full removal is deferred to later cleanup.
+- **Problems:** No blocking issues.
+- **Validation:** `rg "canonical_select_ir|buildCanonicalSelectIR|CanonicalSelectIR|getCanonicalIR|LegacyParityView|toLegacyParityView|toCanonicalParityView" src` returned no matches. `npm test -- --no-coverage` => 11 passed suites, 223 passed tests, 0 failed (2 suites skipped by design). `npx tsc --noEmit` => pass.
+- **Next step:** Phase 7 — consolidate boundaries and reduce remaining duplication/legacy exposure.
 
 ---
 

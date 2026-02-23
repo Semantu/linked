@@ -10,18 +10,13 @@ import {CreateQueryFactory} from '../queries/CreateQuery';
 import {DeleteQueryFactory} from '../queries/DeleteQuery';
 import {NodeId} from '../queries/MutationQuery';
 import {Person, queryFactories} from '../test-helpers/query-fixtures';
-import {
-  buildSelectQueryIR,
-  buildCanonicalSelectIR,
-  toCanonicalParityView,
-  toLegacyParityView,
-} from '../queries/IRPipeline';
+import {buildSelectQueryIR} from '../queries/IRPipeline';
 
 class QueryCaptureStore implements IQueryParser {
   lastQuery?: any;
 
   async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.getQueryObject();
+    this.lastQuery = query.getLegacyQueryObject();
     return [] as ResultType;
   }
 
@@ -30,7 +25,7 @@ class QueryCaptureStore implements IQueryParser {
     shapeClass: typeof Shape,
   ): Promise<CreateResponse<U>> {
     const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
+    this.lastQuery = factory.getLegacyQueryObject();
     return {} as CreateResponse<U>;
   }
 
@@ -40,7 +35,7 @@ class QueryCaptureStore implements IQueryParser {
     shapeClass: typeof Shape,
   ): Promise<AddId<U>> {
     const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
+    this.lastQuery = factory.getLegacyQueryObject();
     return {} as AddId<U>;
   }
 
@@ -50,7 +45,7 @@ class QueryCaptureStore implements IQueryParser {
   ): Promise<DeleteResponse> {
     const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
     const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.getQueryObject();
+    this.lastQuery = factory.getLegacyQueryObject();
     return {deleted: [], count: 0};
   }
 }
@@ -58,53 +53,41 @@ class QueryCaptureStore implements IQueryParser {
 const store = new QueryCaptureStore();
 Person.queryParser = store;
 
-const captureQuery = async (runner: () => Promise<unknown>) => {
+const captureLegacyQuery = async (runner: () => Promise<unknown>) => {
   store.lastQuery = undefined;
   await runner();
   return store.lastQuery;
 };
 
-describe('IR pipeline parity (Phase 8)', () => {
-  test('legacy parity for selection + where + sort/limit fields', async () => {
-    const query = await captureQuery(() => queryFactories.sortByDesc());
-    const canonical = buildSelectQueryIR(query);
+describe('IR pipeline behavior', () => {
+  test('buildSelectQueryIR lowers legacy select query shape', async () => {
+    const query = await captureLegacyQuery(() => queryFactories.sortByDesc());
+    const ir = buildSelectQueryIR(query);
 
-    const legacyView = toLegacyParityView(query);
-    const canonicalView = toCanonicalParityView(canonical);
-
-    expect(canonicalView).toEqual(legacyView);
+    expect(ir.kind).toBe('select_query');
+    expect(ir.root.kind).toBe('shape_scan');
+    expect(ir.projection.length).toBe(1);
+    expect(ir.orderBy?.[0]?.direction).toBe('DESC');
+    expect(ir.limit).toBeUndefined();
   });
 
-  test('legacy parity for subject and singleResult', async () => {
-    const query = await captureQuery(() => queryFactories.selectById());
-    const canonical = buildSelectQueryIR(query);
-
-    expect(toCanonicalParityView(canonical)).toEqual(toLegacyParityView(query));
-    expect(canonical.subjectId).toBe(query.subject.id);
-    expect(canonical.singleResult).toBe(true);
-  });
-
-  test('select factory exposes canonical IR helper', async () => {
+  test('getIR and getQueryObject both expose IR output', async () => {
     const selectFactory = Person.query((p) => p.name).where((p) =>
       p.name.equals('Semmy'),
     );
-    const canonical = selectFactory.getIR();
 
-    expect(canonical.kind).toBe('select_query');
-    expect(canonical.projection.length).toBe(1);
-    expect(canonical.where).toBeDefined();
+    const irFromMethod = selectFactory.getIR();
+    const irFromQueryObject = selectFactory.getQueryObject();
+
+    expect(irFromMethod.kind).toBe('select_query');
+    expect(irFromQueryObject.kind).toBe('select_query');
+    expect(irFromMethod).toEqual(irFromQueryObject);
+  });
+
+  test('builder accepts already-lowered IR as pass-through', async () => {
+    const selectFactory = Person.query((p) => p.name);
+    const ir = selectFactory.getIR();
+
+    expect(buildSelectQueryIR(ir)).toBe(ir);
   });
 });
-
-  test('compatibility alias helper still exposes canonical_select_ir', async () => {
-    const selectFactory = Person.query((p) => p.name).where((p) =>
-      p.name.equals('Semmy'),
-    );
-
-    const canonicalAlias = selectFactory.getCanonicalIR();
-    const canonicalAliasFromBuilder = buildCanonicalSelectIR(selectFactory.getQueryObject());
-
-    expect(canonicalAlias.kind).toBe('canonical_select_ir');
-    expect(canonicalAliasFromBuilder.kind).toBe('canonical_select_ir');
-    expect(canonicalAlias.projection.length).toBe(1);
-  });
