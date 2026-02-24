@@ -266,7 +266,7 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 ---
 
-## Phase 9 — Unify query type names: IR types become SelectQuery/CreateQuery/UpdateQuery/DeleteQuery
+## Phase 9 — Unify query type names: IR types become SelectQuery/CreateQuery/UpdateQuery/DeleteQuery [DONE]
 
 **Goal**: The IR type definitions move into the query files and take over the canonical type names. `IRSelectQuery` → `SelectQuery`, `IRCreateMutation` → `CreateQuery`, etc. `IQuadStore` signatures stay exactly the same — only the import paths change.
 
@@ -337,9 +337,13 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 **Validation:** `npm test` passes. `npx tsc --noEmit` passes. `IQuadStore` method signatures unchanged (only import paths change).
 
+**Report:**
+- **What was done:** Renamed old `SelectQuery` interface → `LegacySelectQuery`, added `export type SelectQuery = IRSelectQuery`. Same pattern for Create/Update/Delete. Updated IRPipeline, IRDesugar, IRMutation to use `Legacy*` prefixed imports. Updated IQuadStore and LinkedStorage to import from query files.
+- **Validation:** 10 passed suites, 223 passed tests. `npx tsc --noEmit` => pass.
+
 ---
 
-## Phase 10 — Rename factory method and eliminate getLegacyQueryObject
+## Phase 10 — Rename factory method and eliminate getLegacyQueryObject [DONE]
 
 **Goal**: Each factory has exactly one public query-building method with a clear name. `getLegacyQueryObject()` is deleted. The desugar/mutation pipelines read factory state directly instead of serializing to a legacy intermediate format.
 
@@ -399,9 +403,14 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 **Validation:** `npm test` passes. `npx tsc --noEmit` passes. `grep getLegacyQueryObject src/` returns zero matches.
 
+**Report:**
+- **What was done:** Added `build()` to all four factories. Made `getQueryObject()` and `getIR()` deprecated aliases. Updated QueryParser.ts to use `build()`. Updated internal callers (`getPropertyPath`, `isValidResult`) to use `getQueryPaths()` directly. Full `getLegacyQueryObject()` elimination deferred to Phase 12.
+- **Problems:** `BoundComponent.getPropertyPath()` had a type issue — `getQueryPaths()` can return `CustomQueryObject` for preload sub-queries. Fixed with `as any` cast matching original behavior.
+- **Validation:** 10 passed suites, 223 passed tests. `npx tsc --noEmit` => pass.
+
 ---
 
-## Phase 11 — Rewrite desugar input to accept factory state, not legacy format
+## Phase 11 — Rewrite desugar input to accept factory state, not legacy format [DONE]
 
 **Goal**: `desugarSelectQuery()` reads the factory's internal query representation directly, eliminating the legacy `SelectQuery` format as a pipeline input.
 
@@ -436,9 +445,13 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 **Validation:** `npm test` passes. `IRDesugar.ts` does not import the old `SelectQuery` interface. The only `SelectQuery` type in the codebase is the IR type.
 
+**Report:**
+- **What was done:** Defined `RawSelectInput` type in `IRDesugar.ts`. Updated `desugarSelectQuery()` and `toSortBy()` to accept `RawSelectInput`. Updated `IRPipeline.ts` to accept `RawSelectInput`. Updated `SelectQueryFactory.build()` to construct `RawSelectInput` directly from factory state, bypassing `getLegacyQueryObject()`. IRDesugar and IRPipeline no longer import `LegacySelectQuery`.
+- **Validation:** 10 passed suites, 223 passed tests. `npx tsc --noEmit` => pass.
+
 ---
 
-## Phase 12 — Migrate tests from legacy to IR assertions
+## Phase 12 — Migrate tests from legacy to IR assertions [DONE]
 
 **Goal**: All test files assert against IR structure. No test captures or reads legacy query objects. `query.test.ts` is deleted (superseded by `ir-select-golden.test.ts`).
 
@@ -469,9 +482,13 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 **Validation:** `npm test` passes. `grep getLegacyQueryObject src/` returns zero matches. `grep 'query\?\.select\[' src/tests/` returns zero matches.
 
+**Report:**
+- **What was done:** Deleted `getLegacyQueryObject()` from all four factories. Added `toRawInput()` on `SelectQueryFactory` for pipeline/test access. Deleted `LegacySelectQuery`, `LegacyCreateQuery`, `LegacyUpdateQuery`, `LegacyDeleteQuery` types. Defined mutation input types locally in `IRMutation.ts`. Updated `query-capture-store.ts` to use `toRawInput()` for select, `build()` for mutations. Simplified `ir-mutation-parity.test.ts` (capture store now returns IR directly). Updated `core-utils.test.ts` to use `toRawInput()`. Deleted `query.test.ts` (76 tests superseded by `ir-select-golden.test.ts`).
+- **Validation:** 9 passed suites, 147 passed tests (76 tests removed with deleted file). `npx tsc --noEmit` => pass. `grep getLegacyQueryObject src/` => 0 matches.
+
 ---
 
-## Phase 13 — Final cleanup and documentation update
+## Phase 13 — Final cleanup and documentation update [DONE]
 
 **Goal**: Remove all vestiges, update docs, verify clean state.
 
@@ -486,6 +503,10 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 **Modify:** `src/queries/IntermediateRepresentation.ts`, `documentation/intermediate-representation.md`, `README.md`
 
 **Validation:** `npm test` passes. `npx tsc --noEmit` passes. All grep audits clean.
+
+**Report:**
+- **What was done:** Deleted `SelectQueryIR` type alias from `IRPipeline.ts`. Renamed `buildSelectQueryIR` to `buildSelectQuery`. Updated `ir-select-golden.test.ts` to use `SelectQuery` type and `build()`. Updated deprecated method tests to test `build()` directly. Updated `documentation/intermediate-representation.md` to reflect current pipeline (`RawSelectInput` → `SelectQuery`). Updated `README.md` migration section for the `build()` API.
+- **Validation:** 9 passed suites, 147 passed tests. `npx tsc --noEmit` => pass. `grep SelectQueryIR src/` => 0 matches (excluding comments).
 
 ---
 
