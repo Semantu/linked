@@ -56,7 +56,12 @@ export class UpdateQueryFactory<
     };
   }
 
-  getQueryObject(): IRUpdateMutation {
+  build(): UpdateQuery {
     return buildCanonicalUpdateMutationIR(this.getLegacyQueryObject());
+  }
+
+  /** @deprecated Use build() */
+  getQueryObject(): UpdateQuery {
+    return this.build();
   }
 }

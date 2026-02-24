@@ -952,15 +952,16 @@ export class BoundComponent<
   getPropertyPath() {
     let sourcePath: ComponentQueryPath = this.source.getPropertyPath();
     let requestQuery = this.getParentQueryFactory();
-    let compSelectQuery = requestQuery.getLegacyQueryObject().select;
+    let compSelectQuery = requestQuery.getQueryPaths();
 
     if (Array.isArray(sourcePath)) {
+      const sel = compSelectQuery as any;
       sourcePath.push(
-        compSelectQuery.length === 1
-          ? compSelectQuery[0].length === 1
-            ? compSelectQuery[0][0]
-            : compSelectQuery[0]
-          : compSelectQuery,
+        sel.length === 1
+          ? sel[0].length === 1
+            ? sel[0][0]
+            : sel[0]
+          : sel,
       );
     }
     return sourcePath as QueryPropertyPath;
@@ -1779,12 +1780,18 @@ export class SelectQueryFactory<
     }
   }
 
-  getQueryObject(): IRSelectQuery {
-    return this.getIR();
+  build(): SelectQuery {
+    return buildSelectQueryIR(this.getLegacyQueryObject());
   }
 
-  getIR(): IRSelectQuery {
-    return buildSelectQueryIR(this.getLegacyQueryObject());
+  /** @deprecated Use build() */
+  getQueryObject(): SelectQuery {
+    return this.build();
+  }
+
+  /** @deprecated Use build() */
+  getIR(): SelectQuery {
+    return this.build();
   }
 
   // applyTo(subject) {
@@ -1880,7 +1887,7 @@ export class SelectQueryFactory<
   }
 
   isValidResult(qResult: QResult<any>) {
-    let select = this.getLegacyQueryObject().select;
+    let select = this.getQueryPaths();
     if (Array.isArray(select)) {
       return this.isValidQueryPathsResult(qResult, select);
     } else if (typeof select === 'object') {

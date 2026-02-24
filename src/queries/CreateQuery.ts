@@ -50,7 +50,12 @@ export class CreateQueryFactory<
     };
   }
 
-  getQueryObject(): IRCreateMutation {
+  build(): CreateQuery {
     return buildCanonicalCreateMutationIR(this.getLegacyQueryObject());
+  }
+
+  /** @deprecated Use build() */
+  getQueryObject(): CreateQuery {
+    return this.build();
   }
 }

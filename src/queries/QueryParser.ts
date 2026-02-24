@@ -26,7 +26,7 @@ export class QueryParser {
     query: SelectQueryFactory<ShapeType, ResponseType, Source>,
   ): Promise<ResultType> {
     try {
-      return LinkedStorage.selectQuery(query.getIR());
+      return LinkedStorage.selectQuery(query.build());
     } catch (e) {
       return Promise.reject(e);
     }
@@ -45,7 +45,7 @@ export class QueryParser {
       id,
       updateObjectOrFn,
     );
-    const irQuery = query.getQueryObject();
+    const irQuery = query.build();
     return LinkedStorage.updateQuery(irQuery);
   }
 
@@ -58,7 +58,7 @@ export class QueryParser {
         shapeClass,
         updateObjectOrFn,
       );
-      const irQuery = query.getQueryObject();
+      const irQuery = query.build();
       return LinkedStorage.createQuery(irQuery);
     } catch (e) {
       console.warn(e);
@@ -70,7 +70,7 @@ export class QueryParser {
     shapeClass: typeof Shape,
   ): Promise<DeleteResponse> {
     const query = new DeleteQueryFactory<Shape, {}>(shapeClass, id);
-    const irQuery = query.getQueryObject();
+    const irQuery = query.build();
     return LinkedStorage.deleteQuery(irQuery);
   }
 }

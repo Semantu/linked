@@ -63,7 +63,12 @@ export class DeleteQueryFactory<
     };
   }
 
-  getQueryObject(): IRDeleteMutation {
+  build(): DeleteQuery {
     return buildCanonicalDeleteMutationIR(this.getLegacyQueryObject());
+  }
+
+  /** @deprecated Use build() */
+  getQueryObject(): DeleteQuery {
+    return this.build();
   }
 }
