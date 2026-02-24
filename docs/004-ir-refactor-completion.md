@@ -266,6 +266,259 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 ---
 
+## Phase 9 — Unify query type names: IR types become SelectQuery/CreateQuery/UpdateQuery/DeleteQuery
+
+**Goal**: The IR type definitions move into the query files and take over the canonical type names. `IRSelectQuery` → `SelectQuery`, `IRCreateMutation` → `CreateQuery`, etc. `IQuadStore` signatures stay exactly the same — only the import paths change.
+
+**Why**: The names `SelectQuery`, `CreateQuery`, `UpdateQuery`, `DeleteQuery` are the established public vocabulary. Downstream stores already implement `IQuadStore` against IR types — this phase just gives those types the names everyone expects.
+
+**Substeps:**
+
+1. **Move IR select type into `SelectQuery.ts`**
+   - Move the `IRSelectQuery` type definition (and its direct dependencies: `IRProjectionItem`, `IROrderByItem`, `IRResultMap`, `IRResultMapEntry`) from `IntermediateRepresentation.ts` into `SelectQuery.ts`.
+   - Rename `IRSelectQuery` → `SelectQuery` (replacing the old interface at lines 86-96).
+   - Re-export from `IntermediateRepresentation.ts` as `export type { SelectQuery as IRSelectQuery } from './SelectQuery.js'` for backward compat during transition.
+   - Remove the old `SelectQuery` interface entirely.
+
+   ```typescript
+   // SelectQuery.ts — NEW
+   export type SelectQuery = {
+     kind: 'select_query';
+     root: IRShapeScanPattern;
+     patterns: IRGraphPattern[];
+     projection: IRProjectionItem[];
+     where?: IRExpression;
+     orderBy?: IROrderByItem[];
+     limit?: number;
+     offset?: number;
+     subjectId?: string;
+     singleResult?: boolean;
+     resultMap?: IRResultMap;
+   };
+   ```
+
+2. **Move IR mutation types into their query files**
+   - `IRCreateMutation` → `CreateQuery` in `CreateQuery.ts` (replacing old interface at lines 9-13)
+   - `IRUpdateMutation` → `UpdateQuery` in `UpdateQuery.ts` (replacing old type at lines 14-19)
+   - `IRDeleteMutation` → `DeleteQuery` in `DeleteQuery.ts` (replacing old interface at lines 9-13)
+   - Re-export from `IntermediateRepresentation.ts` as backward-compat aliases.
+
+   ```typescript
+   // CreateQuery.ts — NEW
+   export type CreateQuery = {
+     kind: 'create_mutation';
+     shape: IRShapeRef;
+     description: IRNodeDescription;
+   };
+   ```
+
+3. **Update `IQuadStore.ts`** — change imports from `IntermediateRepresentation.js` to the query files:
+   ```typescript
+   import type {SelectQuery} from '../queries/SelectQuery.js';
+   import type {CreateQuery} from '../queries/CreateQuery.js';
+   import type {UpdateQuery} from '../queries/UpdateQuery.js';
+   import type {DeleteQuery} from '../queries/DeleteQuery.js';
+
+   export interface IQuadStore {
+     selectQuery<ResultType>(query: SelectQuery): Promise<ResultType>;
+     updateQuery?<RType>(q: UpdateQuery): Promise<RType>;
+     createQuery?<R>(q: CreateQuery): Promise<R>;
+     deleteQuery?(query: DeleteQuery): Promise<DeleteResponse>;
+   }
+   ```
+
+4. **Update `LinkedStorage.ts`** — same import changes.
+
+5. **Update `IntermediateRepresentation.ts`** — becomes a barrel that re-exports from the query files plus keeps shared types (`IRExpression`, `IRGraphPattern`, `IRShapeRef`, etc.) that don't belong to a single query type.
+
+6. **Update all internal imports** — `IRPipeline.ts`, `IRMutation.ts`, `IRLower.ts`, `IRDesugar.ts`, test files.
+
+**Modify:** `src/queries/SelectQuery.ts`, `src/queries/CreateQuery.ts`, `src/queries/UpdateQuery.ts`, `src/queries/DeleteQuery.ts`, `src/queries/IntermediateRepresentation.ts`, `src/interfaces/IQuadStore.ts`, `src/utils/LinkedStorage.ts`, `src/queries/IRPipeline.ts`, `src/queries/IRMutation.ts`, `src/queries/IRLower.ts`, all test files importing IR types.
+
+**Validation:** `npm test` passes. `npx tsc --noEmit` passes. `IQuadStore` method signatures unchanged (only import paths change).
+
+---
+
+## Phase 10 — Rename factory method and eliminate getLegacyQueryObject
+
+**Goal**: Each factory has exactly one public query-building method with a clear name. `getLegacyQueryObject()` is deleted. The desugar/mutation pipelines read factory state directly instead of serializing to a legacy intermediate format.
+
+**Substeps:**
+
+1. **Rename the public method to `build()`** — replace both `getQueryObject()` and `getIR()` with `build()` on all four factories:
+   - `SelectQueryFactory.build(): SelectQuery`
+   - `CreateQueryFactory.build(): CreateQuery`
+   - `UpdateQueryFactory.build(): UpdateQuery`
+   - `DeleteQueryFactory.build(): DeleteQuery`
+
+2. **Rewrite `SelectQueryFactory` to build IR directly** — the key change. Instead of:
+   ```typescript
+   // CURRENT (goes through legacy serialization)
+   getIR(): SelectQuery {
+     return buildSelectQueryIR(this.getLegacyQueryObject());
+   }
+   ```
+   The factory method builds IR by reading its own internal state (`this.getQueryPaths()`, `this.wherePath`, `this.subject`, etc.) and passing those directly to the pipeline:
+   ```typescript
+   // NEW (direct from factory state)
+   build(): SelectQuery {
+     return buildSelectQueryFromFactory(this);
+   }
+   ```
+   This requires a new entry point in `IRPipeline.ts` (`buildSelectQueryFromFactory`) that takes the factory's internal state and feeds it through desugar → canonicalize → lower. The desugar pass will accept a `RawSelectInput` named interface (see Phase 11).
+
+3. **Rewrite mutation factories to build IR directly** — similar pattern. Instead of building a legacy object and converting it, read `this.shapeClass.shape`, `this.description`, `this.fields`, `this.ids` directly:
+   ```typescript
+   // CreateQueryFactory — NEW
+   build(): CreateQuery {
+     return {
+       kind: 'create_mutation',
+       shape: { shapeId: this.shapeClass.shape.id },
+       description: toNodeDescription(this.description),
+     };
+   }
+   ```
+   The `IRMutation.ts` builders (`buildCanonicalCreateMutationIR`, etc.) can be inlined into the factories or kept as helpers that take the factory's raw fields instead of legacy query objects.
+
+4. **Delete `getLegacyQueryObject()`** from all four factories.
+
+5. **Delete old legacy types** — the old `SelectQuery` interface (already replaced in Phase 9), old `CreateQuery`/`UpdateQuery`/`DeleteQuery` interfaces.
+
+6. **Update `QueryParser.ts`** — use the new method name:
+   ```typescript
+   return LinkedStorage.selectQuery(query.build());
+   ```
+
+7. **Update `SelectQuery.ts` internal callers**:
+   - `getPropertyPath()` (line 950): Currently calls `requestQuery.getLegacyQueryObject().select`. This needs to read from the factory's internal `getQueryPaths()` directly.
+   - `isValidResult()` (line 1878): Currently calls `this.getLegacyQueryObject().select`. Needs to use `this.getQueryPaths()` directly.
+
+8. **Delete `SelectQueryIR` alias** from `IRPipeline.ts`.
+
+**Modify:** `src/queries/SelectQuery.ts`, `src/queries/CreateQuery.ts`, `src/queries/UpdateQuery.ts`, `src/queries/DeleteQuery.ts`, `src/queries/IRPipeline.ts`, `src/queries/IRMutation.ts`, `src/queries/QueryParser.ts`
+
+**Validation:** `npm test` passes. `npx tsc --noEmit` passes. `grep getLegacyQueryObject src/` returns zero matches.
+
+---
+
+## Phase 11 — Rewrite desugar input to accept factory state, not legacy format
+
+**Goal**: `desugarSelectQuery()` reads the factory's internal query representation directly, eliminating the legacy `SelectQuery` format as a pipeline input.
+
+**Context**: Currently `desugarSelectQuery()` (line 369 of `IRDesugar.ts`) accepts the old `SelectQuery` and reads `query.select`, `query.where`, `query.sortBy`, `query.subject`, `query.shape`, etc. After Phase 10 deletes `getLegacyQueryObject()`, we need the desugar pass to accept the factory's internal state instead.
+
+**Substeps:**
+
+1. **Define a `RawSelectInput` interface** that captures what the desugar pass actually needs from the factory:
+   ```typescript
+   export type RawSelectInput = {
+     select: SelectPath;
+     where?: WherePath;
+     sortBy?: SortByPath;
+     subject?: Shape | QResult<Shape> | NodeReferenceValue;
+     shape?: ShapeType<Shape>;
+     limit?: number;
+     offset?: number;
+     singleResult?: boolean;
+   };
+   ```
+   This is structurally the same as the old `SelectQuery` but is an internal pipeline type, not a public query type.
+
+2. **Update `desugarSelectQuery()` signature** to accept `RawSelectInput` instead of `SelectQuery`.
+
+3. **Update `buildSelectQueryFromFactory()`** (from Phase 10) to construct a `RawSelectInput` from factory state and pass it to desugar.
+
+4. **Remove the `SelectQuery` import from `IRDesugar.ts`** — it should only import `RawSelectInput` (or equivalent internal types like `SelectPath`, `WherePath`).
+
+5. **Remove old `SelectQuery` import from `IRPipeline.ts`** — the pipeline accepts `RawSelectInput` or `SelectQuery` (the new IR type), not the old format.
+
+**Modify:** `src/queries/IRDesugar.ts`, `src/queries/IRPipeline.ts`, `src/queries/SelectQuery.ts`
+
+**Validation:** `npm test` passes. `IRDesugar.ts` does not import the old `SelectQuery` interface. The only `SelectQuery` type in the codebase is the IR type.
+
+---
+
+## Phase 12 — Migrate tests from legacy to IR assertions
+
+**Goal**: All test files assert against IR structure. No test captures or reads legacy query objects. `query.test.ts` is deleted (superseded by `ir-select-golden.test.ts`).
+
+**Substeps:**
+
+1. **Rewrite `query-capture-store.ts`** — capture IR objects instead of legacy:
+   ```typescript
+   async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
+     this.lastQuery = query.build(); // IR, not legacy
+     return [] as ResultType;
+   }
+   async createQuery(...) {
+     const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
+     this.lastQuery = factory.build(); // IR
+     return {} as CreateResponse<U>;
+   }
+   // same for update, delete
+   ```
+
+2. **Delete `query.test.ts`** — its ~55 legacy field assertions (`query?.select[0][0].property.label`, etc.) are fully superseded by `ir-select-golden.test.ts` which already tests the same query patterns with proper IR structural assertions. No value in maintaining both.
+
+3. **Rewrite `core-utils.test.ts:246`** — replace `query.getLegacyQueryObject()` with `query.build()` and assert IR where structure.
+
+4. **Update `ir-desugar.test.ts`, `ir-canonicalize.test.ts`, `ir-projection.test.ts`** — these test intermediate pipeline stages. They currently capture legacy objects via `captureQuery()` and feed them to `desugarSelectQuery()`. After Phase 11, `captureQuery()` should capture a `RawSelectInput` (the factory's internal state) instead. Update these tests to build `RawSelectInput` from factory state, or refactor `captureQuery()` to return the factory itself so each test can extract what it needs.
+
+**Modify:** `src/test-helpers/query-capture-store.ts`, `src/tests/core-utils.test.ts`, `src/tests/ir-desugar.test.ts`, `src/tests/ir-canonicalize.test.ts`, `src/tests/ir-projection.test.ts`
+**Delete:** `src/tests/query.test.ts`
+
+**Validation:** `npm test` passes. `grep getLegacyQueryObject src/` returns zero matches. `grep 'query\?\.select\[' src/tests/` returns zero matches.
+
+---
+
+## Phase 13 — Final cleanup and documentation update
+
+**Goal**: Remove all vestiges, update docs, verify clean state.
+
+**Substeps:**
+
+1. **Delete dead code**: Remove any remaining legacy type imports, unused old type definitions, backward-compat re-exports from `IntermediateRepresentation.ts`.
+2. **Clean up `IntermediateRepresentation.ts`**: Should only contain shared types (`IRExpression`, `IRGraphPattern`, `IRShapeRef`, `IRPropertyRef`, `IRValue`, `IRNodeDescription`, `IRNodeFieldUpdate`, `IRFieldValue`, `IRSetModificationValue`, and the union type `IRQuery`). Query-specific types live in their query files.
+3. **Update `documentation/intermediate-representation.md`**: Reflect that `SelectQuery`, `CreateQuery`, etc. ARE the IR types now. Remove references to `IRSelectQuery` naming.
+4. **Update `README.md`**: Migration section should say "`SelectQuery` IS the IR" not "alias for".
+5. **Final grep audit**: Confirm no references to `getLegacyQueryObject`, `IRSelectQuery` (except as re-export), `IRCreateMutation`/`IRUpdateMutation`/`IRDeleteMutation` (except as re-exports), `SelectQueryIR`, old `LinkedQuery` base interface fields.
+
+**Modify:** `src/queries/IntermediateRepresentation.ts`, `documentation/intermediate-representation.md`, `README.md`
+
+**Validation:** `npm test` passes. `npx tsc --noEmit` passes. All grep audits clean.
+
+---
+
+## Updated phase dependencies
+
+```
+Phase 1 (expand desugar)
+  ↓
+Phase 2 (lift to full IR AST)
+  ↓
+Phase 3 + Phase 4 (test coverage — can run in parallel)
+  ↓
+Phase 5 (wire production)
+  ↓
+Phase 6 (remove aliases)
+  ↓
+Phase 7 (consolidate)
+  ↓
+Phase 8 (documentation)
+  ↓
+Phase 9 (unify type names)
+  ↓
+Phase 10 (rename method + delete getLegacyQueryObject)
+  ↓
+Phase 11 (rewrite desugar input)
+  ↓
+Phase 12 (migrate tests)
+  ↓
+Phase 13 (final cleanup)
+```
+
+---
+
 ## Phase dependencies
 
 ```
