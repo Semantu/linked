@@ -1,7 +1,7 @@
 # @_linked/core
 Core Linked package for the query DSL, SHACL shape decorators/metadata, and package registration.
 
-Linked core gives you a type-safe, schema-parameterized query language and SHACL-driven Shape classes for linked data. It compiles queries into a plain JS query object that can be executed by a store.
+Linked core gives you a type-safe, schema-parameterized query language and SHACL-driven Shape classes for linked data. It compiles queries into a normalized [Intermediate Representation (IR)](./documentation/intermediate-representation.md) that can be executed by any store.
 
 ## Linked core offers
 
@@ -431,6 +431,23 @@ Override behavior:
 
 - Allow `preloadFor` to accept another query (not just a component).
 - Make and expose functions for auto syncing shapes to the graph.
+
+## Migration: IR query objects
+
+`getQueryObject()` on all query factories now returns IR types instead of legacy flat objects:
+
+| Factory | Return type |
+|---|---|
+| `SelectQueryFactory.getQueryObject()` | `IRSelectQuery` |
+| `CreateQueryFactory.getQueryObject()` | `IRCreateMutation` |
+| `UpdateQueryFactory.getQueryObject()` | `IRUpdateMutation` |
+| `DeleteQueryFactory.getQueryObject()` | `IRDeleteMutation` |
+
+**For `IQuadStore` implementers:**
+
+- `selectQuery` receives an `IRSelectQuery` with `root.shape.shapeId`, `projection[]`, `where`, `patterns[]` instead of the legacy `shape`, `select[][]`, `where` fields.
+- `createQuery`/`updateQuery`/`deleteQuery` receive IR mutation types with `kind` discriminators and ID-based property references.
+- See [Intermediate Representation docs](./documentation/intermediate-representation.md) for the full IR structure and examples.
 
 ## Changelog
 

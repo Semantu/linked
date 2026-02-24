@@ -1,5 +1,6 @@
 ---
 summary: Plan to align IR naming across runtime output, IR types, docs, and tests (with a full naming review and phased refactor).
+status: completed — superseded by 004-ir-refactor-completion.md
 packages: [core]
 ---
 

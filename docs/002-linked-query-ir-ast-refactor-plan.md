@@ -1,5 +1,6 @@
 ---
 summary: Detailed execution plan for migrating Linked query objects to a normalized backend-agnostic IR AST with strict phase-by-phase green validation.
+status: completed — superseded by 004-ir-refactor-completion.md
 packages: [core]
 ---
 

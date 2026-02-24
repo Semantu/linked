@@ -246,7 +246,7 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 ---
 
-## Phase 8 — Documentation sync
+## Phase 8 — Documentation sync [DONE]
 
 **Goal**: All documentation reflects the final implementation.
 
@@ -257,6 +257,12 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 4. Verify extensibility: confirm adding `NOT EXISTS`, new operators, fine-grained optimizations requires only new `IRExpression`/`IRGraphPattern` variants — no structural pipeline changes.
 
 **Validation:** `npm test` passes. Documentation matches emitted IR. README has migration guidance.
+
+**Report:**
+- **What was done:** Rewrote `documentation/intermediate-representation.md` with comprehensive examples for all IR variant types: basic selection, nested paths, where (equality, exists, every/not, logical and/or), aggregation (count/size), sub-selects with custom result objects, type casting, sorting, and subject targeting. Added reference tables for all graph pattern and expression types. Added extensibility section. Updated `README.md` intro to reference IR and added migration section documenting `getQueryObject()` return type changes for all query factories. Marked docs 002 and 003 as superseded in their frontmatter. Verified extensibility: `IRExpression` and `IRGraphPattern` are discriminated unions — new operators/expressions/patterns require only adding variants.
+- **Deviations:** None from Phase 8 scope.
+- **Problems:** No blocking issues.
+- **Validation:** `npm test -- --no-coverage` => 10 passed suites, 223 passed tests, 0 failed. `npx tsc --noEmit` => pass.
 
 ---
 
