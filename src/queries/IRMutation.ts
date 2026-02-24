@@ -94,6 +94,7 @@ const toNodeData = (description: NodeDescriptionValue): IRNodeData => {
   };
 };
 
+/** Builds an IRCreateMutation from a create factory's internal description. */
 export const buildCanonicalCreateMutationIR = (
   query: CreateMutationInput,
 ): IRCreateMutation => {
@@ -104,6 +105,7 @@ export const buildCanonicalCreateMutationIR = (
   };
 };
 
+/** Builds an IRUpdateMutation from an update factory's internal description. */
 export const buildCanonicalUpdateMutationIR = (
   query: UpdateMutationInput,
 ): IRUpdateMutation => {
@@ -115,6 +117,7 @@ export const buildCanonicalUpdateMutationIR = (
   };
 };
 
+/** Builds an IRDeleteMutation from a delete factory's internal description. */
 export const buildCanonicalDeleteMutationIR = (
   query: DeleteMutationInput,
 ): IRDeleteMutation => {

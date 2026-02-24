@@ -1,6 +1,6 @@
 import {describe, expect, test} from '@jest/globals';
 import {Person, queryFactories, tmpEntityBase} from '../test-helpers/query-fixtures';
-import {QueryCaptureStore, captureQuery} from '../test-helpers/query-capture-store';
+import {captureQuery} from '../test-helpers/query-capture-store';
 import {
   IRCreateMutation,
   IRDeleteMutation,
@@ -9,11 +9,8 @@ import {
   IRUpdateMutation,
 } from '../queries/IntermediateRepresentation';
 
-const store = new QueryCaptureStore();
-Person.queryParser = store;
-
 const captureMutationIR = (runner: () => Promise<unknown>) =>
-  captureQuery(store, runner) as Promise<IRCreateMutation | IRUpdateMutation | IRDeleteMutation>;
+  captureQuery(runner) as Promise<IRCreateMutation | IRUpdateMutation | IRDeleteMutation>;
 
 const fieldBySuffix = (fields: IRFieldUpdate[], suffix: string) =>
   fields.find((field) => field.property.endsWith(`/${suffix}`));

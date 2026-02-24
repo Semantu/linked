@@ -1,18 +1,21 @@
-import {IQueryParser, staticImplements} from '../interfaces/IQueryParser.js';
 import {
   GetQueryResponseType,
   QueryResponseToResultType,
   SelectQueryFactory,
 } from './SelectQuery.js';
 import {AddId, NodeReferenceValue, UpdatePartial} from './QueryFactory.js';
-import {Shape} from '../shapes/Shape.js';
+import type {Shape} from '../shapes/Shape.js';
 import {LinkedStorage} from '../utils/LinkedStorage.js';
 import {UpdateQueryFactory} from './UpdateQuery.js';
 import {CreateQueryFactory, CreateResponse} from './CreateQuery.js';
 import {DeleteQueryFactory, DeleteResponse} from './DeleteQuery.js';
 import {NodeId} from './MutationQuery.js';
 
-@staticImplements<IQueryParser>() /* this class implements this interface with static methods */
+/**
+ * Bridges the DSL layer (Shape.select/create/update/delete) to the storage
+ * layer (LinkedStorage → IQuadStore). Each method builds the IR from a
+ * factory and routes it to the appropriate store.
+ */
 export class QueryParser {
   static async selectQuery<
     ShapeType extends Shape,
@@ -74,5 +77,3 @@ export class QueryParser {
     return LinkedStorage.deleteQuery(irQuery);
   }
 }
-
-Shape.queryParser = QueryParser;

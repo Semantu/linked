@@ -36,17 +36,17 @@ type StoreCalls = {
 const createStore = () => {
   const calls: StoreCalls = {select: 0, update: 0, create: 0, delete: 0};
   const store: IQuadStore = {
-    selectQuery: async <ResultType>() => {
+    selectQuery: async () => {
       calls.select += 1;
-      return [] as ResultType;
+      return [];
     },
     updateQuery: async () => {
       calls.update += 1;
-      return {} as any;
+      return {id: 'mock'};
     },
     createQuery: async () => {
       calls.create += 1;
-      return {} as any;
+      return {id: 'mock'};
     },
     deleteQuery: async () => {
       calls.delete += 1;

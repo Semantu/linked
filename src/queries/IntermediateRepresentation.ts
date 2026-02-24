@@ -193,3 +193,86 @@ export type IRFieldValue =
   | IRSetModificationValue
   | IRFieldValue[]
   | undefined;
+
+// ---------------------------------------------------------------------------
+// Store result types
+// ---------------------------------------------------------------------------
+// These types describe what an IQuadStore implementation should return.
+// The calling layer (LinkedStorage / QueryParser) threads the precise
+// DSL-level TypeScript result type back to the caller, so the store
+// only needs to produce data that satisfies these structural contracts.
+// ---------------------------------------------------------------------------
+
+/**
+ * A single result row — an object with a node id and dynamic fields.
+ * Used in select and create results.
+ */
+export type ResultRow = {id: string; [key: string]: ResultFieldValue};
+
+/**
+ * Possible field values in a select or create result row.
+ */
+export type ResultFieldValue =
+  | string
+  | number
+  | boolean
+  | Date
+  | null
+  | undefined
+  | ResultRow
+  | ResultRow[];
+
+/**
+ * What `selectQuery` should return.
+ *
+ * - Array of rows for multi-result queries (the default).
+ * - A single row when `query.singleResult` is true (`.one()` or subject-targeted query).
+ * - `null` when `singleResult` is true and the target node doesn't exist.
+ */
+export type SelectResult = ResultRow[] | ResultRow | null;
+
+/**
+ * What `createQuery` should return.
+ *
+ * A single row with the generated `id` and the created field values.
+ * Nested creates appear as nested `ResultRow` objects (with their own ids).
+ * Array fields (e.g. friends) appear as `ResultRow[]`.
+ */
+export type CreateResult = ResultRow;
+
+/**
+ * When a set property is fully overwritten, the result contains `updatedTo`
+ * with the new complete set of values.
+ */
+export type SetOverwriteResult = {updatedTo: ResultRow[]};
+
+/**
+ * When a set property is incrementally modified with `{add, remove}`,
+ * the result contains the added and removed entries.
+ */
+export type SetModificationResult = {added: ResultRow[]; removed: ResultRow[]};
+
+/**
+ * Possible field values in an update result row.
+ * Extends `ResultFieldValue` with set modification shapes.
+ */
+export type UpdateFieldValue =
+  | ResultFieldValue
+  | SetOverwriteResult
+  | SetModificationResult;
+
+/**
+ * What `updateQuery` should return.
+ *
+ * A single row with the target node's `id` and only the changed fields.
+ * Fields not included in the update are omitted (not returned).
+ *
+ * Field value shapes depend on the type of update:
+ * - Literal fields: the new value (string, number, boolean, Date).
+ * - Single object fields: a `ResultRow` with the referenced/created node.
+ * - Set overwrite (passing an array): `{updatedTo: ResultRow[]}`.
+ * - Set add/remove (passing `{add, remove}`): `{added: ResultRow[], removed: ResultRow[]}`.
+ * - Unset single field (passing `undefined` or `null`): field is `undefined`.
+ * - Unset multi-value field (passing `undefined`): empty array `[]`.
+ */
+export type UpdateResult = {id: string; [key: string]: UpdateFieldValue};

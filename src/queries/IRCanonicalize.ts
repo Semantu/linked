@@ -122,6 +122,10 @@ const flattenLogical = (
   };
 };
 
+/**
+ * Recursively rewrites a desugared where-clause into canonical form:
+ * flattens nested AND/OR groups, converts quantifiers (some/every) to exists patterns.
+ */
 export const canonicalizeWhere = (
   where: DesugaredWhere,
 ): CanonicalWhereExpression => {
@@ -164,6 +168,10 @@ export const canonicalizeWhere = (
   return current;
 };
 
+/**
+ * Canonicalizes a desugared select query by normalizing its where-clause.
+ * All other fields pass through unchanged.
+ */
 export const canonicalizeDesugaredSelectQuery = (
   query: DesugaredSelectQuery,
 ): CanonicalDesugaredSelectQuery => {

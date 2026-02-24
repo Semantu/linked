@@ -206,6 +206,11 @@ const combineWithParentPath = (
   steps: [...parentPath, ...path.steps],
 });
 
+/**
+ * Lowers a canonical desugared select query into the final IRSelectQuery.
+ * Introduces aliases, graph patterns (shape scans, traversals), and
+ * converts selection paths and where-clauses into IR expressions.
+ */
 export const lowerSelectQuery = (
   canonical: CanonicalDesugaredSelectQuery,
 ): IRSelectQuery => {

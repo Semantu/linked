@@ -1,11 +1,6 @@
 import {describe, test} from '@jest/globals';
 import {Dog, Person, Pet, queryFactories} from '../test-helpers/query-fixtures';
-import {QueryCaptureStore} from '../test-helpers/query-capture-store';
 import {setQueryContext} from '../queries/QueryContext';
-
-Person.queryParser = new QueryCaptureStore();
-Pet.queryParser = Person.queryParser;
-Dog.queryParser = Person.queryParser;
 
 const expectType = <T>(_value: T) => _value;
 

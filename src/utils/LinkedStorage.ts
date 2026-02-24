@@ -85,7 +85,7 @@ export abstract class LinkedStorage {
         new Error('No query store configured. Call LinkedStorage.setDefaultStore().'),
       );
     }
-    return store.selectQuery(query);
+    return store.selectQuery(query) as Promise<ResultType>;
   }
 
   static updateQuery<ResponseType>(query: UpdateQuery): Promise<ResponseType> {

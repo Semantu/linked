@@ -1,3 +1,4 @@
+/** A named alias binding in a scope, tracking its source and nesting depth. */
 export type IRAliasBinding = {
   alias: string;
   source: string;
@@ -53,6 +54,7 @@ export class IRAliasScope {
   }
 }
 
+/** Validates that an alias exists in the current scope chain, throwing if not found. */
 export const validateAliasReference = (
   alias: string,
   currentScope: IRAliasScope,

@@ -10,6 +10,7 @@ import {xsd} from '../ontologies/xsd.js';
 import {
   buildSelectQuery,
 } from './IRPipeline.js';
+import {QueryParser} from './QueryParser.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import type {IRSelectQuery} from './IntermediateRepresentation.js';
 
@@ -1475,15 +1476,6 @@ export class Evaluation {
 
 class SetEvaluation extends Evaluation {}
 
-// class QueryBoolean extends QueryBuilderObject<boolean> {
-//   constructor(
-//     property?: PropertyShape,
-//     subject?: QueryShape<any> | QueryShapeSet<any>,
-//   ) {
-//     super(property, subject);
-//   }
-// }
-
 /**
  * The class that is used for when JS primitives are converted to a QueryValue
  * This is extended by QueryString, QueryNumber, QueryBoolean, etc
@@ -1723,7 +1715,7 @@ export class SelectQueryFactory<
   }
 
   exec(): Promise<QueryResponseToResultType<ResponseType>[]> {
-    return Shape.queryParser.selectQuery(this);
+    return QueryParser.selectQuery(this);
   }
 
   /**

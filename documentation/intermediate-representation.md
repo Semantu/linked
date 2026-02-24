@@ -361,6 +361,324 @@ DSL: `Person.delete({id: 'node:1'})`
 }
 ```
 
+## Store implementer guide
+
+This section is for developers building a storage backend (SPARQL, SQL, in-memory, etc.) that executes Linked queries.
+
+### Imports
+
+All IR types (both query input types and result types) are exported from `@_linked/core/queries/IntermediateRepresentation`:
+
+```ts
+import type {
+  // Query input types
+  IRSelectQuery,
+  IRCreateMutation,
+  IRUpdateMutation,
+  IRDeleteMutation,
+  IRExpression,
+  IRGraphPattern,
+  IRProjectionItem,
+  IRNodeData,
+  IRFieldUpdate,
+  // Result types
+  SelectResult,
+  CreateResult,
+  UpdateResult,
+  ResultRow,
+  SetOverwriteResult,
+  SetModificationResult,
+} from '@_linked/core/queries/IntermediateRepresentation';
+```
+
+The store interface and top-level query type aliases:
+
+```ts
+import type {IQuadStore} from '@_linked/core/interfaces/IQuadStore';
+import type {SelectQuery} from '@_linked/core/queries/SelectQuery';
+import type {CreateQuery} from '@_linked/core/queries/CreateQuery';
+import type {UpdateQuery} from '@_linked/core/queries/UpdateQuery';
+import type {DeleteQuery, DeleteResponse} from '@_linked/core/queries/DeleteQuery';
+```
+
+`SelectQuery`, `CreateQuery`, `UpdateQuery`, and `DeleteQuery` are aliases for `IRSelectQuery`, `IRCreateMutation`, `IRUpdateMutation`, and `IRDeleteMutation` respectively.
+
+### The `IQuadStore` interface
+
+```ts
+interface IQuadStore {
+  init?(): Promise<any>;
+  selectQuery(query: SelectQuery): Promise<SelectResult>;
+  updateQuery?(query: UpdateQuery): Promise<UpdateResult>;
+  createQuery?(query: CreateQuery): Promise<CreateResult>;
+  deleteQuery?(query: DeleteQuery): Promise<DeleteResponse>;
+}
+```
+
+Your store receives canonical IR query objects and returns structured results. The calling layer (`LinkedStorage` / `QueryParser`) threads the precise DSL-level TypeScript type back to the caller — your store just needs to produce data that matches the result types described below.
+
+### Return types
+
+Every result row is an object with an `id` string and dynamic fields. The specific result type depends on the query kind.
+
+#### Select results (`SelectResult`)
+
+A select query returns an array of result rows by default. Each row has the node's `id` and only the fields that were selected:
+
+```ts
+// Person.select(p => p.name) → array of rows
+[
+  {id: 'person:1', name: 'Semmy'},
+  {id: 'person:2', name: 'Moa'},
+]
+```
+
+When `query.singleResult` is `true` (the DSL used `.one()` or targeted a specific subject), return a single row instead of an array:
+
+```ts
+// Person.select({id: 'person:1'}, p => p.name) → single row
+{id: 'person:1', name: 'Semmy'}
+```
+
+If the target node doesn't exist, return `null`.
+
+Fields that exist on the node but have no value are `null`. Fields that weren't selected are not included. Nested objects and arrays of objects are nested `ResultRow` objects:
+
+```ts
+// Person.select(p => [p.name, p.friends, p.bestFriend.name])
+{
+  id: 'person:1',
+  name: 'Semmy',
+  friends: [{id: 'person:2'}, {id: 'person:3'}],
+  bestFriend: {id: 'person:3', name: 'Jinx'}
+}
+```
+
+Type: `SelectResult = ResultRow[] | ResultRow | null`
+
+#### Create results (`CreateResult`)
+
+A create query always returns a single row with the generated `id` and the created fields:
+
+```ts
+// Person.create({name: 'Alice', hobby: 'Hiking'})
+{id: 'person:new-1', name: 'Alice', hobby: 'Hiking'}
+```
+
+Nested creates produce nested rows with their own ids. Array fields return arrays of rows:
+
+```ts
+// Person.create({name: 'Bob', friends: [{name: 'New Friend'}, {id: 'person:1'}]})
+{
+  id: 'person:new-2',
+  name: 'Bob',
+  friends: [
+    {id: 'person:new-3', name: 'New Friend'},
+    {id: 'person:1'}
+  ]
+}
+```
+
+Type: `CreateResult = ResultRow`
+
+#### Update results (`UpdateResult`)
+
+An update query returns a single row with the target node's `id` and **only the fields that were changed**. Fields not included in the update are not returned.
+
+**Simple field update** — the new value:
+
+```ts
+// Person.update({id: 'person:1'}, {hobby: 'Gaming'})
+{id: 'person:1', hobby: 'Gaming'}
+// note: name is NOT returned because it wasn't updated
+```
+
+**Set overwrite** (passing an array for a multi-value property) — returns `{updatedTo: ResultRow[]}`:
+
+```ts
+// Person.update({id: 'person:1'}, {friends: [{name: 'NewFriend'}]})
+{
+  id: 'person:1',
+  friends: {
+    updatedTo: [{id: 'person:new-1', name: 'NewFriend'}]
+  }
+}
+```
+
+**Set add/remove** (passing `{add, remove}`) — returns `{added: ResultRow[], removed: ResultRow[]}`:
+
+```ts
+// Person.update({id: 'person:1'}, {friends: {add: {name: 'Friend Added'}, remove: {id: 'person:2'}}})
+{
+  id: 'person:1',
+  friends: {
+    added: [{id: 'person:new-1', name: 'Friend Added'}],
+    removed: [{id: 'person:2'}]
+  }
+}
+```
+
+**Unset a single-value field** — the field value is `undefined`:
+
+```ts
+// Person.update({id: 'person:1'}, {hobby: undefined})
+{id: 'person:1', hobby: undefined}
+```
+
+**Unset a multi-value field** — the field value is an empty array:
+
+```ts
+// Person.update({id: 'person:3'}, {friends: undefined})
+{id: 'person:3', friends: []}
+```
+
+Type: `UpdateResult = {id: string; [key: string]: UpdateFieldValue}`
+
+Where `UpdateFieldValue` extends `ResultFieldValue` with `SetOverwriteResult` and `SetModificationResult`.
+
+#### Delete results (`DeleteResponse`)
+
+A delete query returns the list of successfully deleted node ids and a count:
+
+```ts
+// Person.delete([{id: 'person:1'}, {id: 'person:2'}])
+{
+  deleted: [{id: 'person:1'}, {id: 'person:2'}],
+  count: 2
+}
+```
+
+Optionally includes `failed` (ids that couldn't be deleted) and `errors` (error messages keyed by id).
+
+Type: `DeleteResponse = {deleted: NodeReferenceValue[]; count: number; failed?: NodeReferenceValue[]; errors?: Record<string, string>}`
+
+### Minimal implementation skeleton
+
+```ts
+import type {IQuadStore} from '@_linked/core/interfaces/IQuadStore';
+import type {SelectQuery} from '@_linked/core/queries/SelectQuery';
+import type {CreateQuery} from '@_linked/core/queries/CreateQuery';
+import type {UpdateQuery} from '@_linked/core/queries/UpdateQuery';
+import type {DeleteQuery, DeleteResponse} from '@_linked/core/queries/DeleteQuery';
+import type {SelectResult, CreateResult, UpdateResult} from '@_linked/core/queries/IntermediateRepresentation';
+
+export class MyStore implements IQuadStore {
+  async selectQuery(query: SelectQuery): Promise<SelectResult> {
+    // 1. Read query.root.shape to identify the target shape
+    // 2. Walk query.patterns to build joins/traversals
+    // 3. Compile query.where into a filter
+    // 4. Map query.projection to output columns
+    // 5. Apply query.orderBy, query.limit, query.offset
+    // 6. Use query.resultMap to build the response object
+    // 7. If query.singleResult, return one row; otherwise return an array
+  }
+
+  async createQuery(query: CreateQuery): Promise<CreateResult> {
+    // 1. Read query.shape for the target shape
+    // 2. Walk query.data.fields to extract property values
+    // 3. Handle nested IRNodeData in field values (nested creates)
+    // 4. Handle {id: string} references in field values
+    // 5. Return the created row with its generated id
+  }
+
+  async updateQuery(query: UpdateQuery): Promise<UpdateResult> {
+    // 1. Read query.id for the target node
+    // 2. Walk query.data.fields to extract updates
+    // 3. Handle IRSetModificationValue ({add, remove}) for set properties
+    // 4. Handle undefined values (unset the field)
+    // 5. Return the updated row (only changed fields)
+  }
+
+  async deleteQuery(query: DeleteQuery): Promise<DeleteResponse> {
+    // 1. Read query.ids for the nodes to delete
+    // 2. Return {deleted: [...], count: N}
+  }
+}
+```
+
+### Compiling expressions
+
+The `where` clause and `projection` items contain `IRExpression` trees. Switch on the `kind` discriminator to compile them:
+
+```ts
+function compileExpression(expr: IRExpression): string {
+  switch (expr.kind) {
+    case 'property_expr':
+      // Access property expr.property on the node aliased as expr.sourceAlias
+      return `${expr.sourceAlias}.${expr.property}`;
+    case 'literal_expr':
+      // Literal value (string, number, boolean, or null)
+      return JSON.stringify(expr.value);
+    case 'binary_expr':
+      // Comparison: =, !=, >, >=, <, <=
+      return `${compileExpression(expr.left)} ${expr.operator} ${compileExpression(expr.right)}`;
+    case 'logical_expr':
+      // Boolean combination: and, or
+      return expr.expressions.map(compileExpression).join(` ${expr.operator} `);
+    case 'not_expr':
+      return `NOT (${compileExpression(expr.expression)})`;
+    case 'exists_expr':
+      // Existential subquery with optional filter
+      return `EXISTS { ${compilePattern(expr.pattern)}${expr.filter ? ` FILTER ${compileExpression(expr.filter)}` : ''} }`;
+    case 'aggregate_expr':
+      // count, sum, avg, min, max
+      return `${expr.name}(${expr.args.map(compileExpression).join(', ')})`;
+    case 'function_expr':
+      return `${expr.name}(${expr.args.map(compileExpression).join(', ')})`;
+    case 'alias_expr':
+      return expr.alias;
+  }
+}
+```
+
+### Compiling graph patterns
+
+The `patterns` array and `root` describe the data shape. Switch on `kind`:
+
+```ts
+function compilePattern(pattern: IRGraphPattern): string {
+  switch (pattern.kind) {
+    case 'shape_scan':
+      // Entry point: scan all instances of pattern.shape, bind to pattern.alias
+      break;
+    case 'traverse':
+      // Follow pattern.property from pattern.from to pattern.to
+      break;
+    case 'join':
+      // Combine pattern.patterns (inner join)
+      break;
+    case 'optional':
+      // Left-outer-join: pattern.pattern
+      break;
+    case 'union':
+      // OR-union of pattern.branches
+      break;
+    case 'exists':
+      // Existence check: pattern.pattern
+      break;
+  }
+}
+```
+
+### Handling mutation data
+
+Mutation field values (`IRFieldValue`) can be:
+
+| Value | Meaning |
+|---|---|
+| `string \| number \| boolean \| null` | Literal value |
+| `Date` | Date value |
+| `{id: string}` | Reference to an existing node |
+| `IRNodeData` (has `shape` + `fields`) | Nested create |
+| `IRSetModificationValue` (has `add` / `remove`) | Incremental set update |
+| `IRFieldValue[]` | Array of values (e.g. overwriting a set) |
+| `undefined` | Unset the field |
+
+### Reference implementations
+
+- `@_linked/sparql-store` — SPARQL endpoint store (coming soon)
+- `@_linked/rdf-mem-store` — in-memory RDF store
+
 ## Extensibility
 
 Adding new capabilities requires only new variants in the type unions — no structural pipeline changes:

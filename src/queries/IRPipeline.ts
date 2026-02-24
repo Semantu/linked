@@ -9,6 +9,11 @@ const isIRSelectQuery = (query: unknown): query is IRSelectQuery =>
   'kind' in query &&
   (query as IRSelectQuery).kind === 'select';
 
+/**
+ * Runs the full select pipeline: desugar → canonicalize → lower.
+ * Accepts either a RawSelectInput (from a query factory) or an already-built
+ * IRSelectQuery (returned as-is).
+ */
 export const buildSelectQuery = (query: RawSelectInput | IRSelectQuery): IRSelectQuery => {
   if (isIRSelectQuery(query)) {
     return query;

@@ -1,72 +1,60 @@
-import {Shape} from '../shapes/Shape';
-import {SelectQueryFactory} from '../queries/SelectQuery';
-import {IQueryParser} from '../interfaces/IQueryParser';
-import {DeleteResponse} from '../queries/DeleteQuery';
-import {CreateResponse} from '../queries/CreateQuery';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
+import {jest} from '@jest/globals';
+import {QueryParser} from '../queries/QueryParser';
 import {UpdateQueryFactory} from '../queries/UpdateQuery';
 import {CreateQueryFactory} from '../queries/CreateQuery';
 import {DeleteQueryFactory} from '../queries/DeleteQuery';
-import {NodeId} from '../queries/MutationQuery';
+import type {NodeId} from '../queries/MutationQuery';
 
 /**
- * Test utility that intercepts query factory calls and captures
+ * Test utility that intercepts QueryParser methods via jest.spyOn and captures
  * the query object for inspection by test assertions.
  *
  * For select queries, captures the RawSelectInput (pipeline input format).
  * For mutations, captures the IR (canonical format).
  *
- * Assign an instance to `Shape.queryParser` (or a specific shape's
- * `queryParser`) before executing queries, then use `captureQuery`
- * to retrieve the captured object.
+ * Import this module and call `captureQuery(runner)` to execute a DSL
+ * call (e.g. Person.select(...)) and retrieve the captured query.
  */
-export class QueryCaptureStore implements IQueryParser {
-  lastQuery?: any;
+let _lastQuery: any;
 
-  async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.toRawInput();
-    return [] as ResultType;
-  }
+jest.spyOn(QueryParser, 'selectQuery').mockImplementation(async (query: any) => {
+  _lastQuery = query.toRawInput();
+  return [] as any;
+});
 
-  async createQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<CreateResponse<U>> {
+jest.spyOn(QueryParser, 'createQuery').mockImplementation(
+  async (updateObjectOrFn: any, shapeClass: any) => {
     const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.build();
-    return {} as CreateResponse<U>;
-  }
+    _lastQuery = factory.build();
+    return {} as any;
+  },
+);
 
-  async updateQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    id: string | NodeReferenceValue,
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<AddId<U>> {
+jest.spyOn(QueryParser, 'updateQuery').mockImplementation(
+  async (id: any, updateObjectOrFn: any, shapeClass: any) => {
     const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.build();
-    return {} as AddId<U>;
-  }
+    _lastQuery = factory.build();
+    return {} as any;
+  },
+);
 
-  async deleteQuery(
-    id: NodeId | NodeId[] | NodeReferenceValue[],
-    shapeClass: typeof Shape,
-  ): Promise<DeleteResponse> {
+jest.spyOn(QueryParser, 'deleteQuery').mockImplementation(
+  async (id: any, shapeClass: any) => {
     const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
     const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.build();
+    _lastQuery = factory.build();
     return {deleted: [], count: 0};
-  }
-}
+  },
+);
 
 /**
  * Execute a query-producing callback and return whatever
- * the capture store intercepted.
+ * the capture intercepted.
  */
 export const captureQuery = async (
-  store: QueryCaptureStore,
   runner: () => Promise<unknown>,
 ) => {
-  store.lastQuery = undefined;
+  _lastQuery = undefined;
   await runner();
-  return store.lastQuery;
+  return _lastQuery;
 };

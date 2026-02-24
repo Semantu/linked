@@ -8,18 +8,12 @@ import {
   tmpEntityBase,
 } from "../test-helpers/query-fixtures";
 import {
-  QueryCaptureStore,
-  captureQuery as _captureQuery,
+  captureQuery,
 } from "../test-helpers/query-capture-store";
 import { buildSelectQuery } from "../queries/IRPipeline";
 import type { SelectQuery } from "../queries/SelectQuery";
 import { setQueryContext } from "../queries/QueryContext";
 
-const store = new QueryCaptureStore();
-Person.queryParser = store;
-Pet.queryParser = store;
-Dog.queryParser = store;
-Employee.queryParser = store;
 setQueryContext("user", { id: "user-1" }, Person);
 
 const sanitize = (value: unknown): unknown => {
@@ -39,7 +33,7 @@ const sanitize = (value: unknown): unknown => {
 const captureIR = async (
   runner: () => Promise<unknown>
 ): Promise<SelectQuery> => {
-  const query = await _captureQuery(store, runner);
+  const query = await captureQuery(runner);
   return sanitize(buildSelectQuery(query)) as SelectQuery;
 };
 
@@ -625,7 +619,7 @@ describe("select IR parity coverage (Phase 3)", () => {
 
 describe("IR pipeline behavior", () => {
   test("buildSelectQuery lowers raw select input to IR", async () => {
-    const query = await _captureQuery(store, () => queryFactories.sortByDesc());
+    const query = await captureQuery(() => queryFactories.sortByDesc());
     const ir = buildSelectQuery(query);
 
     expect(ir.kind).toBe("select");

@@ -21,6 +21,7 @@ import * as DeleteQuery from './queries/DeleteQuery.js';
 import * as CreateQuery from './queries/CreateQuery.js';
 import * as QueryParser from './queries/QueryParser.js';
 import * as QueryFactory from './queries/QueryFactory.js';
+import * as IntermediateRepresentation from './queries/IntermediateRepresentation.js';
 import * as NameSpace from './utils/NameSpace.js';
 import * as ShapeClass from './utils/ShapeClass.js';
 import * as cached from './utils/cached.js';
@@ -64,6 +65,7 @@ export function initModularApp() {
     CreateQuery,
     QueryParser,
     QueryFactory,
+    IntermediateRepresentation,
     SHACLShapes,
     rdf,
     rdfs,

@@ -19,6 +19,7 @@ export type ProjectionPathInput =
       key?: string;
     };
 
+/** Derives a result key name from the last step of a selection path. */
 export const projectionKeyFromPath = (path: DesugaredSelectionPath): string => {
   if (!path.steps.length) return 'value';
   const lastStep = path.steps[path.steps.length - 1];
@@ -28,6 +29,10 @@ export const projectionKeyFromPath = (path: DesugaredSelectionPath): string => {
   return 'value';
 };
 
+/**
+ * Lowers a single desugared selection path into an IR expression,
+ * creating traversal aliases for intermediate property steps.
+ */
 export const lowerSelectionPathExpression = (
   path: DesugaredSelectionPath,
   options: ProjectionPathLoweringOptions,
@@ -71,6 +76,10 @@ export const lowerSelectionPathExpression = (
   return {kind: 'alias_expr', alias: currentAlias};
 };
 
+/**
+ * Builds projection items and a result map from an array of selection paths.
+ * Each path gets a unique alias and is lowered into an IR expression.
+ */
 export const buildCanonicalProjection = (
   selections: ProjectionPathInput[],
   options: ProjectionPathLoweringOptions,

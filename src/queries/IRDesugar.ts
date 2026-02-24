@@ -382,6 +382,10 @@ const toSortBy = (query: RawSelectInput): DesugaredSortBy | undefined => {
   };
 };
 
+/**
+ * Converts a RawSelectInput (DSL-level query) into a flat DesugaredSelectQuery
+ * by walking proxy-traced select/where/sortBy paths and extracting property steps.
+ */
 export const desugarSelectQuery = (query: RawSelectInput): DesugaredSelectQuery => {
   const selections = toSelections(query.select);
 
