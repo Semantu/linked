@@ -3,20 +3,12 @@ import {NodeReferenceValue} from './QueryFactory.js';
 export type IRDirection = 'ASC' | 'DESC';
 export type IRAlias = string;
 
-export type IRShapeRef = {
-  shapeId: string;
-};
-
-export type IRPropertyRef = {
-  propertyShapeId: string;
-};
-
 export type IRValue = string | number | boolean | null;
 
 export type IRQuery = IRSelectQuery | IRCreateMutation | IRUpdateMutation | IRDeleteMutation;
 
 export type IRSelectQuery = {
-  kind: 'select_query';
+  kind: 'select';
   root: IRShapeScanPattern;
   patterns: IRGraphPattern[];
   projection: IRProjectionItem[];
@@ -26,24 +18,17 @@ export type IRSelectQuery = {
   offset?: number;
   subjectId?: string;
   singleResult?: boolean;
-  resultMap?: IRResultMap;
+  resultMap?: IRResultMapEntry[];
 };
 
 export type IRProjectionItem = {
-  kind: 'projection_item';
   alias: IRAlias;
   expression: IRExpression;
 };
 
 export type IROrderByItem = {
-  kind: 'order_by_item';
   expression: IRExpression;
   direction: IRDirection;
-};
-
-export type IRResultMap = {
-  kind: 'result_map';
-  entries: IRResultMapEntry[];
 };
 
 export type IRResultMapEntry = {
@@ -61,7 +46,7 @@ export type IRGraphPattern =
 
 export type IRShapeScanPattern = {
   kind: 'shape_scan';
-  shape: IRShapeRef;
+  shape: string;
   alias: IRAlias;
 };
 
@@ -69,7 +54,7 @@ export type IRTraversePattern = {
   kind: 'traverse';
   from: IRAlias;
   to: IRAlias;
-  property: IRPropertyRef;
+  property: string;
 };
 
 export type IRJoinPattern = {
@@ -88,7 +73,7 @@ export type IRUnionPattern = {
 };
 
 export type IRExistsPattern = {
-  kind: 'exists_pattern';
+  kind: 'exists';
   pattern: IRGraphPattern;
 };
 
@@ -116,7 +101,7 @@ export type IRAliasExpression = {
 export type IRPropertyExpression = {
   kind: 'property_expr';
   sourceAlias: IRAlias;
-  property: IRPropertyRef;
+  property: string;
 };
 
 export type IRBinaryOperator =
@@ -166,32 +151,32 @@ export type IRExistsExpression = {
 };
 
 export type IRCreateMutation = {
-  kind: 'create_mutation';
-  shape: IRShapeRef;
-  description: IRNodeDescription;
+  kind: 'create';
+  shape: string;
+  data: IRNodeData;
 };
 
 export type IRUpdateMutation = {
-  kind: 'update_mutation';
-  shape: IRShapeRef;
+  kind: 'update';
+  shape: string;
   id: string;
-  updates: IRNodeDescription;
+  data: IRNodeData;
 };
 
 export type IRDeleteMutation = {
-  kind: 'delete_mutation';
-  shape: IRShapeRef;
+  kind: 'delete';
+  shape: string;
   ids: NodeReferenceValue[];
 };
 
-export type IRNodeDescription = {
-  shape: IRShapeRef;
-  fields: IRNodeFieldUpdate[];
+export type IRNodeData = {
+  shape: string;
+  fields: IRFieldUpdate[];
   id?: string;
 };
 
-export type IRNodeFieldUpdate = {
-  property: IRPropertyRef;
+export type IRFieldUpdate = {
+  property: string;
   value: IRFieldValue;
 };
 
@@ -204,7 +189,7 @@ export type IRFieldValue =
   | IRValue
   | Date
   | NodeReferenceValue
-  | IRNodeDescription
+  | IRNodeData
   | IRSetModificationValue
   | IRFieldValue[]
   | undefined;

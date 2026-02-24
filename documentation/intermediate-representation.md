@@ -13,10 +13,10 @@ This document defines the canonical Linked query IR structure produced by `@_lin
 ## Canonical invariants
 
 1. Every node has a `kind` discriminator.
-2. Shape/property references are ID-based (`shapeId`, `propertyShapeId`).
+2. Shape/property references are plain ID strings.
 3. Select projection is a flat list of `{alias, expression}`.
 4. Quantifiers are normalized (`some` -> `exists_expr`, `every` -> `not_expr(exists_expr(not_expr(...)))`).
-5. Mutation kinds remain explicit (`create_mutation`, `update_mutation`, `delete_mutation`).
+5. Mutation kinds are explicit (`create`, `update`, `delete`).
 
 ## Pipeline architecture
 
@@ -44,17 +44,17 @@ The `SelectQuery` type (exported from `SelectQuery.ts`, aliased as `IRSelectQuer
 
 ```ts
 type SelectQuery = {
-  kind: 'select_query';
-  root: IRShapeScanPattern;     // shape scan entry point
-  patterns: IRGraphPattern[];   // traversal patterns (joins, optional, etc.)
+  kind: 'select';
+  root: IRShapeScanPattern;       // shape scan entry point
+  patterns: IRGraphPattern[];     // traversal patterns (joins, optional, etc.)
   projection: IRProjectionItem[]; // what to return
-  where?: IRExpression;         // filter expression
-  orderBy?: IROrderByItem[];    // sort specification
+  where?: IRExpression;           // filter expression
+  orderBy?: IROrderByItem[];      // sort specification
   limit?: number;
   offset?: number;
-  subjectId?: string;           // target a specific node
-  singleResult?: boolean;       // true if .one() or specific subject
-  resultMap?: IRResultMap;      // maps projection aliases to result keys
+  subjectId?: string;             // target a specific node
+  singleResult?: boolean;         // true if .one() or specific subject
+  resultMap?: IRResultMapEntry[]; // maps projection aliases to result keys
 };
 ```
 
@@ -64,17 +64,16 @@ DSL: `Person.select((p) => p.name)`
 
 ```ts
 {
-  kind: 'select_query',
-  root: {kind: 'shape_scan', shape: {shapeId: 'shape:Person'}, alias: 'a0'},
+  kind: 'select',
+  root: {kind: 'shape_scan', shape: 'shape:Person', alias: 'a0'},
   patterns: [],
   projection: [
     {
-      kind: 'projection_item',
       alias: 'a1',
-      expression: {kind: 'property_expr', sourceAlias: 'a0', property: {propertyShapeId: 'prop:name'}}
+      expression: {kind: 'property_expr', sourceAlias: 'a0', property: 'prop:name'}
     }
   ],
-  resultMap: {kind: 'result_map', entries: [{key: 'prop:name', alias: 'a1'}]},
+  resultMap: [{key: 'prop:name', alias: 'a1'}],
   singleResult: false
 }
 ```
@@ -85,17 +84,16 @@ DSL: `Person.select((p) => p.friends.friends.name)`
 
 ```ts
 {
-  kind: 'select_query',
-  root: {kind: 'shape_scan', shape: {shapeId: 'shape:Person'}, alias: 'a0'},
+  kind: 'select',
+  root: {kind: 'shape_scan', shape: 'shape:Person', alias: 'a0'},
   patterns: [
-    {kind: 'traverse', from: 'a0', to: 'a1', property: {propertyShapeId: 'prop:friends'}},
-    {kind: 'traverse', from: 'a1', to: 'a2', property: {propertyShapeId: 'prop:friends'}}
+    {kind: 'traverse', from: 'a0', to: 'a1', property: 'prop:friends'},
+    {kind: 'traverse', from: 'a1', to: 'a2', property: 'prop:friends'}
   ],
   projection: [
     {
-      kind: 'projection_item',
       alias: 'a1',
-      expression: {kind: 'property_expr', sourceAlias: 'a2', property: {propertyShapeId: 'prop:name'}}
+      expression: {kind: 'property_expr', sourceAlias: 'a2', property: 'prop:name'}
     }
   ],
   singleResult: false
@@ -108,14 +106,14 @@ DSL: `Person.select().where((p) => p.name.equals('Semmy'))`
 
 ```ts
 {
-  kind: 'select_query',
-  root: {kind: 'shape_scan', shape: {shapeId: 'shape:Person'}, alias: 'a0'},
+  kind: 'select',
+  root: {kind: 'shape_scan', shape: 'shape:Person', alias: 'a0'},
   patterns: [],
   projection: [],
   where: {
     kind: 'binary_expr',
     operator: '=',
-    left: {kind: 'property_expr', sourceAlias: 'a0', property: {propertyShapeId: 'prop:name'}},
+    left: {kind: 'property_expr', sourceAlias: 'a0', property: 'prop:name'},
     right: {kind: 'literal_expr', value: 'Semmy'}
   },
   singleResult: false
@@ -128,17 +126,17 @@ DSL: `Person.select().where((p) => p.friends.some((f) => f.name.equals('Moa')))`
 
 ```ts
 {
-  kind: 'select_query',
-  root: {kind: 'shape_scan', shape: {shapeId: 'shape:Person'}, alias: 'a0'},
+  kind: 'select',
+  root: {kind: 'shape_scan', shape: 'shape:Person', alias: 'a0'},
   patterns: [],
   projection: [],
   where: {
     kind: 'exists_expr',
-    pattern: {kind: 'traverse', from: 'a0', to: 'a1', property: {propertyShapeId: 'prop:friends'}},
+    pattern: {kind: 'traverse', from: 'a0', to: 'a1', property: 'prop:friends'},
     filter: {
       kind: 'binary_expr',
       operator: '=',
-      left: {kind: 'property_expr', sourceAlias: 'a1', property: {propertyShapeId: 'prop:name'}},
+      left: {kind: 'property_expr', sourceAlias: 'a1', property: 'prop:name'},
       right: {kind: 'literal_expr', value: 'Moa'}
     }
   },
@@ -156,13 +154,13 @@ DSL: `Person.select().where((p) => p.friends.every((f) => f.name.equals('Moa')))
     kind: 'not_expr',
     expression: {
       kind: 'exists_expr',
-      pattern: {kind: 'traverse', from: 'a0', to: 'a1', property: {propertyShapeId: 'prop:friends'}},
+      pattern: {kind: 'traverse', from: 'a0', to: 'a1', property: 'prop:friends'},
       filter: {
         kind: 'not_expr',
         expression: {
           kind: 'binary_expr',
           operator: '=',
-          left: {kind: 'property_expr', sourceAlias: 'a1', property: {propertyShapeId: 'prop:name'}},
+          left: {kind: 'property_expr', sourceAlias: 'a1', property: 'prop:name'},
           right: {kind: 'literal_expr', value: 'Moa'}
         }
       }
@@ -196,12 +194,11 @@ DSL: `Person.select((p) => p.friends.size())`
 {
   projection: [
     {
-      kind: 'projection_item',
       alias: 'a1',
       expression: {
         kind: 'aggregate_expr',
         name: 'count',
-        args: [{kind: 'property_expr', sourceAlias: 'a0', property: {propertyShapeId: 'prop:friends'}}]
+        args: [{kind: 'property_expr', sourceAlias: 'a0', property: 'prop:friends'}]
       }
     }
   ]
@@ -217,19 +214,16 @@ The sub-select's custom keys appear in the `resultMap`:
 ```ts
 {
   patterns: [
-    {kind: 'traverse', from: 'a0', to: 'a1', property: {propertyShapeId: 'prop:friends'}}
+    {kind: 'traverse', from: 'a0', to: 'a1', property: 'prop:friends'}
   ],
   projection: [
-    {kind: 'projection_item', alias: 'a2', expression: {kind: 'property_expr', sourceAlias: 'a1', property: {propertyShapeId: 'prop:name'}}},
-    {kind: 'projection_item', alias: 'a3', expression: {kind: 'property_expr', sourceAlias: 'a1', property: {propertyShapeId: 'prop:hobby'}}}
+    {alias: 'a2', expression: {kind: 'property_expr', sourceAlias: 'a1', property: 'prop:name'}},
+    {alias: 'a3', expression: {kind: 'property_expr', sourceAlias: 'a1', property: 'prop:hobby'}}
   ],
-  resultMap: {
-    kind: 'result_map',
-    entries: [
-      {key: 'name', alias: 'a2'},
-      {key: 'hobby', alias: 'a3'}
-    ]
-  }
+  resultMap: [
+    {key: 'name', alias: 'a2'},
+    {key: 'hobby', alias: 'a3'}
+  ]
 }
 ```
 
@@ -242,10 +236,10 @@ Type casting does not produce a separate IR node. The cast changes which propert
 ```ts
 {
   patterns: [
-    {kind: 'traverse', from: 'a0', to: 'a1', property: {propertyShapeId: 'prop:pets'}}
+    {kind: 'traverse', from: 'a0', to: 'a1', property: 'prop:pets'}
   ],
   projection: [
-    {kind: 'projection_item', alias: 'a2', expression: {kind: 'property_expr', sourceAlias: 'a1', property: {propertyShapeId: 'prop:guardDogLevel'}}}
+    {alias: 'a2', expression: {kind: 'property_expr', sourceAlias: 'a1', property: 'prop:guardDogLevel'}}
   ]
 }
 ```
@@ -258,8 +252,7 @@ DSL: `Person.select((p) => p.name).sortBy((p) => p.name, 'DESC')`
 {
   orderBy: [
     {
-      kind: 'order_by_item',
-      expression: {kind: 'property_expr', sourceAlias: 'a0', property: {propertyShapeId: 'prop:name'}},
+      expression: {kind: 'property_expr', sourceAlias: 'a0', property: 'prop:name'},
       direction: 'DESC'
     }
   ]
@@ -287,7 +280,7 @@ DSL: `Person.select({id: 'node:1'}, (p) => p.name)`
 | `join` | `patterns[]` | Combine multiple patterns |
 | `optional` | `pattern` | Left-outer-join semantics |
 | `union` | `branches[]` | OR-union of patterns |
-| `exists_pattern` | `pattern` | Existence check pattern |
+| `exists` | `pattern` | Existence check pattern |
 
 ## Expression types
 
@@ -311,18 +304,18 @@ DSL: `Person.create({name: 'Alice'})`
 
 ```ts
 {
-  kind: 'create_mutation',
-  shape: {shapeId: 'shape:Person'},
-  description: {
-    shape: {shapeId: 'shape:Person'},
+  kind: 'create',
+  shape: 'shape:Person',
+  data: {
+    shape: 'shape:Person',
     fields: [
-      {property: {propertyShapeId: 'prop:name'}, value: 'Alice'}
+      {property: 'prop:name', value: 'Alice'}
     ]
   }
 }
 ```
 
-Nested creates produce nested `IRNodeDescription` objects in field values. ID references are `{id: string}` objects.
+Nested creates produce nested `IRNodeData` objects in field values. ID references are `{id: string}` objects.
 
 ### Update
 
@@ -330,13 +323,13 @@ DSL: `Person.update({id: 'node:1'}, {name: 'Alicia'})`
 
 ```ts
 {
-  kind: 'update_mutation',
-  shape: {shapeId: 'shape:Person'},
+  kind: 'update',
+  shape: 'shape:Person',
   id: 'node:1',
-  updates: {
-    shape: {shapeId: 'shape:Person'},
+  data: {
+    shape: 'shape:Person',
     fields: [
-      {property: {propertyShapeId: 'prop:name'}, value: 'Alicia'}
+      {property: 'prop:name', value: 'Alicia'}
     ]
   }
 }
@@ -346,7 +339,7 @@ Set modifications use `{add?: [...], remove?: [...]}` instead of a direct value:
 
 ```ts
 {
-  property: {propertyShapeId: 'prop:friends'},
+  property: 'prop:friends',
   value: {
     add: [{id: 'node:2'}],
     remove: [{id: 'node:3'}]
@@ -362,8 +355,8 @@ DSL: `Person.delete({id: 'node:1'})`
 
 ```ts
 {
-  kind: 'delete_mutation',
-  shape: {shapeId: 'shape:Person'},
+  kind: 'delete',
+  shape: 'shape:Person',
   ids: [{id: 'node:1'}]
 }
 ```

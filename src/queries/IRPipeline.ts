@@ -7,7 +7,7 @@ const isIRSelectQuery = (query: unknown): query is IRSelectQuery =>
   !!query &&
   typeof query === 'object' &&
   'kind' in query &&
-  (query as IRSelectQuery).kind === 'select_query';
+  (query as IRSelectQuery).kind === 'select';
 
 export const buildSelectQuery = (query: RawSelectInput | IRSelectQuery): IRSelectQuery => {
   if (isIRSelectQuery(query)) {

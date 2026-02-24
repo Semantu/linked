@@ -1,20 +1,15 @@
 import {DesugaredSelectionPath} from './IRDesugar.js';
 import {IRAliasScope} from './IRAliasScope.js';
-import {IRExpression, IRProjectionItem, IRResultMap} from './IntermediateRepresentation.js';
+import {IRExpression, IRProjectionItem, IRResultMapEntry} from './IntermediateRepresentation.js';
 
 export type ProjectionPathLoweringOptions = {
   rootAlias: string;
   resolveTraversal: (fromAlias: string, propertyShapeId: string) => string;
 };
 
-export type CanonicalResultMapEntry = {
-  key: string;
-  alias: string;
-};
-
 export type CanonicalProjectionResult = {
   projection: IRProjectionItem[];
-  resultMap?: IRResultMap;
+  resultMap?: IRResultMapEntry[];
 };
 
 export type ProjectionPathInput =
@@ -52,7 +47,7 @@ export const lowerSelectionPathExpression = (
         return {
           kind: 'property_expr',
           sourceAlias: currentAlias,
-          property: {propertyShapeId: step.propertyShapeId},
+          property: step.propertyShapeId,
         };
       }
 
@@ -67,7 +62,7 @@ export const lowerSelectionPathExpression = (
         args: step.path.map((propertyStep) => ({
           kind: 'property_expr',
           sourceAlias: currentAlias,
-          property: {propertyShapeId: propertyStep.propertyShapeId},
+          property: propertyStep.propertyShapeId,
         })),
       };
     }
@@ -82,7 +77,7 @@ export const buildCanonicalProjection = (
   scope = new IRAliasScope('projection'),
 ): CanonicalProjectionResult => {
   const projection: IRProjectionItem[] = [];
-  const entries: CanonicalResultMapEntry[] = [];
+  const entries: IRResultMapEntry[] = [];
 
   selections.forEach((selection) => {
     const path = 'path' in selection ? selection.path : selection;
@@ -90,7 +85,6 @@ export const buildCanonicalProjection = (
     const resultKey = key || projectionKeyFromPath(path);
     const binding = scope.generateAlias(resultKey);
     projection.push({
-      kind: 'projection_item',
       alias: binding.alias,
       expression: lowerSelectionPathExpression(path, options),
     });
@@ -102,9 +96,6 @@ export const buildCanonicalProjection = (
 
   return {
     projection,
-    resultMap: {
-      kind: 'result_map',
-      entries,
-    },
+    resultMap: entries,
   };
 };

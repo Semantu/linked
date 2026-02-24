@@ -51,7 +51,7 @@ class LoweringContext {
       kind: 'traverse',
       from: fromAlias,
       to: toAlias,
-      property: {propertyShapeId},
+      property: propertyShapeId,
     });
     this.traverseMap.set(key, toAlias);
     return toAlias;
@@ -148,7 +148,7 @@ const lowerWhere = (
           kind: 'traverse',
           from: fromAlias,
           to: toAlias,
-          property: {propertyShapeId},
+          property: propertyShapeId,
         });
         localTraversalMap.set(key, toAlias);
         return toAlias;
@@ -218,7 +218,7 @@ export const lowerSelectQuery = (
 
   const root: IRShapeScanPattern = {
     kind: 'shape_scan',
-    shape: {shapeId: canonical.shapeId || ''},
+    shape: canonical.shapeId || '',
     alias: ctx.rootAlias,
   };
 
@@ -297,7 +297,6 @@ export const lowerSelectQuery = (
       : seed.key;
     const alias = projectionScope.generateAlias(key).alias;
     projection.push({
-      kind: 'projection_item' as const,
       alias,
       expression: seed.kind === 'path'
         ? lowerSelectionPathExpression(seed.path, pathOptions)
@@ -313,14 +312,13 @@ export const lowerSelectQuery = (
 
   const orderBy: IROrderByItem[] | undefined = canonical.sortBy
     ? canonical.sortBy.paths.map((path) => ({
-        kind: 'order_by_item',
         expression: lowerPath(path, pathOptions),
         direction: canonical.sortBy.direction,
       }))
     : undefined;
 
   return {
-    kind: 'select_query',
+    kind: 'select',
     root,
     patterns: ctx.getPatterns(),
     projection,
@@ -330,6 +328,6 @@ export const lowerSelectQuery = (
     offset: canonical.offset,
     subjectId: canonical.subjectId,
     singleResult: canonical.singleResult,
-    resultMap: {kind: 'result_map', entries: resultMapEntries},
+    resultMap: resultMapEntries,
   };
 };

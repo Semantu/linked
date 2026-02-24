@@ -13,21 +13,20 @@ const expectType = <T>(_value: T) => _value;
 describe.skip('intermediate representation type contracts (compile only)', () => {
   test('select query discriminators and required fields', () => {
     const query: IRSelectQuery = {
-      kind: 'select_query',
+      kind: 'select',
       root: {
         kind: 'shape_scan',
-        shape: {shapeId: 'shape:Person'},
+        shape: 'shape:Person',
         alias: 'p',
       },
       patterns: [],
       projection: [
         {
-          kind: 'projection_item',
           alias: 'name',
           expression: {
             kind: 'property_expr',
             sourceAlias: 'p',
-            property: {propertyShapeId: 'prop:name'},
+            property: 'prop:name',
           },
         },
       ],
@@ -37,14 +36,14 @@ describe.skip('intermediate representation type contracts (compile only)', () =>
         left: {
           kind: 'property_expr',
           sourceAlias: 'p',
-          property: {propertyShapeId: 'prop:name'},
+          property: 'prop:name',
         },
         right: {kind: 'literal_expr', value: 'Semmy'},
       },
     };
 
-    expectType<'select_query'>(query.kind);
-    expectType<string>(query.root.shape.shapeId);
+    expectType<'select'>(query.kind);
+    expectType<string>(query.root.shape);
   });
 
   test('graph pattern and expression unions are discriminated', () => {
@@ -53,14 +52,14 @@ describe.skip('intermediate representation type contracts (compile only)', () =>
       patterns: [
         {
           kind: 'shape_scan',
-          shape: {shapeId: 'shape:Person'},
+          shape: 'shape:Person',
           alias: 'p',
         },
         {
           kind: 'traverse',
           from: 'p',
           to: 'f',
-          property: {propertyShapeId: 'prop:friends'},
+          property: 'prop:friends',
         },
       ],
     };
@@ -75,13 +74,13 @@ describe.skip('intermediate representation type contracts (compile only)', () =>
 
   test('mutation kinds stay distinct', () => {
     const create: IRCreateMutation = {
-      kind: 'create_mutation',
-      shape: {shapeId: 'shape:Person'},
-      description: {
-        shape: {shapeId: 'shape:Person'},
+      kind: 'create',
+      shape: 'shape:Person',
+      data: {
+        shape: 'shape:Person',
         fields: [
           {
-            property: {propertyShapeId: 'prop:name'},
+            property: 'prop:name',
             value: 'Alice',
           },
         ],
@@ -89,14 +88,14 @@ describe.skip('intermediate representation type contracts (compile only)', () =>
     };
 
     const update: IRUpdateMutation = {
-      kind: 'update_mutation',
-      shape: {shapeId: 'shape:Person'},
+      kind: 'update',
+      shape: 'shape:Person',
       id: 'id:1',
-      updates: {
-        shape: {shapeId: 'shape:Person'},
+      data: {
+        shape: 'shape:Person',
         fields: [
           {
-            property: {propertyShapeId: 'prop:name'},
+            property: 'prop:name',
             value: 'Alicia',
           },
         ],
@@ -104,13 +103,13 @@ describe.skip('intermediate representation type contracts (compile only)', () =>
     };
 
     const del: IRDeleteMutation = {
-      kind: 'delete_mutation',
-      shape: {shapeId: 'shape:Person'},
+      kind: 'delete',
+      shape: 'shape:Person',
       ids: [{id: 'id:1'}],
     };
 
-    expectType<'create_mutation'>(create.kind);
-    expectType<'update_mutation'>(update.kind);
-    expectType<'delete_mutation'>(del.kind);
+    expectType<'create'>(create.kind);
+    expectType<'update'>(update.kind);
+    expectType<'delete'>(del.kind);
   });
 });

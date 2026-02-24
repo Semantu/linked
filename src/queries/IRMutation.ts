@@ -11,8 +11,8 @@ import {
   IRCreateMutation,
   IRDeleteMutation,
   IRFieldValue,
-  IRNodeDescription,
-  IRNodeFieldUpdate,
+  IRNodeData,
+  IRFieldUpdate,
   IRSetModificationValue,
   IRUpdateMutation,
 } from './IntermediateRepresentation.js';
@@ -64,7 +64,7 @@ const toSingleFieldValue = (value: SinglePropertyUpdateValue): IRFieldValue => {
     return toNodeReference(value as NodeReferenceValue);
   }
 
-  return toNodeDescription(value as NodeDescriptionValue);
+  return toNodeData(value as NodeDescriptionValue);
 };
 
 const toFieldValue = (value: PropUpdateValue): IRFieldValue => {
@@ -79,17 +79,17 @@ const toFieldValue = (value: PropUpdateValue): IRFieldValue => {
   return toSingleFieldValue(value);
 };
 
-const toNodeField = (field: NodeDescriptionValue['fields'][number]): IRNodeFieldUpdate => {
+const toFieldUpdate = (field: NodeDescriptionValue['fields'][number]): IRFieldUpdate => {
   return {
-    property: {propertyShapeId: field.prop.id},
+    property: field.prop.id,
     value: toFieldValue(field.val),
   };
 };
 
-const toNodeDescription = (description: NodeDescriptionValue): IRNodeDescription => {
+const toNodeData = (description: NodeDescriptionValue): IRNodeData => {
   return {
-    shape: {shapeId: description.shape.id},
-    fields: description.fields.map(toNodeField),
+    shape: description.shape.id,
+    fields: description.fields.map(toFieldUpdate),
     ...(description.__id ? {id: description.__id} : {}),
   };
 };
@@ -98,9 +98,9 @@ export const buildCanonicalCreateMutationIR = (
   query: CreateMutationInput,
 ): IRCreateMutation => {
   return {
-    kind: 'create_mutation',
-    shape: {shapeId: query.shape.id},
-    description: toNodeDescription(query.description),
+    kind: 'create',
+    shape: query.shape.id,
+    data: toNodeData(query.description),
   };
 };
 
@@ -108,10 +108,10 @@ export const buildCanonicalUpdateMutationIR = (
   query: UpdateMutationInput,
 ): IRUpdateMutation => {
   return {
-    kind: 'update_mutation',
-    shape: {shapeId: query.shape.id},
+    kind: 'update',
+    shape: query.shape.id,
     id: query.id,
-    updates: toNodeDescription(query.updates),
+    data: toNodeData(query.updates),
   };
 };
 
@@ -119,9 +119,8 @@ export const buildCanonicalDeleteMutationIR = (
   query: DeleteMutationInput,
 ): IRDeleteMutation => {
   return {
-    kind: 'delete_mutation',
-    shape: {shapeId: query.shape.id},
+    kind: 'delete',
+    shape: query.shape.id,
     ids: query.ids.map((id) => ({id: id.id})),
   };
 };
-

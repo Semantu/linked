@@ -1,4 +1,4 @@
-import {describe, expect, test} from '@jest/globals';
+import { describe, expect, test } from "@jest/globals";
 import {
   Dog,
   Employee,
@@ -6,35 +6,38 @@ import {
   Pet,
   queryFactories,
   tmpEntityBase,
-} from '../test-helpers/query-fixtures';
-import {QueryCaptureStore, captureQuery as _captureQuery} from '../test-helpers/query-capture-store';
-import {buildSelectQuery} from '../queries/IRPipeline';
-import type {SelectQuery} from '../queries/SelectQuery';
-import {setQueryContext} from '../queries/QueryContext';
+} from "../test-helpers/query-fixtures";
+import {
+  QueryCaptureStore,
+  captureQuery as _captureQuery,
+} from "../test-helpers/query-capture-store";
+import { buildSelectQuery } from "../queries/IRPipeline";
+import type { SelectQuery } from "../queries/SelectQuery";
+import { setQueryContext } from "../queries/QueryContext";
 
 const store = new QueryCaptureStore();
 Person.queryParser = store;
 Pet.queryParser = store;
 Dog.queryParser = store;
 Employee.queryParser = store;
-setQueryContext('user', {id: 'user-1'}, Person);
+setQueryContext("user", { id: "user-1" }, Person);
 
 const sanitize = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map((item) => sanitize(item));
-  if (value && typeof value === 'object') {
+  if (value && typeof value === "object") {
     return Object.entries(value as Record<string, unknown>).reduce(
       (acc, [key, child]) => {
         if (child !== undefined) acc[key] = sanitize(child);
         return acc;
       },
-      {} as Record<string, unknown>,
+      {} as Record<string, unknown>
     );
   }
   return value;
 };
 
 const captureIR = async (
-  runner: () => Promise<unknown>,
+  runner: () => Promise<unknown>
 ): Promise<SelectQuery> => {
   const query = await _captureQuery(store, runner);
   return sanitize(buildSelectQuery(query)) as SelectQuery;
@@ -47,10 +50,10 @@ type SelectCase = {
   exactProjection?: number;
   minPatterns?: number;
   hasWhere?: boolean;
-  whereKind?: 'binary_expr' | 'logical_expr' | 'exists_expr' | 'not_expr';
+  whereKind?: "binary_expr" | "logical_expr" | "exists_expr" | "not_expr";
   singleResult?: boolean;
   subjectId?: string;
-  orderByDirection?: 'ASC' | 'DESC';
+  orderByDirection?: "ASC" | "DESC";
   limit?: number;
   requireAggregate?: boolean;
   expectedRootShapeId?: string;
@@ -58,18 +61,17 @@ type SelectCase = {
 };
 
 const assertSelectCase = (ir: SelectQuery, testCase: SelectCase) => {
-  expect(ir.kind).toBe('select_query');
-  expect(ir.root.kind).toBe('shape_scan');
+  expect(ir.kind).toBe("select");
+  expect(ir.root.kind).toBe("shape_scan");
   expect(ir.root.alias).toBeDefined();
   expect(Array.isArray(ir.patterns)).toBe(true);
   expect(Array.isArray(ir.projection)).toBe(true);
-  expect(ir.resultMap?.kind).toBe('result_map');
-  expect(ir.resultMap?.entries.length).toBe(ir.projection.length);
+  expect(ir.resultMap?.length).toBe(ir.projection.length);
 
   if (testCase.expectedRootShapeId) {
-    expect(ir.root.shape.shapeId).toBe(testCase.expectedRootShapeId);
+    expect(ir.root.shape).toBe(testCase.expectedRootShapeId);
   } else {
-    expect(ir.root.shape.shapeId).toBeDefined();
+    expect(ir.root.shape).toBeDefined();
   }
 
   if (testCase.exactProjection !== undefined) {
@@ -111,12 +113,12 @@ const assertSelectCase = (ir: SelectQuery, testCase: SelectCase) => {
 
   if (testCase.requireAggregate) {
     expect(
-      ir.projection.some((item) => item.expression.kind === 'aggregate_expr'),
+      ir.projection.some((item) => item.expression.kind === "aggregate_expr")
     ).toBe(true);
   }
 
   if (testCase.requiredResultKeys?.length) {
-    const keys = ir.resultMap?.entries.map((entry) => entry.key) ?? [];
+    const keys = ir.resultMap?.map((entry) => entry.key) ?? [];
     testCase.requiredResultKeys.forEach((key) => {
       expect(keys).toContain(key);
     });
@@ -124,33 +126,49 @@ const assertSelectCase = (ir: SelectQuery, testCase: SelectCase) => {
 };
 
 const basicCases: SelectCase[] = [
-  {name: 'selectName', run: () => queryFactories.selectName(), minProjection: 1},
-  {name: 'selectFriends', run: () => queryFactories.selectFriends(), minProjection: 1},
-  {name: 'selectBirthDate', run: () => queryFactories.selectBirthDate(), minProjection: 1},
-  {name: 'selectIsRealPerson', run: () => queryFactories.selectIsRealPerson(), minProjection: 1},
   {
-    name: 'selectById',
+    name: "selectName",
+    run: () => queryFactories.selectName(),
+    minProjection: 1,
+  },
+  {
+    name: "selectFriends",
+    run: () => queryFactories.selectFriends(),
+    minProjection: 1,
+  },
+  {
+    name: "selectBirthDate",
+    run: () => queryFactories.selectBirthDate(),
+    minProjection: 1,
+  },
+  {
+    name: "selectIsRealPerson",
+    run: () => queryFactories.selectIsRealPerson(),
+    minProjection: 1,
+  },
+  {
+    name: "selectById",
     run: () => queryFactories.selectById(),
     minProjection: 1,
     singleResult: true,
     subjectId: `${tmpEntityBase}p1`,
   },
   {
-    name: 'selectByIdReference',
+    name: "selectByIdReference",
     run: () => queryFactories.selectByIdReference(),
     minProjection: 1,
     singleResult: true,
     subjectId: `${tmpEntityBase}p1`,
   },
   {
-    name: 'selectNonExisting',
+    name: "selectNonExisting",
     run: () => queryFactories.selectNonExisting(),
     minProjection: 1,
     singleResult: true,
-    subjectId: 'https://does.not/exist',
+    subjectId: "https://does.not/exist",
   },
   {
-    name: 'selectUndefinedOnly',
+    name: "selectUndefinedOnly",
     run: () => queryFactories.selectUndefinedOnly(),
     minProjection: 2,
     singleResult: true,
@@ -160,31 +178,31 @@ const basicCases: SelectCase[] = [
 
 const nestedCases: SelectCase[] = [
   {
-    name: 'selectFriendsName',
+    name: "selectFriendsName",
     run: () => queryFactories.selectFriendsName(),
     minProjection: 1,
     minPatterns: 1,
   },
   {
-    name: 'selectNestedFriendsName',
+    name: "selectNestedFriendsName",
     run: () => queryFactories.selectNestedFriendsName(),
     minProjection: 1,
     minPatterns: 2,
   },
   {
-    name: 'selectMultiplePaths',
+    name: "selectMultiplePaths",
     run: () => queryFactories.selectMultiplePaths(),
     exactProjection: 3,
     minPatterns: 1,
   },
   {
-    name: 'selectBestFriendName',
+    name: "selectBestFriendName",
     run: () => queryFactories.selectBestFriendName(),
     minProjection: 1,
     minPatterns: 1,
   },
   {
-    name: 'selectDeepNested',
+    name: "selectDeepNested",
     run: () => queryFactories.selectDeepNested(),
     minProjection: 1,
     minPatterns: 3,
@@ -193,195 +211,203 @@ const nestedCases: SelectCase[] = [
 
 const filteringCases: SelectCase[] = [
   {
-    name: 'whereFriendsNameEquals',
+    name: "whereFriendsNameEquals",
     run: () => queryFactories.whereFriendsNameEquals(),
     minProjection: 1,
   },
   {
-    name: 'whereBestFriendEquals',
+    name: "whereBestFriendEquals",
     run: () => queryFactories.whereBestFriendEquals(),
     hasWhere: true,
-    whereKind: 'binary_expr',
+    whereKind: "binary_expr",
     exactProjection: 0,
   },
   {
-    name: 'whereHobbyEquals',
+    name: "whereHobbyEquals",
     run: () => queryFactories.whereHobbyEquals(),
     minProjection: 1,
   },
-  {name: 'whereAnd', run: () => queryFactories.whereAnd(), minProjection: 1},
-  {name: 'whereOr', run: () => queryFactories.whereOr(), minProjection: 1},
-  {name: 'selectAll', run: () => queryFactories.selectAll(), exactProjection: 0},
+  { name: "whereAnd", run: () => queryFactories.whereAnd(), minProjection: 1 },
+  { name: "whereOr", run: () => queryFactories.whereOr(), minProjection: 1 },
   {
-    name: 'selectAllProperties',
+    name: "selectAll",
+    run: () => queryFactories.selectAll(),
+    exactProjection: 0,
+  },
+  {
+    name: "selectAllProperties",
     run: () => queryFactories.selectAllProperties(),
     minProjection: 10,
   },
   {
-    name: 'selectAllEmployeeProperties',
+    name: "selectAllEmployeeProperties",
     run: () => queryFactories.selectAllEmployeeProperties(),
     minProjection: 10,
     expectedRootShapeId: Employee.shape.id,
   },
   {
-    name: 'selectWhereNameSemmy',
+    name: "selectWhereNameSemmy",
     run: () => queryFactories.selectWhereNameSemmy(),
     hasWhere: true,
-    whereKind: 'binary_expr',
+    whereKind: "binary_expr",
     exactProjection: 0,
   },
-  {name: 'whereAndOrAnd', run: () => queryFactories.whereAndOrAnd(), minProjection: 1},
   {
-    name: 'whereAndOrAndNested',
+    name: "whereAndOrAnd",
+    run: () => queryFactories.whereAndOrAnd(),
+    minProjection: 1,
+  },
+  {
+    name: "whereAndOrAndNested",
     run: () => queryFactories.whereAndOrAndNested(),
     minProjection: 1,
   },
   {
-    name: 'whereSomeImplicit',
+    name: "whereSomeImplicit",
     run: () => queryFactories.whereSomeImplicit(),
     hasWhere: true,
-    whereKind: 'binary_expr',
+    whereKind: "binary_expr",
     exactProjection: 0,
   },
   {
-    name: 'whereSomeExplicit',
+    name: "whereSomeExplicit",
     run: () => queryFactories.whereSomeExplicit(),
     hasWhere: true,
-    whereKind: 'exists_expr',
+    whereKind: "exists_expr",
     exactProjection: 0,
   },
   {
-    name: 'whereEvery',
+    name: "whereEvery",
     run: () => queryFactories.whereEvery(),
     hasWhere: true,
-    whereKind: 'not_expr',
+    whereKind: "not_expr",
     exactProjection: 0,
   },
   {
-    name: 'whereSequences',
+    name: "whereSequences",
     run: () => queryFactories.whereSequences(),
     hasWhere: true,
-    whereKind: 'logical_expr',
+    whereKind: "logical_expr",
     exactProjection: 0,
   },
   {
-    name: 'outerWhere',
+    name: "outerWhere",
     run: () => queryFactories.outerWhere(),
     hasWhere: true,
-    whereKind: 'binary_expr',
+    whereKind: "binary_expr",
     minProjection: 1,
   },
   {
-    name: 'whereWithContext',
+    name: "whereWithContext",
     run: () => queryFactories.whereWithContext(),
     hasWhere: true,
-    whereKind: 'binary_expr',
+    whereKind: "binary_expr",
     minProjection: 1,
   },
   {
-    name: 'whereWithContextPath',
+    name: "whereWithContextPath",
     run: () => queryFactories.whereWithContextPath(),
     hasWhere: true,
-    whereKind: 'exists_expr',
+    whereKind: "exists_expr",
     minProjection: 1,
   },
 ];
 
 const aggregationCases: SelectCase[] = [
   {
-    name: 'countFriends',
+    name: "countFriends",
     run: () => queryFactories.countFriends(),
     exactProjection: 1,
     requireAggregate: true,
   },
   {
-    name: 'countNestedFriends',
+    name: "countNestedFriends",
     run: () => queryFactories.countNestedFriends(),
     exactProjection: 1,
     minPatterns: 1,
     requireAggregate: true,
   },
   {
-    name: 'countLabel',
+    name: "countLabel",
     run: () => queryFactories.countLabel(),
     exactProjection: 1,
     minPatterns: 1,
     requireAggregate: true,
-    requiredResultKeys: ['numFriends'],
+    requiredResultKeys: ["numFriends"],
   },
   {
-    name: 'nestedObjectProperty',
+    name: "nestedObjectProperty",
     run: () => queryFactories.nestedObjectProperty(),
     exactProjection: 1,
     minPatterns: 1,
   },
   {
-    name: 'nestedObjectPropertySingle',
+    name: "nestedObjectPropertySingle",
     run: () => queryFactories.nestedObjectPropertySingle(),
     exactProjection: 1,
     minPatterns: 1,
   },
   {
-    name: 'subSelectSingleProp',
+    name: "subSelectSingleProp",
     run: () => queryFactories.subSelectSingleProp(),
     exactProjection: 1,
     minPatterns: 1,
-    requiredResultKeys: ['name'],
+    requiredResultKeys: ["name"],
   },
   {
-    name: 'subSelectPluralCustom',
+    name: "subSelectPluralCustom",
     run: () => queryFactories.subSelectPluralCustom(),
     exactProjection: 2,
     minPatterns: 1,
-    requiredResultKeys: ['name', 'hobby'],
+    requiredResultKeys: ["name", "hobby"],
   },
   {
-    name: 'subSelectAllProperties',
+    name: "subSelectAllProperties",
     run: () => queryFactories.subSelectAllProperties(),
     minProjection: 10,
     minPatterns: 1,
   },
   {
-    name: 'subSelectAllPropertiesSingle',
+    name: "subSelectAllPropertiesSingle",
     run: () => queryFactories.subSelectAllPropertiesSingle(),
     minProjection: 10,
     minPatterns: 1,
   },
   {
-    name: 'doubleNestedSubSelect',
+    name: "doubleNestedSubSelect",
     run: () => queryFactories.doubleNestedSubSelect(),
     exactProjection: 1,
     minPatterns: 2,
-    requiredResultKeys: ['name'],
+    requiredResultKeys: ["name"],
   },
   {
-    name: 'subSelectAllPrimitives',
+    name: "subSelectAllPrimitives",
     run: () => queryFactories.subSelectAllPrimitives(),
     exactProjection: 3,
     minPatterns: 1,
   },
   {
-    name: 'customResultEqualsBoolean',
+    name: "customResultEqualsBoolean",
     run: () => queryFactories.customResultEqualsBoolean(),
     exactProjection: 1,
-    requiredResultKeys: ['isBestFriend'],
+    requiredResultKeys: ["isBestFriend"],
   },
   {
-    name: 'customResultNumFriends',
+    name: "customResultNumFriends",
     run: () => queryFactories.customResultNumFriends(),
     exactProjection: 1,
     requireAggregate: true,
-    requiredResultKeys: ['numFriends'],
+    requiredResultKeys: ["numFriends"],
   },
   {
-    name: 'countEquals',
+    name: "countEquals",
     run: () => queryFactories.countEquals(),
     hasWhere: true,
-    whereKind: 'binary_expr',
+    whereKind: "binary_expr",
     exactProjection: 0,
   },
   {
-    name: 'subSelectArray',
+    name: "subSelectArray",
     run: () => queryFactories.subSelectArray(),
     exactProjection: 2,
     minPatterns: 1,
@@ -390,38 +416,38 @@ const aggregationCases: SelectCase[] = [
 
 const transformationCases: SelectCase[] = [
   {
-    name: 'selectShapeSetAs',
+    name: "selectShapeSetAs",
     run: () => queryFactories.selectShapeSetAs(),
     exactProjection: 1,
     minPatterns: 1,
   },
   {
-    name: 'selectNonExistingMultiple',
+    name: "selectNonExistingMultiple",
     run: () => queryFactories.selectNonExistingMultiple(),
     exactProjection: 2,
   },
   {
-    name: 'selectShapeAs',
+    name: "selectShapeAs",
     run: () => queryFactories.selectShapeAs(),
     exactProjection: 1,
     minPatterns: 1,
   },
   {
-    name: 'selectOne',
+    name: "selectOne",
     run: () => queryFactories.selectOne(),
     hasWhere: true,
-    whereKind: 'binary_expr',
+    whereKind: "binary_expr",
     exactProjection: 1,
     singleResult: true,
   },
   {
-    name: 'nestedQueries2',
+    name: "nestedQueries2",
     run: () => queryFactories.nestedQueries2(),
     minProjection: 1,
     minPatterns: 1,
   },
   {
-    name: 'selectDuplicatePaths',
+    name: "selectDuplicatePaths",
     run: () => queryFactories.selectDuplicatePaths(),
     exactProjection: 3,
     minPatterns: 1,
@@ -430,7 +456,7 @@ const transformationCases: SelectCase[] = [
 
 const preloadCases: SelectCase[] = [
   {
-    name: 'preloadBestFriend',
+    name: "preloadBestFriend",
     run: () => queryFactories.preloadBestFriend(),
     minProjection: 1,
     minPatterns: 1,
@@ -439,88 +465,78 @@ const preloadCases: SelectCase[] = [
 
 const sortingCases: SelectCase[] = [
   {
-    name: 'outerWhereLimit',
+    name: "outerWhereLimit",
     run: () => queryFactories.outerWhereLimit(),
     hasWhere: true,
-    whereKind: 'logical_expr',
+    whereKind: "logical_expr",
     exactProjection: 1,
     limit: 1,
   },
   {
-    name: 'sortByAsc',
+    name: "sortByAsc",
     run: () => queryFactories.sortByAsc(),
     exactProjection: 1,
-    orderByDirection: 'ASC',
+    orderByDirection: "ASC",
   },
   {
-    name: 'sortByDesc',
+    name: "sortByDesc",
     run: () => queryFactories.sortByDesc(),
     exactProjection: 1,
-    orderByDirection: 'DESC',
+    orderByDirection: "DESC",
   },
 ];
 
-describe('select canonical IR golden fixtures', () => {
-  test('basic selection fixture', async () => {
+describe("select canonical IR golden fixtures", () => {
+  test("basic selection fixture", async () => {
     const actual = await captureIR(() => queryFactories.selectName());
     expect(actual).toMatchInlineSnapshot(`
       {
-        "kind": "select_query",
+        "kind": "select",
         "patterns": [],
         "projection": [
           {
             "alias": "a1",
             "expression": {
               "kind": "property_expr",
-              "property": {
-                "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-              },
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
               "sourceAlias": "a0",
             },
-            "kind": "projection_item",
           },
         ],
-        "resultMap": {
-          "entries": [
-            {
-              "alias": "a1",
-              "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-            },
-          ],
-          "kind": "result_map",
-        },
+        "resultMap": [
+          {
+            "alias": "a1",
+            "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          },
+        ],
         "root": {
           "alias": "a0",
           "kind": "shape_scan",
-          "shape": {
-            "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
-          },
+          "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
         },
         "singleResult": false,
       }
     `);
   });
 
-  test('nested selection fixture', async () => {
-    const actual = await captureIR(() => queryFactories.selectNestedFriendsName());
+  test("nested selection fixture", async () => {
+    const actual = await captureIR(() =>
+      queryFactories.selectNestedFriendsName()
+    );
     expect(actual).toMatchInlineSnapshot(`
       {
-        "kind": "select_query",
+        "kind": "select",
         "patterns": [
           {
             "from": "a0",
             "kind": "traverse",
-            "property": {
-              "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-            },
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
             "to": "a1",
           },
           {
             "from": "a1",
             "kind": "traverse",
-            "property": {
-              "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-            },
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
             "to": "a2",
           },
         ],
@@ -529,53 +545,40 @@ describe('select canonical IR golden fixtures', () => {
             "alias": "a1",
             "expression": {
               "kind": "property_expr",
-              "property": {
-                "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-              },
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
               "sourceAlias": "a2",
             },
-            "kind": "projection_item",
           },
         ],
-        "resultMap": {
-          "entries": [
-            {
-              "alias": "a1",
-              "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-            },
-          ],
-          "kind": "result_map",
-        },
+        "resultMap": [
+          {
+            "alias": "a1",
+            "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          },
+        ],
         "root": {
           "alias": "a0",
           "kind": "shape_scan",
-          "shape": {
-            "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
-          },
+          "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
         },
         "singleResult": false,
       }
     `);
   });
 
-  test('filtering fixture with normalized quantifier', async () => {
+  test("filtering fixture with normalized quantifier", async () => {
     const actual = await captureIR(() => queryFactories.whereSomeExplicit());
-    expect(actual.where?.kind).toBe('exists_expr');
+    expect(actual.where?.kind).toBe("exists_expr");
     expect(actual).toMatchInlineSnapshot(`
       {
-        "kind": "select_query",
+        "kind": "select",
         "patterns": [],
         "projection": [],
-        "resultMap": {
-          "entries": [],
-          "kind": "result_map",
-        },
+        "resultMap": [],
         "root": {
           "alias": "a0",
           "kind": "shape_scan",
-          "shape": {
-            "shapeId": "https://data.lincd.org/module/-_linked-core/shape/person",
-          },
+          "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
         },
         "singleResult": false,
         "where": {
@@ -583,9 +586,7 @@ describe('select canonical IR golden fixtures', () => {
             "kind": "binary_expr",
             "left": {
               "kind": "property_expr",
-              "property": {
-                "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/name",
-              },
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
               "sourceAlias": "a1",
             },
             "operator": "=",
@@ -598,9 +599,7 @@ describe('select canonical IR golden fixtures', () => {
           "pattern": {
             "from": "a0",
             "kind": "traverse",
-            "property": {
-              "propertyShapeId": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
-            },
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
             "to": "a1",
           },
         },
@@ -609,7 +608,7 @@ describe('select canonical IR golden fixtures', () => {
   });
 });
 
-describe('select IR parity coverage (Phase 3)', () => {
+describe("select IR parity coverage (Phase 3)", () => {
   test.each([
     ...basicCases,
     ...nestedCases,
@@ -618,37 +617,37 @@ describe('select IR parity coverage (Phase 3)', () => {
     ...transformationCases,
     ...preloadCases,
     ...sortingCases,
-  ])('$name emits expected IR structure', async (testCase) => {
+  ])("$name emits expected IR structure", async (testCase) => {
     const actual = await captureIR(testCase.run);
     assertSelectCase(actual, testCase);
   });
 });
 
-describe('IR pipeline behavior', () => {
-  test('buildSelectQuery lowers raw select input to IR', async () => {
+describe("IR pipeline behavior", () => {
+  test("buildSelectQuery lowers raw select input to IR", async () => {
     const query = await _captureQuery(store, () => queryFactories.sortByDesc());
     const ir = buildSelectQuery(query);
 
-    expect(ir.kind).toBe('select_query');
-    expect(ir.root.kind).toBe('shape_scan');
+    expect(ir.kind).toBe("select");
+    expect(ir.root.kind).toBe("shape_scan");
     expect(ir.projection.length).toBe(1);
-    expect(ir.orderBy?.[0]?.direction).toBe('DESC');
+    expect(ir.orderBy?.[0]?.direction).toBe("DESC");
     expect(ir.limit).toBeUndefined();
   });
 
-  test('build() returns canonical IR', async () => {
+  test("build() returns canonical IR", async () => {
     const selectFactory = Person.query((p) => p.name).where((p) =>
-      p.name.equals('Semmy'),
+      p.name.equals("Semmy")
     );
 
     const ir = selectFactory.build();
 
-    expect(ir.kind).toBe('select_query');
+    expect(ir.kind).toBe("select");
     expect(ir.projection.length).toBe(1);
     expect(ir.where).toBeDefined();
   });
 
-  test('builder accepts already-lowered IR as pass-through', async () => {
+  test("builder accepts already-lowered IR as pass-through", async () => {
     const selectFactory = Person.query((p) => p.name);
     const ir = selectFactory.build();
 

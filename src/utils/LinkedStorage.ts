@@ -63,7 +63,7 @@ export abstract class LinkedStorage {
   }
 
   private static resolveStoreForQueryShape(
-    shape?: {id?: string; shapeId?: string} | typeof Shape | ShapeType | null,
+    shape?: string | typeof Shape | ShapeType | null,
   ): IQuadStore {
     if (!shape) {
       return this.defaultStore;
@@ -71,9 +71,8 @@ export abstract class LinkedStorage {
     if (typeof shape === 'function') {
       return this.getStoreForShapeClass(shape as typeof Shape);
     }
-    const shapeId = shape.id || shape.shapeId;
-    if (shapeId) {
-      const shapeClass = getShapeClass(shapeId);
+    if (typeof shape === 'string') {
+      const shapeClass = getShapeClass(shape);
       return this.getStoreForShapeClass(shapeClass);
     }
     return this.defaultStore;

@@ -22,7 +22,7 @@ describe('IR projection canonicalization (Phase 7)', () => {
     });
 
     expect(projection.projection).toHaveLength(3);
-    expect(projection.projection.every((item) => item.kind === 'projection_item')).toBe(true);
+    expect(projection.projection.every((item) => item.alias && item.expression)).toBe(true);
     expect(projection.projection.every((item) => item.expression.kind === 'property_expr')).toBe(true);
   });
 
@@ -56,8 +56,7 @@ describe('IR projection canonicalization (Phase 7)', () => {
       resolveTraversal: (fromAlias, propertyShapeId) => `${fromAlias}:${propertyShapeId}`,
     });
 
-    expect(projection.resultMap?.kind).toBe('result_map');
-    expect(projection.resultMap?.entries).toHaveLength(3);
-    expect(projection.resultMap?.entries[0].alias).toBe('a0');
+    expect(projection.resultMap).toHaveLength(3);
+    expect(projection.resultMap?.[0].alias).toBe('a0');
   });
 });
