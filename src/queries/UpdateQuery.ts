@@ -38,15 +38,9 @@ export class UpdateQueryFactory<
 
   build(): UpdateQuery {
     return buildCanonicalUpdateMutationIR({
-      type: 'update',
       id: this.id,
       shape: this.shapeClass.shape,
       updates: this.fields,
     });
-  }
-
-  /** @deprecated Use build() */
-  getQueryObject(): UpdateQuery {
-    return this.build();
   }
 }

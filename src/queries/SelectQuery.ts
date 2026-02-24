@@ -68,16 +68,6 @@ export type SortByPath = {
   direction: 'ASC' | 'DESC';
 };
 
-/**
- * A LinkedQuery is used to build a query, when complete it can be turned into a LinkedQueryObject
- * that is used to send across the network as it can be serialized to JSON
- * @todo add | UpdateQuery and others
- */
-export interface LinkedQuery {
-  type?: string;
-  kind?: string;
-}
-
 export type SubQueryPaths = SelectPath;
 
 /**
@@ -114,8 +104,7 @@ export type WhereAndOr = {
 };
 
 /**
- * A WhereQuery is a (sub)query that is used to filter down the results of its parent query
- * Hence it extends LinkedQuery and can do anything a normal query can
+ * A WhereQuery is a (sub)query that is used to filter down the results of its parent query.
  */
 export type AndOrQueryToken = {
   and?: WherePath;
@@ -930,24 +919,29 @@ export class BoundComponent<
       }
     }
     throw new Error(
-      'Unknown data query type. Expected a LinkedQuery (from Shape.query()) or an object with 1 key whose value is a LinkedQuery',
+      'Unknown data query type. Expected a SelectQueryFactory (from Shape.query()) or an object with 1 key whose value is a SelectQueryFactory',
     );
   }
 
   getPropertyPath() {
     let sourcePath: ComponentQueryPath = this.source.getPropertyPath();
     let requestQuery = this.getParentQueryFactory();
-    let compSelectQuery = requestQuery.getQueryPaths();
+    let compSelectQuery: SelectPath = requestQuery.getQueryPaths();
 
     if (Array.isArray(sourcePath)) {
-      const sel = compSelectQuery as any;
-      sourcePath.push(
-        sel.length === 1
-          ? sel[0].length === 1
-            ? sel[0][0]
-            : sel[0]
-          : sel,
-      );
+      if (Array.isArray(compSelectQuery)) {
+        // QueryPath[] — unwrap single-element arrays for compact representation
+        const unwrapped =
+          compSelectQuery.length === 1
+            ? Array.isArray(compSelectQuery[0]) && compSelectQuery[0].length === 1
+              ? compSelectQuery[0][0]
+              : compSelectQuery[0]
+            : compSelectQuery;
+        sourcePath.push(unwrapped as QueryStep | SubQueryPaths);
+      } else {
+        // CustomQueryObject
+        sourcePath.push(compSelectQuery);
+      }
     }
     return sourcePath as QueryPropertyPath;
   }
@@ -1761,20 +1755,6 @@ export class SelectQueryFactory<
   build(): SelectQuery {
     return buildSelectQuery(this.toRawInput());
   }
-
-  /** @deprecated Use build() */
-  getQueryObject(): SelectQuery {
-    return this.build();
-  }
-
-  /** @deprecated Use build() */
-  getIR(): SelectQuery {
-    return this.build();
-  }
-
-  // applyTo(subject) {
-  //   return new LinkedQuery(this.shape, this.queryBuildFn, subject);
-  // }
 
   getSubject() {
     //if the subject is a QueryShape which comes from query context

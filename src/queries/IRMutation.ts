@@ -17,32 +17,21 @@ import {
   IRUpdateMutation,
 } from './IntermediateRepresentation.js';
 
-/** Internal input type for the create mutation IR builder. */
 type CreateMutationInput = {
-  type: 'create';
   shape: NodeShape;
   description: NodeDescriptionValue;
 };
 
-/** Internal input type for the update mutation IR builder. */
 type UpdateMutationInput = {
-  type: 'update';
   id: string;
   shape: NodeShape;
   updates: NodeDescriptionValue;
 };
 
-/** Internal input type for the delete mutation IR builder. */
 type DeleteMutationInput = {
-  type: 'delete';
   shape: NodeShape;
   ids: NodeReferenceValue[];
 };
-
-export type CanonicalMutationIR =
-  | IRCreateMutation
-  | IRUpdateMutation
-  | IRDeleteMutation;
 
 const toNodeReference = (value: NodeReferenceValue): NodeReferenceValue => ({
   id: value.id,
@@ -136,16 +125,3 @@ export const buildCanonicalDeleteMutationIR = (
   };
 };
 
-export const buildCanonicalMutationIR = (
-  query: CreateMutationInput | UpdateMutationInput | DeleteMutationInput,
-): CanonicalMutationIR => {
-  if (query.type === 'create') {
-    return buildCanonicalCreateMutationIR(query);
-  }
-
-  if (query.type === 'update') {
-    return buildCanonicalUpdateMutationIR(query);
-  }
-
-  return buildCanonicalDeleteMutationIR(query);
-};

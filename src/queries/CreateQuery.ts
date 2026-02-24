@@ -33,14 +33,8 @@ export class CreateQueryFactory<
 
   build(): CreateQuery {
     return buildCanonicalCreateMutationIR({
-      type: 'create',
       shape: this.shapeClass.shape,
       description: this.description,
     });
-  }
-
-  /** @deprecated Use build() */
-  getQueryObject(): CreateQuery {
-    return this.build();
   }
 }

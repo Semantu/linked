@@ -46,14 +46,8 @@ export class DeleteQueryFactory<
 
   build(): DeleteQuery {
     return buildCanonicalDeleteMutationIR({
-      type: 'delete',
       shape: this.shapeClass.shape,
       ids: this.ids,
     });
-  }
-
-  /** @deprecated Use build() */
-  getQueryObject(): DeleteQuery {
-    return this.build();
   }
 }

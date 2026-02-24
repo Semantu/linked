@@ -1,4 +1,3 @@
-import {LinkedQuery} from './SelectQuery.js';
 import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {Shape} from '../shapes/Shape.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
@@ -229,11 +228,7 @@ export type ShapeReferenceValue = {id: string; shape: NodeReferenceValue};
 export {toNodeReference} from '../utils/NodeReference.js';
 export type {NodeReferenceValue};
 
-export abstract class QueryFactory {
-  getQueryObject(): LinkedQuery | Promise<LinkedQuery> {
-    return null;
-  }
-}
+export abstract class QueryFactory {}
 
 export function isSetModificationValue(
   value: any,
