@@ -10,6 +10,7 @@ import {xsd} from '../ontologies/xsd.js';
 import {
   buildSelectQueryIR,
 } from './IRPipeline.js';
+import type {RawSelectInput} from './IRDesugar.js';
 import type {IRSelectQuery} from './IntermediateRepresentation.js';
 
 /**
@@ -1781,7 +1782,24 @@ export class SelectQueryFactory<
   }
 
   build(): SelectQuery {
-    return buildSelectQueryIR(this.getLegacyQueryObject());
+    const input: RawSelectInput = {
+      select: this.getQueryPaths(),
+      subject: this.getSubject(),
+      limit: this.limit,
+      offset: this.offset,
+      shape: this.shape,
+      sortBy: this.getSortByPath() as SortByPath | undefined,
+      singleResult:
+        this.singleResult ||
+        !!(
+          this.subject &&
+          ('id' in (this.subject as S) || 'id' in (this.subject as QResult<S>))
+        ),
+    };
+    if (this.wherePath) {
+      input.where = this.wherePath;
+    }
+    return buildSelectQueryIR(input);
   }
 
   /** @deprecated Use build() */

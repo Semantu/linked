@@ -3,16 +3,32 @@ import {
   CustomQueryObject,
   isWhereEvaluationPath,
   JSNonNullPrimitive,
-  LegacySelectQuery,
   QueryPath,
   QueryStep,
   SelectPath,
   SizeStep,
+  SortByPath,
   WhereAndOr,
   WhereMethods,
   WherePath,
 } from './SelectQuery.js';
 import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
+
+/**
+ * Internal pipeline input type — captures exactly what the desugar pass
+ * needs from a select query factory. Replaces the old LegacySelectQuery
+ * as the pipeline entry point.
+ */
+export type RawSelectInput = {
+  select: SelectPath;
+  where?: WherePath;
+  sortBy?: SortByPath;
+  subject?: unknown;
+  shape?: unknown;
+  limit?: number;
+  offset?: number;
+  singleResult?: boolean;
+};
 
 export type DesugaredPropertyStep = {
   kind: 'property_step';
@@ -355,7 +371,7 @@ const toWhere = (path: WherePath): DesugaredWhere => {
 };
 
 
-const toSortBy = (query: LegacySelectQuery): DesugaredSortBy | undefined => {
+const toSortBy = (query: RawSelectInput): DesugaredSortBy | undefined => {
   if (!query.sortBy) {
     return undefined;
   }
@@ -366,7 +382,7 @@ const toSortBy = (query: LegacySelectQuery): DesugaredSortBy | undefined => {
   };
 };
 
-export const desugarSelectQuery = (query: LegacySelectQuery): DesugaredSelectQuery => {
+export const desugarSelectQuery = (query: RawSelectInput): DesugaredSelectQuery => {
   const selections = toSelections(query.select);
 
   const subjectId =
