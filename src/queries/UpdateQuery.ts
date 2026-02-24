@@ -6,15 +6,15 @@ import {
   UpdatePartial,
   toNodeReference,
 } from './QueryFactory.js';
-import {NodeShape} from '../shapes/SHACL.js';
 import {MutationQueryFactory} from './MutationQuery.js';
+import {IRUpdateMutation} from './IntermediateRepresentation.js';
+import {buildCanonicalUpdateMutationIR} from './IRMutation.js';
 
-export type UpdateQuery<ResponseType = null> = {
-  type: 'update';
-  id: string;
-  shape: NodeShape;
-  updates: NodeDescriptionValue;
-};
+/**
+ * The canonical UpdateQuery type — an IR AST node representing an update mutation.
+ * This is the type received by IQuadStore.updateQuery().
+ */
+export type UpdateQuery = IRUpdateMutation;
 
 export class UpdateQueryFactory<
   ShapeType extends Shape,
@@ -36,12 +36,11 @@ export class UpdateQueryFactory<
     );
   }
 
-  getQueryObject(): UpdateQuery<AddId<U>> {
-    return {
-      type: 'update',
+  build(): UpdateQuery {
+    return buildCanonicalUpdateMutationIR({
       id: this.id,
       shape: this.shapeClass.shape,
       updates: this.fields,
-    };
+    });
   }
 }

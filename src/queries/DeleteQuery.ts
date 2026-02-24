@@ -1,14 +1,14 @@
 import {Shape} from '../shapes/Shape.js';
-import {NodeShape} from '../shapes/SHACL.js';
-import {LinkedQuery} from './SelectQuery.js';
 import {NodeReferenceValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory, NodeId} from './MutationQuery.js';
+import {IRDeleteMutation} from './IntermediateRepresentation.js';
+import {buildCanonicalDeleteMutationIR} from './IRMutation.js';
 
-export interface DeleteQuery extends LinkedQuery {
-  type: 'delete';
-  shape: NodeShape;
-  ids: NodeReferenceValue[];
-}
+/**
+ * The canonical DeleteQuery type — an IR AST node representing a delete mutation.
+ * This is the type received by IQuadStore.deleteQuery().
+ */
+export type DeleteQuery = IRDeleteMutation;
 
 export type DeleteResponse = {
   /**
@@ -44,11 +44,10 @@ export class DeleteQueryFactory<
     this.ids = this.convertNodeReferences(ids);
   }
 
-  getQueryObject(): DeleteQuery {
-    return {
-      type: 'delete',
+  build(): DeleteQuery {
+    return buildCanonicalDeleteMutationIR({
       shape: this.shapeClass.shape,
       ids: this.ids,
-    };
+    });
   }
 }

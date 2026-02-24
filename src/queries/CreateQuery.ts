@@ -1,14 +1,14 @@
 import {Shape} from '../shapes/Shape.js';
-import {NodeShape} from '../shapes/SHACL.js';
-import {LinkedQuery} from './SelectQuery.js';
 import {AddId, NodeDescriptionValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory} from './MutationQuery.js';
+import {IRCreateMutation} from './IntermediateRepresentation.js';
+import {buildCanonicalCreateMutationIR} from './IRMutation.js';
 
-export interface CreateQuery<ResponseType = null> extends LinkedQuery {
-  type: 'create';
-  shape: NodeShape;
-  description: NodeDescriptionValue;
-}
+/**
+ * The canonical CreateQuery type — an IR AST node representing a create mutation.
+ * This is the type received by IQuadStore.createQuery().
+ */
+export type CreateQuery = IRCreateMutation;
 
 export type CreateResponse<U> = AddId<U, true>;
 
@@ -31,11 +31,10 @@ export class CreateQueryFactory<
     );
   }
 
-  getQueryObject(): CreateQuery<AddId<U, true>> {
-    return {
-      type: 'create',
+  build(): CreateQuery {
+    return buildCanonicalCreateMutationIR({
       shape: this.shapeClass.shape,
       description: this.description,
-    };
+    });
   }
 }

@@ -1,7 +1,7 @@
 # @_linked/core
 Core Linked package for the query DSL, SHACL shape decorators/metadata, and package registration.
 
-Linked core gives you a type-safe, schema-parameterized query language and SHACL-driven Shape classes for linked data. It compiles queries into a plain JS query object that can be executed by a store.
+Linked core gives you a type-safe, schema-parameterized query language and SHACL-driven Shape classes for linked data. It compiles queries into a normalized [Intermediate Representation (IR)](./documentation/intermediate-representation.md) that can be executed by any store.
 
 ## Linked core offers
 
@@ -26,6 +26,10 @@ import {linkedPackage} from '@_linked/core/utils/Package';
 
 - `@_linked/rdf-mem-store`: in-memory RDF store that implements `IQuadStore`.
 - `@_linked/react`: React bindings for Linked queries and shapes.
+
+## Documentation
+
+- [Intermediate Representation (IR)](./documentation/intermediate-representation.md)
 
 ## Linked Package Setup
 
@@ -427,6 +431,41 @@ Override behavior:
 
 - Allow `preloadFor` to accept another query (not just a component).
 - Make and expose functions for auto syncing shapes to the graph.
+
+## Intermediate Representation (IR)
+
+Every Linked query compiles to a plain, JSON-serializable JavaScript object — the **Intermediate Representation**. This IR is the contract between the DSL and any storage backend. A store receives these objects and translates them into its native query language (SPARQL, SQL, etc.).
+
+For example, this DSL call:
+
+```typescript
+const names = await Person.select((p) => p.name);
+```
+
+produces the following IR object, which is passed to your store's `selectQuery()` method:
+
+```json
+{
+  "kind": "select",
+  "root": {"kind": "shape_scan", "shape": "https://schema.org/Person", "alias": "a0"},
+  "patterns": [],
+  "projection": [
+    {
+      "alias": "a1",
+      "expression": {"kind": "property_expr", "sourceAlias": "a0", "property": "https://schema.org/name"}
+    }
+  ],
+  "resultMap": [{"key": "name", "alias": "a1"}],
+  "singleResult": false
+}
+```
+
+All IR types are available from `@_linked/core/queries/IntermediateRepresentation`. See the full [Intermediate Representation docs](./documentation/intermediate-representation.md) for the complete type reference, examples, and a store implementer guide.
+
+**Store packages:**
+
+- `@_linked/sparql-store` — SPARQL endpoint store (coming soon)
+- `@_linked/rdf-mem-store` — in-memory RDF store
 
 ## Changelog
 
