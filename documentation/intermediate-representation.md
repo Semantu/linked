@@ -34,7 +34,7 @@ RawSelectInput → Desugar → Canonicalize → Lower → SelectQuery
 
 Projection building (`IRProjection.ts`) and alias scoping (`IRAliasScope.ts`) are invoked by the lowering pass.
 
-Mutation IR is produced separately by `IRMutation.ts` via `buildCanonicalMutationIR()`.
+Mutation IR is produced by the individual mutation factory `build()` methods, which call the builders in `IRMutation.ts` (`buildCanonicalCreateMutationIR`, `buildCanonicalUpdateMutationIR`, `buildCanonicalDeleteMutationIR`).
 
 Intermediate types (`DesugaredSelectQuery`, `CanonicalDesugaredSelectQuery`, `RawSelectInput`, etc.) are internal to the pipeline and not part of the public API. Only the final types are intended for external consumption: `SelectQuery`, `CreateQuery`, `UpdateQuery`, `DeleteQuery` (exported from their respective query files).
 
