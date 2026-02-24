@@ -11,7 +11,16 @@ import {MutationQueryFactory} from './MutationQuery.js';
 import {IRUpdateMutation} from './IntermediateRepresentation.js';
 import {buildCanonicalUpdateMutationIR} from './IRMutation.js';
 
-export type UpdateQuery<ResponseType = null> = {
+/**
+ * The canonical UpdateQuery type — an IR AST node representing an update mutation.
+ * This is the type received by IQuadStore.updateQuery().
+ */
+export type UpdateQuery = IRUpdateMutation;
+
+/**
+ * @deprecated Legacy flat update query format — used internally by mutation IR builders.
+ */
+export type LegacyUpdateQuery<ResponseType = null> = {
   type: 'update';
   id: string;
   shape: NodeShape;
@@ -38,7 +47,7 @@ export class UpdateQueryFactory<
     );
   }
 
-  getLegacyQueryObject(): UpdateQuery<AddId<U>> {
+  getLegacyQueryObject(): LegacyUpdateQuery<AddId<U>> {
     return {
       type: 'update',
       id: this.id,

@@ -9,8 +9,14 @@ import {NodeReferenceValue,Prettify,QueryFactory,ShapeReferenceValue} from './Qu
 import {xsd} from '../ontologies/xsd.js';
 import {
   buildSelectQueryIR,
-  SelectQueryIR,
 } from './IRPipeline.js';
+import type {IRSelectQuery} from './IntermediateRepresentation.js';
+
+/**
+ * The canonical SelectQuery type — an IR AST node representing a select query.
+ * This is the type received by IQuadStore.selectQuery().
+ */
+export type SelectQuery = IRSelectQuery;
 
 /**
  * ###################################
@@ -79,11 +85,10 @@ export type SubQueryPaths = SelectPath;
 export type QueryPath = (QueryStep | SubQueryPaths)[] | WherePath;
 
 /**
- * A plain JS object that represents a LinkedQuery created by a Shape.select(...) call
- * It can be sent across the network.
- * @see LinkedQuery
+ * @deprecated Legacy flat query format — used internally by the desugar pipeline.
+ * Will be removed once the pipeline reads factory state directly.
  */
-export interface SelectQuery<S extends Shape = Shape, ResultType = any>
+export interface LegacySelectQuery<S extends Shape = Shape, ResultType = any>
   extends LinkedQuery {
   select: SelectPath;
   where?: WherePath;
@@ -1744,7 +1749,7 @@ export class SelectQueryFactory<
   /**
    * Turns the LinkedQuery into a SelectQuery, which is a plain JS object that can be serialized to JSON
    */
-  getLegacyQueryObject(): SelectQuery<S> {
+  getLegacyQueryObject(): LegacySelectQuery<S> {
     try {
       let queryPaths = this.getQueryPaths();
       let selectQuery = {
@@ -1762,7 +1767,7 @@ export class SelectQueryFactory<
             this.subject &&
             ('id' in (this.subject as S) || 'id' in (this.subject as QResult<S>))
           ),
-      } as SelectQuery<S>;
+      } as LegacySelectQuery<S>;
 
       if (this.wherePath) {
         selectQuery.where = this.wherePath;
@@ -1774,11 +1779,11 @@ export class SelectQueryFactory<
     }
   }
 
-  getQueryObject(): SelectQueryIR {
+  getQueryObject(): IRSelectQuery {
     return this.getIR();
   }
 
-  getIR(): SelectQueryIR {
+  getIR(): IRSelectQuery {
     return buildSelectQueryIR(this.getLegacyQueryObject());
   }
 

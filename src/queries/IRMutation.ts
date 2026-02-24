@@ -1,5 +1,5 @@
-import {CreateQuery} from './CreateQuery.js';
-import {DeleteQuery} from './DeleteQuery.js';
+import {LegacyCreateQuery} from './CreateQuery.js';
+import {LegacyDeleteQuery} from './DeleteQuery.js';
 import {
   NodeDescriptionValue,
   NodeReferenceValue,
@@ -8,7 +8,7 @@ import {
   SinglePropertyUpdateValue,
   isSetModificationValue,
 } from './QueryFactory.js';
-import {UpdateQuery} from './UpdateQuery.js';
+import {LegacyUpdateQuery} from './UpdateQuery.js';
 import {
   IRCreateMutation,
   IRDeleteMutation,
@@ -86,7 +86,7 @@ const toNodeDescription = (description: NodeDescriptionValue): IRNodeDescription
 };
 
 export const buildCanonicalCreateMutationIR = (
-  query: CreateQuery,
+  query: LegacyCreateQuery,
 ): IRCreateMutation => {
   return {
     kind: 'create_mutation',
@@ -96,7 +96,7 @@ export const buildCanonicalCreateMutationIR = (
 };
 
 export const buildCanonicalUpdateMutationIR = (
-  query: UpdateQuery,
+  query: LegacyUpdateQuery,
 ): IRUpdateMutation => {
   return {
     kind: 'update_mutation',
@@ -107,7 +107,7 @@ export const buildCanonicalUpdateMutationIR = (
 };
 
 export const buildCanonicalDeleteMutationIR = (
-  query: DeleteQuery,
+  query: LegacyDeleteQuery,
 ): IRDeleteMutation => {
   return {
     kind: 'delete_mutation',
@@ -117,7 +117,7 @@ export const buildCanonicalDeleteMutationIR = (
 };
 
 export const buildCanonicalMutationIR = (
-  query: CreateQuery | UpdateQuery | DeleteQuery,
+  query: LegacyCreateQuery | LegacyUpdateQuery | LegacyDeleteQuery,
 ): CanonicalMutationIR => {
   if (query.type === 'create') {
     return buildCanonicalCreateMutationIR(query);

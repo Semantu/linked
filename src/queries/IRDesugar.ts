@@ -3,10 +3,10 @@ import {
   CustomQueryObject,
   isWhereEvaluationPath,
   JSNonNullPrimitive,
+  LegacySelectQuery,
   QueryPath,
   QueryStep,
   SelectPath,
-  SelectQuery,
   SizeStep,
   WhereAndOr,
   WhereMethods,
@@ -355,7 +355,7 @@ const toWhere = (path: WherePath): DesugaredWhere => {
 };
 
 
-const toSortBy = (query: SelectQuery): DesugaredSortBy | undefined => {
+const toSortBy = (query: LegacySelectQuery): DesugaredSortBy | undefined => {
   if (!query.sortBy) {
     return undefined;
   }
@@ -366,7 +366,7 @@ const toSortBy = (query: SelectQuery): DesugaredSortBy | undefined => {
   };
 };
 
-export const desugarSelectQuery = (query: SelectQuery): DesugaredSelectQuery => {
+export const desugarSelectQuery = (query: LegacySelectQuery): DesugaredSelectQuery => {
   const selections = toSelections(query.select);
 
   const subjectId =

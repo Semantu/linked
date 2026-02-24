@@ -1,13 +1,10 @@
 import {CoreMap} from '../collections/CoreMap.js';
 import {CoreSet} from '../collections/CoreSet.js';
 import {IQuadStore} from '../interfaces/IQuadStore.js';
-import {
-  IRCreateMutation,
-  IRDeleteMutation,
-  IRSelectQuery,
-  IRUpdateMutation,
-} from '../queries/IntermediateRepresentation.js';
-import {DeleteResponse} from '../queries/DeleteQuery.js';
+import type {SelectQuery} from '../queries/SelectQuery.js';
+import type {CreateQuery} from '../queries/CreateQuery.js';
+import type {UpdateQuery} from '../queries/UpdateQuery.js';
+import type {DeleteQuery, DeleteResponse} from '../queries/DeleteQuery.js';
 import {Shape, ShapeType} from '../shapes/Shape.js';
 import {getShapeClass} from './ShapeClass.js';
 
@@ -82,7 +79,7 @@ export abstract class LinkedStorage {
     return this.defaultStore;
   }
 
-  static selectQuery<ResultType>(query: IRSelectQuery): Promise<ResultType> {
+  static selectQuery<ResultType>(query: SelectQuery): Promise<ResultType> {
     const store = this.resolveStoreForQueryShape(query?.root?.shape);
     if (!store?.selectQuery) {
       return Promise.reject(
@@ -92,7 +89,7 @@ export abstract class LinkedStorage {
     return store.selectQuery(query);
   }
 
-  static updateQuery<ResponseType>(query: IRUpdateMutation): Promise<ResponseType> {
+  static updateQuery<ResponseType>(query: UpdateQuery): Promise<ResponseType> {
     const store = this.resolveStoreForQueryShape(query?.shape);
     if (!store?.updateQuery) {
       return Promise.reject(
@@ -102,7 +99,7 @@ export abstract class LinkedStorage {
     return store.updateQuery(query) as Promise<ResponseType>;
   }
 
-  static createQuery<ResponseType>(query: IRCreateMutation): Promise<ResponseType> {
+  static createQuery<ResponseType>(query: CreateQuery): Promise<ResponseType> {
     const store = this.resolveStoreForQueryShape(query?.shape);
     if (!store?.createQuery) {
       return Promise.reject(
@@ -112,7 +109,7 @@ export abstract class LinkedStorage {
     return store.createQuery(query) as Promise<ResponseType>;
   }
 
-  static deleteQuery(query: IRDeleteMutation): Promise<DeleteResponse> {
+  static deleteQuery(query: DeleteQuery): Promise<DeleteResponse> {
     const store = this.resolveStoreForQueryShape(query?.shape);
     if (!store?.deleteQuery) {
       return Promise.reject(

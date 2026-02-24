@@ -1,4 +1,4 @@
-import {SelectQuery} from './SelectQuery.js';
+import {LegacySelectQuery} from './SelectQuery.js';
 import {desugarSelectQuery} from './IRDesugar.js';
 import {canonicalizeDesugaredSelectQuery} from './IRCanonicalize.js';
 import {lowerSelectQuery} from './IRLower.js';
@@ -12,12 +12,12 @@ const isIRSelectQuery = (query: unknown): query is IRSelectQuery =>
   'kind' in query &&
   (query as IRSelectQuery).kind === 'select_query';
 
-export const buildSelectQueryIR = (query: SelectQuery | IRSelectQuery): IRSelectQuery => {
+export const buildSelectQueryIR = (query: LegacySelectQuery | IRSelectQuery): IRSelectQuery => {
   if (isIRSelectQuery(query)) {
     return query;
   }
 
-  const desugared = desugarSelectQuery(query as SelectQuery);
+  const desugared = desugarSelectQuery(query as LegacySelectQuery);
   const canonical = canonicalizeDesugaredSelectQuery(desugared);
   return lowerSelectQuery(canonical);
 };
