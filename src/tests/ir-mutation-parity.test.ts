@@ -1,5 +1,4 @@
 import {describe, expect, test} from '@jest/globals';
-import {buildCanonicalMutationIR} from '../queries/IRMutation';
 import {Person, queryFactories, tmpEntityBase} from '../test-helpers/query-fixtures';
 import {QueryCaptureStore, captureQuery} from '../test-helpers/query-capture-store';
 import {
@@ -13,15 +12,8 @@ import {
 const store = new QueryCaptureStore();
 Person.queryParser = store;
 
-const captureMutationQuery = (runner: () => Promise<unknown>) =>
-  captureQuery(store, runner);
-
-const captureMutationIR = async (
-  runner: () => Promise<unknown>,
-): Promise<IRCreateMutation | IRUpdateMutation | IRDeleteMutation> => {
-  const query = await captureMutationQuery(runner);
-  return buildCanonicalMutationIR(query);
-};
+const captureMutationIR = (runner: () => Promise<unknown>) =>
+  captureQuery(store, runner) as Promise<IRCreateMutation | IRUpdateMutation | IRDeleteMutation>;
 
 const fieldBySuffix = (fields: IRNodeFieldUpdate[], suffix: string) =>
   fields.find((field) => field.property.propertyShapeId.endsWith(`/${suffix}`));

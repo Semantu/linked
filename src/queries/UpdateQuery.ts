@@ -6,7 +6,6 @@ import {
   UpdatePartial,
   toNodeReference,
 } from './QueryFactory.js';
-import {NodeShape} from '../shapes/SHACL.js';
 import {MutationQueryFactory} from './MutationQuery.js';
 import {IRUpdateMutation} from './IntermediateRepresentation.js';
 import {buildCanonicalUpdateMutationIR} from './IRMutation.js';
@@ -16,16 +15,6 @@ import {buildCanonicalUpdateMutationIR} from './IRMutation.js';
  * This is the type received by IQuadStore.updateQuery().
  */
 export type UpdateQuery = IRUpdateMutation;
-
-/**
- * @deprecated Legacy flat update query format — used internally by mutation IR builders.
- */
-export type LegacyUpdateQuery<ResponseType = null> = {
-  type: 'update';
-  id: string;
-  shape: NodeShape;
-  updates: NodeDescriptionValue;
-};
 
 export class UpdateQueryFactory<
   ShapeType extends Shape,
@@ -47,17 +36,13 @@ export class UpdateQueryFactory<
     );
   }
 
-  getLegacyQueryObject(): LegacyUpdateQuery<AddId<U>> {
-    return {
+  build(): UpdateQuery {
+    return buildCanonicalUpdateMutationIR({
       type: 'update',
       id: this.id,
       shape: this.shapeClass.shape,
       updates: this.fields,
-    };
-  }
-
-  build(): UpdateQuery {
-    return buildCanonicalUpdateMutationIR(this.getLegacyQueryObject());
+    });
   }
 
   /** @deprecated Use build() */

@@ -1,5 +1,4 @@
-import {LegacyCreateQuery} from './CreateQuery.js';
-import {LegacyDeleteQuery} from './DeleteQuery.js';
+import {NodeShape} from '../shapes/SHACL.js';
 import {
   NodeDescriptionValue,
   NodeReferenceValue,
@@ -8,7 +7,6 @@ import {
   SinglePropertyUpdateValue,
   isSetModificationValue,
 } from './QueryFactory.js';
-import {LegacyUpdateQuery} from './UpdateQuery.js';
 import {
   IRCreateMutation,
   IRDeleteMutation,
@@ -18,6 +16,28 @@ import {
   IRSetModificationValue,
   IRUpdateMutation,
 } from './IntermediateRepresentation.js';
+
+/** Internal input type for the create mutation IR builder. */
+type CreateMutationInput = {
+  type: 'create';
+  shape: NodeShape;
+  description: NodeDescriptionValue;
+};
+
+/** Internal input type for the update mutation IR builder. */
+type UpdateMutationInput = {
+  type: 'update';
+  id: string;
+  shape: NodeShape;
+  updates: NodeDescriptionValue;
+};
+
+/** Internal input type for the delete mutation IR builder. */
+type DeleteMutationInput = {
+  type: 'delete';
+  shape: NodeShape;
+  ids: NodeReferenceValue[];
+};
 
 export type CanonicalMutationIR =
   | IRCreateMutation
@@ -86,7 +106,7 @@ const toNodeDescription = (description: NodeDescriptionValue): IRNodeDescription
 };
 
 export const buildCanonicalCreateMutationIR = (
-  query: LegacyCreateQuery,
+  query: CreateMutationInput,
 ): IRCreateMutation => {
   return {
     kind: 'create_mutation',
@@ -96,7 +116,7 @@ export const buildCanonicalCreateMutationIR = (
 };
 
 export const buildCanonicalUpdateMutationIR = (
-  query: LegacyUpdateQuery,
+  query: UpdateMutationInput,
 ): IRUpdateMutation => {
   return {
     kind: 'update_mutation',
@@ -107,7 +127,7 @@ export const buildCanonicalUpdateMutationIR = (
 };
 
 export const buildCanonicalDeleteMutationIR = (
-  query: LegacyDeleteQuery,
+  query: DeleteMutationInput,
 ): IRDeleteMutation => {
   return {
     kind: 'delete_mutation',
@@ -117,7 +137,7 @@ export const buildCanonicalDeleteMutationIR = (
 };
 
 export const buildCanonicalMutationIR = (
-  query: LegacyCreateQuery | LegacyUpdateQuery | LegacyDeleteQuery,
+  query: CreateMutationInput | UpdateMutationInput | DeleteMutationInput,
 ): CanonicalMutationIR => {
   if (query.type === 'create') {
     return buildCanonicalCreateMutationIR(query);

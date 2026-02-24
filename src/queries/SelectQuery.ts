@@ -86,22 +86,6 @@ export type SubQueryPaths = SelectPath;
 export type QueryPath = (QueryStep | SubQueryPaths)[] | WherePath;
 
 /**
- * @deprecated Legacy flat query format — used internally by the desugar pipeline.
- * Will be removed once the pipeline reads factory state directly.
- */
-export interface LegacySelectQuery<S extends Shape = Shape, ResultType = any>
-  extends LinkedQuery {
-  select: SelectPath;
-  where?: WherePath;
-  sortBy?: SortByPath;
-  subject?: S | QResult<S>;
-  limit?: number;
-  offset?: number;
-  shape?: ShapeType<S>;
-  singleResult?: boolean;
-}
-
-/**
  * Much like a querypath, except it can only contain QuerySteps
  */
 export type QueryPropertyPath = QueryStep[];
@@ -1749,39 +1733,11 @@ export class SelectQueryFactory<
   }
 
   /**
-   * Turns the LinkedQuery into a SelectQuery, which is a plain JS object that can be serialized to JSON
+   * Returns the raw pipeline input for this query.
+   * Used internally by build() and by test helpers that need
+   * to feed factory state into individual pipeline stages.
    */
-  getLegacyQueryObject(): LegacySelectQuery<S> {
-    try {
-      let queryPaths = this.getQueryPaths();
-      let selectQuery = {
-        type: 'select',
-        select: queryPaths,
-        subject: this.getSubject(),
-        limit: this.limit,
-        offset: this.offset,
-        shape: this.shape,
-        sortBy: this.getSortByPath(),
-        //the query is selecting a single result if it explicitly requested it, or if the subject is a specific subject (with a URI or ID)
-        singleResult:
-          this.singleResult ||
-          !!(
-            this.subject &&
-            ('id' in (this.subject as S) || 'id' in (this.subject as QResult<S>))
-          ),
-      } as LegacySelectQuery<S>;
-
-      if (this.wherePath) {
-        selectQuery.where = this.wherePath;
-      }
-      return selectQuery;
-    } catch (err) {
-      console.error('Error in getQueryObject', err);
-      throw err;
-    }
-  }
-
-  build(): SelectQuery {
+  toRawInput(): RawSelectInput {
     const input: RawSelectInput = {
       select: this.getQueryPaths(),
       subject: this.getSubject(),
@@ -1799,7 +1755,11 @@ export class SelectQueryFactory<
     if (this.wherePath) {
       input.where = this.wherePath;
     }
-    return buildSelectQueryIR(input);
+    return input;
+  }
+
+  build(): SelectQuery {
+    return buildSelectQueryIR(this.toRawInput());
   }
 
   /** @deprecated Use build() */

@@ -1,6 +1,4 @@
 import {Shape} from '../shapes/Shape.js';
-import {NodeShape} from '../shapes/SHACL.js';
-import {LinkedQuery} from './SelectQuery.js';
 import {NodeReferenceValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory, NodeId} from './MutationQuery.js';
 import {IRDeleteMutation} from './IntermediateRepresentation.js';
@@ -11,15 +9,6 @@ import {buildCanonicalDeleteMutationIR} from './IRMutation.js';
  * This is the type received by IQuadStore.deleteQuery().
  */
 export type DeleteQuery = IRDeleteMutation;
-
-/**
- * @deprecated Legacy flat delete query format — used internally by mutation IR builders.
- */
-export interface LegacyDeleteQuery extends LinkedQuery {
-  type: 'delete';
-  shape: NodeShape;
-  ids: NodeReferenceValue[];
-}
 
 export type DeleteResponse = {
   /**
@@ -55,16 +44,12 @@ export class DeleteQueryFactory<
     this.ids = this.convertNodeReferences(ids);
   }
 
-  getLegacyQueryObject(): LegacyDeleteQuery {
-    return {
+  build(): DeleteQuery {
+    return buildCanonicalDeleteMutationIR({
       type: 'delete',
       shape: this.shapeClass.shape,
       ids: this.ids,
-    };
-  }
-
-  build(): DeleteQuery {
-    return buildCanonicalDeleteMutationIR(this.getLegacyQueryObject());
+    });
   }
 
   /** @deprecated Use build() */

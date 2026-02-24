@@ -243,7 +243,7 @@ describe('QueryContext edge cases', () => {
     const query = ContextPerson.query((p) => p.name).where((p) =>
       p.bestFriend.equals(context),
     );
-    const queryObject = query.getLegacyQueryObject();
+    const queryObject = query.toRawInput();
     const where = queryObject?.where;
     expect(where).toBeDefined();
     if (!where) {

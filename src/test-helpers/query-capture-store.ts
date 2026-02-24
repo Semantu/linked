@@ -11,7 +11,10 @@ import {NodeId} from '../queries/MutationQuery';
 
 /**
  * Test utility that intercepts query factory calls and captures
- * the legacy query object for inspection by test assertions.
+ * the query object for inspection by test assertions.
+ *
+ * For select queries, captures the RawSelectInput (pipeline input format).
+ * For mutations, captures the IR (canonical format).
  *
  * Assign an instance to `Shape.queryParser` (or a specific shape's
  * `queryParser`) before executing queries, then use `captureQuery`
@@ -21,7 +24,7 @@ export class QueryCaptureStore implements IQueryParser {
   lastQuery?: any;
 
   async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.getLegacyQueryObject();
+    this.lastQuery = query.toRawInput();
     return [] as ResultType;
   }
 
@@ -30,7 +33,7 @@ export class QueryCaptureStore implements IQueryParser {
     shapeClass: typeof Shape,
   ): Promise<CreateResponse<U>> {
     const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.getLegacyQueryObject();
+    this.lastQuery = factory.build();
     return {} as CreateResponse<U>;
   }
 
@@ -40,7 +43,7 @@ export class QueryCaptureStore implements IQueryParser {
     shapeClass: typeof Shape,
   ): Promise<AddId<U>> {
     const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.getLegacyQueryObject();
+    this.lastQuery = factory.build();
     return {} as AddId<U>;
   }
 
@@ -50,7 +53,7 @@ export class QueryCaptureStore implements IQueryParser {
   ): Promise<DeleteResponse> {
     const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
     const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.getLegacyQueryObject();
+    this.lastQuery = factory.build();
     return {deleted: [], count: 0};
   }
 }

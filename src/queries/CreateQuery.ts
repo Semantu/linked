@@ -1,6 +1,4 @@
 import {Shape} from '../shapes/Shape.js';
-import {NodeShape} from '../shapes/SHACL.js';
-import {LinkedQuery} from './SelectQuery.js';
 import {AddId, NodeDescriptionValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory} from './MutationQuery.js';
 import {IRCreateMutation} from './IntermediateRepresentation.js';
@@ -11,15 +9,6 @@ import {buildCanonicalCreateMutationIR} from './IRMutation.js';
  * This is the type received by IQuadStore.createQuery().
  */
 export type CreateQuery = IRCreateMutation;
-
-/**
- * @deprecated Legacy flat create query format — used internally by mutation IR builders.
- */
-export interface LegacyCreateQuery<ResponseType = null> extends LinkedQuery {
-  type: 'create';
-  shape: NodeShape;
-  description: NodeDescriptionValue;
-}
 
 export type CreateResponse<U> = AddId<U, true>;
 
@@ -42,16 +31,12 @@ export class CreateQueryFactory<
     );
   }
 
-  getLegacyQueryObject(): LegacyCreateQuery<AddId<U, true>> {
-    return {
+  build(): CreateQuery {
+    return buildCanonicalCreateMutationIR({
       type: 'create',
       shape: this.shapeClass.shape,
       description: this.description,
-    };
-  }
-
-  build(): CreateQuery {
-    return buildCanonicalCreateMutationIR(this.getLegacyQueryObject());
+    });
   }
 
   /** @deprecated Use build() */
