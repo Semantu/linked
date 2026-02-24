@@ -434,19 +434,19 @@ Override behavior:
 
 ## Migration: IR query objects
 
-`getQueryObject()` on all query factories now returns IR types instead of legacy flat objects:
+All query factories expose `build()` as the canonical method. The types `SelectQuery`, `CreateQuery`, `UpdateQuery`, and `DeleteQuery` **are** the IR types — there is no separate "legacy" format.
 
-| Factory | Return type |
-|---|---|
-| `SelectQueryFactory.getQueryObject()` | `IRSelectQuery` |
-| `CreateQueryFactory.getQueryObject()` | `IRCreateMutation` |
-| `UpdateQueryFactory.getQueryObject()` | `IRUpdateMutation` |
-| `DeleteQueryFactory.getQueryObject()` | `IRDeleteMutation` |
+| Factory | Method | Return type |
+|---|---|---|
+| `SelectQueryFactory.build()` | `build()` | `SelectQuery` |
+| `CreateQueryFactory.build()` | `build()` | `CreateQuery` |
+| `UpdateQueryFactory.build()` | `build()` | `UpdateQuery` |
+| `DeleteQueryFactory.build()` | `build()` | `DeleteQuery` |
 
 **For `IQuadStore` implementers:**
 
-- `selectQuery` receives an `IRSelectQuery` with `root.shape.shapeId`, `projection[]`, `where`, `patterns[]` instead of the legacy `shape`, `select[][]`, `where` fields.
-- `createQuery`/`updateQuery`/`deleteQuery` receive IR mutation types with `kind` discriminators and ID-based property references.
+- `selectQuery` receives a `SelectQuery` with `root.shape.shapeId`, `projection[]`, `where`, `patterns[]`.
+- `createQuery`/`updateQuery`/`deleteQuery` receive mutation IR types with `kind` discriminators and ID-based property references.
 - See [Intermediate Representation docs](./documentation/intermediate-representation.md) for the full IR structure and examples.
 
 ## Changelog

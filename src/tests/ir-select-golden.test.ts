@@ -8,7 +8,8 @@ import {
   tmpEntityBase,
 } from '../test-helpers/query-fixtures';
 import {QueryCaptureStore, captureQuery as _captureQuery} from '../test-helpers/query-capture-store';
-import {SelectQueryIR, buildSelectQueryIR} from '../queries/IRPipeline';
+import {buildSelectQuery} from '../queries/IRPipeline';
+import type {SelectQuery} from '../queries/SelectQuery';
 import {setQueryContext} from '../queries/QueryContext';
 
 const store = new QueryCaptureStore();
@@ -34,9 +35,9 @@ const sanitize = (value: unknown): unknown => {
 
 const captureIR = async (
   runner: () => Promise<unknown>,
-): Promise<SelectQueryIR> => {
+): Promise<SelectQuery> => {
   const query = await _captureQuery(store, runner);
-  return sanitize(buildSelectQueryIR(query)) as SelectQueryIR;
+  return sanitize(buildSelectQuery(query)) as SelectQuery;
 };
 
 type SelectCase = {
@@ -56,7 +57,7 @@ type SelectCase = {
   requiredResultKeys?: string[];
 };
 
-const assertSelectCase = (ir: SelectQueryIR, testCase: SelectCase) => {
+const assertSelectCase = (ir: SelectQuery, testCase: SelectCase) => {
   expect(ir.kind).toBe('select_query');
   expect(ir.root.kind).toBe('shape_scan');
   expect(ir.root.alias).toBeDefined();
@@ -624,9 +625,9 @@ describe('select IR parity coverage (Phase 3)', () => {
 });
 
 describe('IR pipeline behavior', () => {
-  test('buildSelectQueryIR lowers legacy select query shape', async () => {
+  test('buildSelectQuery lowers raw select input to IR', async () => {
     const query = await _captureQuery(store, () => queryFactories.sortByDesc());
-    const ir = buildSelectQueryIR(query);
+    const ir = buildSelectQuery(query);
 
     expect(ir.kind).toBe('select_query');
     expect(ir.root.kind).toBe('shape_scan');
@@ -635,23 +636,22 @@ describe('IR pipeline behavior', () => {
     expect(ir.limit).toBeUndefined();
   });
 
-  test('getIR and getQueryObject both expose IR output', async () => {
+  test('build() returns canonical IR', async () => {
     const selectFactory = Person.query((p) => p.name).where((p) =>
       p.name.equals('Semmy'),
     );
 
-    const irFromMethod = selectFactory.getIR();
-    const irFromQueryObject = selectFactory.getQueryObject();
+    const ir = selectFactory.build();
 
-    expect(irFromMethod.kind).toBe('select_query');
-    expect(irFromQueryObject.kind).toBe('select_query');
-    expect(irFromMethod).toEqual(irFromQueryObject);
+    expect(ir.kind).toBe('select_query');
+    expect(ir.projection.length).toBe(1);
+    expect(ir.where).toBeDefined();
   });
 
   test('builder accepts already-lowered IR as pass-through', async () => {
     const selectFactory = Person.query((p) => p.name);
-    const ir = selectFactory.getIR();
+    const ir = selectFactory.build();
 
-    expect(buildSelectQueryIR(ir)).toBe(ir);
+    expect(buildSelectQuery(ir)).toBe(ir);
   });
 });

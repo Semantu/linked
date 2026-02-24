@@ -20,30 +20,30 @@ This document defines the canonical Linked query IR structure produced by `@_lin
 
 ## Pipeline architecture
 
-The IR is produced by a three-stage pipeline, invoked by `buildSelectQueryIR()`:
+The IR is produced by a three-stage pipeline, invoked by `buildSelectQuery()`:
 
 ```
-SelectQuery (legacy) → Desugar → Canonicalize → Lower → IRSelectQuery
+RawSelectInput → Desugar → Canonicalize → Lower → SelectQuery
 ```
 
 | Stage | File | Input | Output |
 |---|---|---|---|
-| **Desugar** | `IRDesugar.ts` | `SelectQuery` (legacy flat object) | `DesugaredSelectQuery` — selection paths, sub-selects, custom objects, where clauses in DSL-close form |
+| **Desugar** | `IRDesugar.ts` | `RawSelectInput` (factory state) | `DesugaredSelectQuery` — selection paths, sub-selects, custom objects, where clauses in DSL-close form |
 | **Canonicalize** | `IRCanonicalize.ts` | `DesugaredSelectQuery` | `CanonicalDesugaredSelectQuery` — quantifier rewrites (`some` → `exists`, `every` → `not exists(not …)`), boolean flattening, operator normalization |
-| **Lower** | `IRLower.ts` | `CanonicalDesugaredSelectQuery` | `IRSelectQuery` — full AST with `IRShapeScanPattern` root, `IRTraversePattern` graph patterns, `IRExpression` trees for projection/where/orderBy |
+| **Lower** | `IRLower.ts` | `CanonicalDesugaredSelectQuery` | `SelectQuery` (`IRSelectQuery`) — full AST with `IRShapeScanPattern` root, `IRTraversePattern` graph patterns, `IRExpression` trees for projection/where/orderBy |
 
 Projection building (`IRProjection.ts`) and alias scoping (`IRAliasScope.ts`) are invoked by the lowering pass.
 
 Mutation IR is produced separately by `IRMutation.ts` via `buildCanonicalMutationIR()`.
 
-Intermediate types (`DesugaredSelectQuery`, `CanonicalDesugaredSelectQuery`, etc.) are internal to the pipeline and not part of the public API. Only the final types from `IntermediateRepresentation.ts` are intended for external consumption.
+Intermediate types (`DesugaredSelectQuery`, `CanonicalDesugaredSelectQuery`, `RawSelectInput`, etc.) are internal to the pipeline and not part of the public API. Only the final types are intended for external consumption: `SelectQuery`, `CreateQuery`, `UpdateQuery`, `DeleteQuery` (exported from their respective query files).
 
 ## Select query IR
 
-The top-level select query type:
+The `SelectQuery` type (exported from `SelectQuery.ts`, aliased as `IRSelectQuery` in `IntermediateRepresentation.ts`):
 
 ```ts
-type IRSelectQuery = {
+type SelectQuery = {
   kind: 'select_query';
   root: IRShapeScanPattern;     // shape scan entry point
   patterns: IRGraphPattern[];   // traversal patterns (joins, optional, etc.)

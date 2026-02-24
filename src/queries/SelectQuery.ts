@@ -8,7 +8,7 @@ import {getPropertyShapeByLabel,getShapeClass} from '../utils/ShapeClass.js';
 import {NodeReferenceValue,Prettify,QueryFactory,ShapeReferenceValue} from './QueryFactory.js';
 import {xsd} from '../ontologies/xsd.js';
 import {
-  buildSelectQueryIR,
+  buildSelectQuery,
 } from './IRPipeline.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import type {IRSelectQuery} from './IntermediateRepresentation.js';
@@ -1759,7 +1759,7 @@ export class SelectQueryFactory<
   }
 
   build(): SelectQuery {
-    return buildSelectQueryIR(this.toRawInput());
+    return buildSelectQuery(this.toRawInput());
   }
 
   /** @deprecated Use build() */
