@@ -1,14 +1,4 @@
 import {describe, expect, test} from '@jest/globals';
-import {Shape} from '../shapes/Shape';
-import {SelectQueryFactory} from '../queries/SelectQuery';
-import {IQueryParser} from '../interfaces/IQueryParser';
-import {DeleteResponse} from '../queries/DeleteQuery';
-import {CreateResponse} from '../queries/CreateQuery';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
-import {UpdateQueryFactory} from '../queries/UpdateQuery';
-import {CreateQueryFactory} from '../queries/CreateQuery';
-import {DeleteQueryFactory} from '../queries/DeleteQuery';
-import {NodeId} from '../queries/MutationQuery';
 import {
   Dog,
   Employee,
@@ -17,46 +7,9 @@ import {
   queryFactories,
   tmpEntityBase,
 } from '../test-helpers/query-fixtures';
+import {QueryCaptureStore, captureQuery as _captureQuery} from '../test-helpers/query-capture-store';
 import {SelectQueryIR, buildSelectQueryIR} from '../queries/IRPipeline';
 import {setQueryContext} from '../queries/QueryContext';
-
-class QueryCaptureStore implements IQueryParser {
-  lastQuery?: any;
-
-  async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.getLegacyQueryObject();
-    return [] as ResultType;
-  }
-
-  async createQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<CreateResponse<U>> {
-    const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
-    return {} as CreateResponse<U>;
-  }
-
-  async updateQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    id: string | NodeReferenceValue,
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<AddId<U>> {
-    const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
-    return {} as AddId<U>;
-  }
-
-  async deleteQuery(
-    id: NodeId | NodeId[] | NodeReferenceValue[],
-    shapeClass: typeof Shape,
-  ): Promise<DeleteResponse> {
-    const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
-    const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.getQueryObject();
-    return {deleted: [], count: 0};
-  }
-}
 
 const store = new QueryCaptureStore();
 Person.queryParser = store;
@@ -82,9 +35,8 @@ const sanitize = (value: unknown): unknown => {
 const captureIR = async (
   runner: () => Promise<unknown>,
 ): Promise<SelectQueryIR> => {
-  store.lastQuery = undefined;
-  await runner();
-  return sanitize(buildSelectQueryIR(store.lastQuery)) as SelectQueryIR;
+  const query = await _captureQuery(store, runner);
+  return sanitize(buildSelectQueryIR(query)) as SelectQueryIR;
 };
 
 type SelectCase = {
@@ -668,5 +620,38 @@ describe('select IR parity coverage (Phase 3)', () => {
   ])('$name emits expected IR structure', async (testCase) => {
     const actual = await captureIR(testCase.run);
     assertSelectCase(actual, testCase);
+  });
+});
+
+describe('IR pipeline behavior', () => {
+  test('buildSelectQueryIR lowers legacy select query shape', async () => {
+    const query = await _captureQuery(store, () => queryFactories.sortByDesc());
+    const ir = buildSelectQueryIR(query);
+
+    expect(ir.kind).toBe('select_query');
+    expect(ir.root.kind).toBe('shape_scan');
+    expect(ir.projection.length).toBe(1);
+    expect(ir.orderBy?.[0]?.direction).toBe('DESC');
+    expect(ir.limit).toBeUndefined();
+  });
+
+  test('getIR and getQueryObject both expose IR output', async () => {
+    const selectFactory = Person.query((p) => p.name).where((p) =>
+      p.name.equals('Semmy'),
+    );
+
+    const irFromMethod = selectFactory.getIR();
+    const irFromQueryObject = selectFactory.getQueryObject();
+
+    expect(irFromMethod.kind).toBe('select_query');
+    expect(irFromQueryObject.kind).toBe('select_query');
+    expect(irFromMethod).toEqual(irFromQueryObject);
+  });
+
+  test('builder accepts already-lowered IR as pass-through', async () => {
+    const selectFactory = Person.query((p) => p.name);
+    const ir = selectFactory.getIR();
+
+    expect(buildSelectQueryIR(ir)).toBe(ir);
   });
 });

@@ -18,6 +18,26 @@ This document defines the canonical Linked query IR structure produced by `@_lin
 4. Quantifiers are normalized (`some -> exists`, `every -> not exists(not ...)`).
 5. Mutation kinds remain explicit (`create_mutation`, `update_mutation`, `delete_mutation`).
 
+## Pipeline architecture
+
+The IR is produced by a three-stage pipeline, invoked by `buildSelectQueryIR()`:
+
+```
+SelectQuery (legacy) → Desugar → Canonicalize → Lower → IRSelectQuery
+```
+
+| Stage | File | Input | Output |
+|---|---|---|---|
+| **Desugar** | `IRDesugar.ts` | `SelectQuery` (legacy flat object) | `DesugaredSelectQuery` — selection paths, sub-selects, custom objects, where clauses in DSL-close form |
+| **Canonicalize** | `IRCanonicalize.ts` | `DesugaredSelectQuery` | `CanonicalDesugaredSelectQuery` — quantifier rewrites (`some` → `exists`, `every` → `not exists(not …)`), boolean flattening, operator normalization |
+| **Lower** | `IRLower.ts` | `CanonicalDesugaredSelectQuery` | `IRSelectQuery` — full AST with `IRShapeScanPattern` root, `IRTraversePattern` graph patterns, `IRExpression` trees for projection/where/orderBy |
+
+Projection building (`IRProjection.ts`) and alias scoping (`IRAliasScope.ts`) are invoked by the lowering pass.
+
+Mutation IR is produced separately by `IRMutation.ts` via `buildCanonicalMutationIR()`.
+
+Intermediate types (`DesugaredSelectQuery`, `CanonicalDesugaredSelectQuery`, etc.) are internal to the pipeline and not part of the public API. Only the final types from `IntermediateRepresentation.ts` are intended for external consumption.
+
 ## Select query shape
 
 ```ts

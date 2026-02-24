@@ -1,16 +1,7 @@
 import {describe, expect, test} from '@jest/globals';
-import {Shape} from '../shapes/Shape';
-import {SelectQueryFactory} from '../queries/SelectQuery';
-import {IQueryParser} from '../interfaces/IQueryParser';
-import {DeleteResponse} from '../queries/DeleteQuery';
-import {CreateResponse} from '../queries/CreateQuery';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
-import {UpdateQueryFactory} from '../queries/UpdateQuery';
-import {CreateQueryFactory} from '../queries/CreateQuery';
-import {DeleteQueryFactory} from '../queries/DeleteQuery';
-import {NodeId} from '../queries/MutationQuery';
 import {buildCanonicalMutationIR} from '../queries/IRMutation';
 import {Person, queryFactories, tmpEntityBase} from '../test-helpers/query-fixtures';
+import {QueryCaptureStore, captureQuery} from '../test-helpers/query-capture-store';
 import {
   IRCreateMutation,
   IRDeleteMutation,
@@ -19,52 +10,11 @@ import {
   IRUpdateMutation,
 } from '../queries/IntermediateRepresentation';
 
-class QueryCaptureStore implements IQueryParser {
-  lastQuery?: any;
-
-  async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.getQueryObject();
-    return [] as ResultType;
-  }
-
-  async createQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<CreateResponse<U>> {
-    const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.getLegacyQueryObject();
-    return {} as CreateResponse<U>;
-  }
-
-  async updateQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    id: string | NodeReferenceValue,
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<AddId<U>> {
-    const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.getLegacyQueryObject();
-    return {} as AddId<U>;
-  }
-
-  async deleteQuery(
-    id: NodeId | NodeId[] | NodeReferenceValue[],
-    shapeClass: typeof Shape,
-  ): Promise<DeleteResponse> {
-    const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
-    const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.getLegacyQueryObject();
-    return {deleted: [], count: 0};
-  }
-}
-
 const store = new QueryCaptureStore();
 Person.queryParser = store;
 
-const captureMutationQuery = async (runner: () => Promise<unknown>) => {
-  store.lastQuery = undefined;
-  await runner();
-  return store.lastQuery;
-};
+const captureMutationQuery = (runner: () => Promise<unknown>) =>
+  captureQuery(store, runner);
 
 const captureMutationIR = async (
   runner: () => Promise<unknown>,

@@ -225,7 +225,7 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 
 ---
 
-## Phase 7 — Consolidate and clean up
+## Phase 7 — Consolidate and clean up [DONE]
 
 **Goal**: Clean module boundaries, remove test duplication, mark internal types as internal.
 
@@ -236,6 +236,13 @@ Key patterns to cover: unset with undefined/null, nested object updates, ID refe
 4. Merge useful assertions from `ir-pipeline-parity.test.ts` into `ir-select-golden.test.ts` and remove the parity test file if no longer needed.
 
 **Validation:** `npm test` passes. Clean exports. No test duplication.
+
+**Report:**
+- **What was done:** Extracted duplicated `QueryCaptureStore` class and `captureQuery` helper into `src/test-helpers/query-capture-store.ts`. Updated 7 test files to use the shared helper: `ir-canonicalize.test.ts`, `ir-desugar.test.ts`, `ir-projection.test.ts`, `ir-mutation-parity.test.ts`, `ir-select-golden.test.ts`, `query.test.ts`, `query.types.test.ts`. Merged 3 pipeline behavior tests from `ir-pipeline-parity.test.ts` into `ir-select-golden.test.ts` and deleted the parity file. Added pipeline architecture section to `documentation/intermediate-representation.md`. Verified no intermediate IR types are exported from `src/index.ts`.
+- **Deviations:** None from Phase 7 scope.
+- **Problems:** No blocking issues.
+- **Validation:** `npm test -- --no-coverage` => 10 passed suites, 223 passed tests, 0 failed (2 suites skipped by design). `npx tsc --noEmit` => pass.
+- **Next step:** Phase 8 — documentation sync.
 
 ---
 

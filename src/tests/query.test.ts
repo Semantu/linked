@@ -1,54 +1,7 @@
 import {describe, expect, test} from '@jest/globals';
-import {Shape} from '../shapes/Shape';
-import {SelectQueryFactory} from '../queries/SelectQuery';
-import {IQueryParser} from '../interfaces/IQueryParser';
-import {DeleteResponse} from '../queries/DeleteQuery';
-import {CreateResponse} from '../queries/CreateQuery';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
-import {UpdateQueryFactory} from '../queries/UpdateQuery';
-import {CreateQueryFactory} from '../queries/CreateQuery';
-import {DeleteQueryFactory} from '../queries/DeleteQuery';
-import {NodeId} from '../queries/MutationQuery';
 import {Dog, Employee, Person, Pet, queryFactories, name as namePath, tmpEntityBase} from '../test-helpers/query-fixtures';
+import {QueryCaptureStore, captureQuery as _captureQuery} from '../test-helpers/query-capture-store';
 import {setQueryContext} from '../queries/QueryContext';
-
-class QueryCaptureStore implements IQueryParser {
-  lastQuery?: any;
-
-  async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.getLegacyQueryObject();
-    return [] as ResultType;
-  }
-
-  async createQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<CreateResponse<U>> {
-    const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.getLegacyQueryObject();
-    return {} as CreateResponse<U>;
-  }
-
-  async updateQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    id: string | NodeReferenceValue,
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<AddId<U>> {
-    const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.getLegacyQueryObject();
-    return {} as AddId<U>;
-  }
-
-  async deleteQuery(
-    id: NodeId | NodeId[] | NodeReferenceValue[],
-    shapeClass: typeof Shape,
-  ): Promise<DeleteResponse> {
-    const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
-    const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.getLegacyQueryObject();
-    return {deleted: [], count: 0};
-  }
-}
 
 const store = new QueryCaptureStore();
 Person.queryParser = store;
@@ -56,11 +9,7 @@ Pet.queryParser = store;
 Dog.queryParser = store;
 Employee.queryParser = store;
 
-const captureQuery = async (runner: () => Promise<unknown>) => {
-  store.lastQuery = undefined;
-  await runner();
-  return store.lastQuery;
-};
+const captureQuery = (runner: () => Promise<unknown>) => _captureQuery(store, runner);
 
 const expectSelectQuery = (query: any) => {
   expect(query).toBeDefined();

@@ -1,15 +1,6 @@
 import {describe, expect, test} from '@jest/globals';
-import {Shape} from '../shapes/Shape';
-import {SelectQueryFactory} from '../queries/SelectQuery';
-import {IQueryParser} from '../interfaces/IQueryParser';
-import {DeleteResponse} from '../queries/DeleteQuery';
-import {CreateResponse} from '../queries/CreateQuery';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
-import {UpdateQueryFactory} from '../queries/UpdateQuery';
-import {CreateQueryFactory} from '../queries/CreateQuery';
-import {DeleteQueryFactory} from '../queries/DeleteQuery';
-import {NodeId} from '../queries/MutationQuery';
 import {Person, queryFactories} from '../test-helpers/query-fixtures';
+import {QueryCaptureStore, captureQuery} from '../test-helpers/query-capture-store';
 import {setQueryContext} from '../queries/QueryContext';
 import {
   desugarSelectQuery,
@@ -20,53 +11,11 @@ import {
   DesugaredMultiSelection,
 } from '../queries/IRDesugar';
 
-class QueryCaptureStore implements IQueryParser {
-  lastQuery?: any;
-
-  async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.getLegacyQueryObject();
-    return [] as ResultType;
-  }
-
-  async createQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<CreateResponse<U>> {
-    const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
-    return {} as CreateResponse<U>;
-  }
-
-  async updateQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    id: string | NodeReferenceValue,
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<AddId<U>> {
-    const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
-    return {} as AddId<U>;
-  }
-
-  async deleteQuery(
-    id: NodeId | NodeId[] | NodeReferenceValue[],
-    shapeClass: typeof Shape,
-  ): Promise<DeleteResponse> {
-    const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
-    const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.getQueryObject();
-    return {deleted: [], count: 0};
-  }
-}
-
 const store = new QueryCaptureStore();
 Person.queryParser = store;
 setQueryContext('user', {id: 'user-1'}, Person);
 
-const captureQuery = async (runner: () => Promise<unknown>) => {
-  store.lastQuery = undefined;
-  await runner();
-  return store.lastQuery;
-};
+const capture = (runner: () => Promise<unknown>) => captureQuery(store, runner);
 
 const asPath = (s: unknown): DesugaredSelectionPath => {
   expect((s as any).kind).toBe('selection_path');
@@ -92,7 +41,7 @@ describe('IR desugar conversion', () => {
   // === Basic selection ===
 
   test('desugars simple select path', async () => {
-    const query = await captureQuery(() => queryFactories.selectName());
+    const query = await capture(() => queryFactories.selectName());
     const desugared = desugarSelectQuery(query);
 
     expect(desugared.kind).toBe('desugared_select');
@@ -105,7 +54,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars nested path selection', async () => {
-    const query = await captureQuery(() => queryFactories.selectFriendsName());
+    const query = await capture(() => queryFactories.selectFriendsName());
     const desugared = desugarSelectQuery(query);
 
     expect(desugared.selections).toHaveLength(1);
@@ -116,7 +65,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars multiple paths', async () => {
-    const query = await captureQuery(() => queryFactories.selectMultiplePaths());
+    const query = await capture(() => queryFactories.selectMultiplePaths());
     const desugared = desugarSelectQuery(query);
 
     expect(desugared.selections).toHaveLength(3);
@@ -126,13 +75,13 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars empty select', async () => {
-    const query = await captureQuery(() => queryFactories.selectAll());
+    const query = await capture(() => queryFactories.selectAll());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(0);
   });
 
   test('desugars selectAll properties', async () => {
-    const query = await captureQuery(() => queryFactories.selectAllProperties());
+    const query = await capture(() => queryFactories.selectAllProperties());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections.length).toBeGreaterThan(0);
     desugared.selections.forEach((s) => {
@@ -143,7 +92,7 @@ describe('IR desugar conversion', () => {
   // === Where clauses ===
 
   test('desugars where equality', async () => {
-    const query = await captureQuery(() => queryFactories.selectWhereNameSemmy());
+    const query = await capture(() => queryFactories.selectWhereNameSemmy());
     const desugared = desugarSelectQuery(query);
 
     expect(desugared.where?.kind).toBe('where_comparison');
@@ -154,20 +103,20 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars where and', async () => {
-    const query = await captureQuery(() => queryFactories.whereAnd());
+    const query = await capture(() => queryFactories.whereAnd());
     const desugared = desugarSelectQuery(query);
     // inline where on friends path — the selection should still desugar
     expect(desugared.selections).toHaveLength(1);
   });
 
   test('desugars where or', async () => {
-    const query = await captureQuery(() => queryFactories.whereOr());
+    const query = await capture(() => queryFactories.whereOr());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
   });
 
   test('desugars outer where with selections', async () => {
-    const query = await captureQuery(() => queryFactories.outerWhere());
+    const query = await capture(() => queryFactories.outerWhere());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     expect(desugared.where).toBeDefined();
@@ -175,19 +124,19 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars where some explicit', async () => {
-    const query = await captureQuery(() => queryFactories.whereSomeExplicit());
+    const query = await capture(() => queryFactories.whereSomeExplicit());
     const desugared = desugarSelectQuery(query);
     expect(desugared.where).toBeDefined();
   });
 
   test('desugars where every', async () => {
-    const query = await captureQuery(() => queryFactories.whereEvery());
+    const query = await capture(() => queryFactories.whereEvery());
     const desugared = desugarSelectQuery(query);
     expect(desugared.where).toBeDefined();
   });
 
   test('desugars where sequences', async () => {
-    const query = await captureQuery(() => queryFactories.whereSequences());
+    const query = await capture(() => queryFactories.whereSequences());
     const desugared = desugarSelectQuery(query);
     expect(desugared.where).toBeDefined();
     expect(desugared.where!.kind).toBe('where_boolean');
@@ -196,7 +145,7 @@ describe('IR desugar conversion', () => {
   // === Count / aggregation ===
 
   test('desugars count (size)', async () => {
-    const query = await captureQuery(() => queryFactories.countFriends());
+    const query = await capture(() => queryFactories.countFriends());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asPath(desugared.selections[0]);
@@ -204,7 +153,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars nested count', async () => {
-    const query = await captureQuery(() => queryFactories.countNestedFriends());
+    const query = await capture(() => queryFactories.countNestedFriends());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asPath(desugared.selections[0]);
@@ -214,7 +163,7 @@ describe('IR desugar conversion', () => {
   // === Sub-selects ===
 
   test('desugars sub-select with custom object', async () => {
-    const query = await captureQuery(() => queryFactories.subSelectSingleProp());
+    const query = await capture(() => queryFactories.subSelectSingleProp());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asSubSelect(desugared.selections[0]);
@@ -223,7 +172,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars sub-select plural custom object', async () => {
-    const query = await captureQuery(() => queryFactories.subSelectPluralCustom());
+    const query = await capture(() => queryFactories.subSelectPluralCustom());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asSubSelect(desugared.selections[0]);
@@ -233,7 +182,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars sub-select all properties', async () => {
-    const query = await captureQuery(() => queryFactories.subSelectAllProperties());
+    const query = await capture(() => queryFactories.subSelectAllProperties());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asSubSelect(desugared.selections[0]);
@@ -241,7 +190,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars sub-select array', async () => {
-    const query = await captureQuery(() => queryFactories.subSelectArray());
+    const query = await capture(() => queryFactories.subSelectArray());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asSubSelect(desugared.selections[0]);
@@ -249,7 +198,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars double nested sub-select', async () => {
-    const query = await captureQuery(() => queryFactories.doubleNestedSubSelect());
+    const query = await capture(() => queryFactories.doubleNestedSubSelect());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const outer = asSubSelect(desugared.selections[0]);
@@ -257,7 +206,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars sub-select all primitives', async () => {
-    const query = await captureQuery(() => queryFactories.subSelectAllPrimitives());
+    const query = await capture(() => queryFactories.subSelectAllPrimitives());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asSubSelect(desugared.selections[0]);
@@ -267,7 +216,7 @@ describe('IR desugar conversion', () => {
   // === Custom result objects at top level ===
 
   test('desugars custom result object with evaluation', async () => {
-    const query = await captureQuery(() => queryFactories.customResultEqualsBoolean());
+    const query = await capture(() => queryFactories.customResultEqualsBoolean());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asCustomObject(desugared.selections[0]);
@@ -276,7 +225,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars custom result object with count', async () => {
-    const query = await captureQuery(() => queryFactories.customResultNumFriends());
+    const query = await capture(() => queryFactories.customResultNumFriends());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asCustomObject(desugared.selections[0]);
@@ -287,7 +236,7 @@ describe('IR desugar conversion', () => {
   // === Type casting ===
 
   test('desugars type cast (as) on shape set — cast is implicit in property resolution', async () => {
-    const query = await captureQuery(() => queryFactories.selectShapeSetAs());
+    const query = await capture(() => queryFactories.selectShapeSetAs());
     const desugared = desugarSelectQuery(query);
     // as() doesn't produce a separate step — it changes which properties are accessible
     // The path is just [pets, guardDogLevel] where guardDogLevel comes from Dog shape
@@ -298,7 +247,7 @@ describe('IR desugar conversion', () => {
   });
 
   test('desugars type cast (as) on single shape — cast is implicit in property resolution', async () => {
-    const query = await captureQuery(() => queryFactories.selectShapeAs());
+    const query = await capture(() => queryFactories.selectShapeAs());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     const sel = asPath(desugared.selections[0]);
@@ -309,7 +258,7 @@ describe('IR desugar conversion', () => {
   // === Preload ===
 
   test('desugars preload composition', async () => {
-    const query = await captureQuery(() => queryFactories.preloadBestFriend());
+    const query = await capture(() => queryFactories.preloadBestFriend());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     // Preload pushes sub-query select into the path — should not throw
@@ -318,21 +267,21 @@ describe('IR desugar conversion', () => {
   // === Sorting / limiting ===
 
   test('desugars sort by ASC', async () => {
-    const query = await captureQuery(() => queryFactories.sortByAsc());
+    const query = await capture(() => queryFactories.sortByAsc());
     const desugared = desugarSelectQuery(query);
     expect(desugared.sortBy).toBeDefined();
     expect(desugared.sortBy!.direction).toBe('ASC');
   });
 
   test('desugars sort by DESC', async () => {
-    const query = await captureQuery(() => queryFactories.sortByDesc());
+    const query = await capture(() => queryFactories.sortByDesc());
     const desugared = desugarSelectQuery(query);
     expect(desugared.sortBy).toBeDefined();
     expect(desugared.sortBy!.direction).toBe('DESC');
   });
 
   test('desugars limit', async () => {
-    const query = await captureQuery(() => queryFactories.outerWhereLimit());
+    const query = await capture(() => queryFactories.outerWhereLimit());
     const desugared = desugarSelectQuery(query);
     expect(desugared.limit).toBe(1);
     expect(desugared.where).toBeDefined();
@@ -341,7 +290,7 @@ describe('IR desugar conversion', () => {
   // === One modifier ===
 
   test('desugars one() as singleResult', async () => {
-    const query = await captureQuery(() => queryFactories.selectOne());
+    const query = await capture(() => queryFactories.selectOne());
     const desugared = desugarSelectQuery(query);
     expect(desugared.singleResult).toBe(true);
     expect(desugared.limit).toBe(1);
@@ -350,7 +299,7 @@ describe('IR desugar conversion', () => {
   // === Subject targeting ===
 
   test('desugars subject by ID', async () => {
-    const query = await captureQuery(() => queryFactories.selectById());
+    const query = await capture(() => queryFactories.selectById());
     const desugared = desugarSelectQuery(query);
     expect(desugared.subjectId).toBeDefined();
     expect(desugared.singleResult).toBe(true);
@@ -359,7 +308,7 @@ describe('IR desugar conversion', () => {
   // === Nested queries ===
 
   test('desugars nested queries with mixed sub-selects', async () => {
-    const query = await captureQuery(() => queryFactories.nestedQueries2());
+    const query = await capture(() => queryFactories.nestedQueries2());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     // Should not throw — contains double-nested sub-selects
@@ -368,7 +317,7 @@ describe('IR desugar conversion', () => {
   // === Where with query context ===
 
   test('desugars where with query context', async () => {
-    const query = await captureQuery(() => queryFactories.whereWithContext());
+    const query = await capture(() => queryFactories.whereWithContext());
     const desugared = desugarSelectQuery(query);
     expect(desugared.where).toBeDefined();
   });
@@ -376,7 +325,7 @@ describe('IR desugar conversion', () => {
   // === Count in where ===
 
   test('desugars count in where clause', async () => {
-    const query = await captureQuery(() => queryFactories.countEquals());
+    const query = await capture(() => queryFactories.countEquals());
     const desugared = desugarSelectQuery(query);
     expect(desugared.where).toBeDefined();
   });
@@ -384,7 +333,7 @@ describe('IR desugar conversion', () => {
   // === Duplicate paths ===
 
   test('desugars duplicate paths', async () => {
-    const query = await captureQuery(() => queryFactories.selectDuplicatePaths());
+    const query = await capture(() => queryFactories.selectDuplicatePaths());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(3);
   });
@@ -392,7 +341,7 @@ describe('IR desugar conversion', () => {
   // === Count with label in sub-select ===
 
   test('desugars count label in sub-select', async () => {
-    const query = await captureQuery(() => queryFactories.countLabel());
+    const query = await capture(() => queryFactories.countLabel());
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     // Should not throw

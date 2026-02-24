@@ -1,69 +1,18 @@
 import {describe, expect, test} from '@jest/globals';
-import {Shape} from '../shapes/Shape';
-import {SelectQueryFactory} from '../queries/SelectQuery';
-import {IQueryParser} from '../interfaces/IQueryParser';
-import {DeleteResponse} from '../queries/DeleteQuery';
-import {CreateResponse} from '../queries/CreateQuery';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
-import {UpdateQueryFactory} from '../queries/UpdateQuery';
-import {CreateQueryFactory} from '../queries/CreateQuery';
-import {DeleteQueryFactory} from '../queries/DeleteQuery';
-import {NodeId} from '../queries/MutationQuery';
 import {Person, queryFactories} from '../test-helpers/query-fixtures';
+import {QueryCaptureStore, captureQuery} from '../test-helpers/query-capture-store';
 import {DesugaredWhereBoolean, desugarSelectQuery} from '../queries/IRDesugar';
 import {canonicalizeDesugaredSelectQuery} from '../queries/IRCanonicalize';
 import {WhereMethods} from '../queries/SelectQuery';
 
-class QueryCaptureStore implements IQueryParser {
-  lastQuery?: any;
-
-  async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    this.lastQuery = query.getLegacyQueryObject();
-    return [] as ResultType;
-  }
-
-  async createQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<CreateResponse<U>> {
-    const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
-    return {} as CreateResponse<U>;
-  }
-
-  async updateQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    id: string | NodeReferenceValue,
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<AddId<U>> {
-    const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    this.lastQuery = factory.getQueryObject();
-    return {} as AddId<U>;
-  }
-
-  async deleteQuery(
-    id: NodeId | NodeId[] | NodeReferenceValue[],
-    shapeClass: typeof Shape,
-  ): Promise<DeleteResponse> {
-    const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
-    const factory = new DeleteQueryFactory(shapeClass, ids);
-    this.lastQuery = factory.getQueryObject();
-    return {deleted: [], count: 0};
-  }
-}
-
 const store = new QueryCaptureStore();
 Person.queryParser = store;
 
-const captureQuery = async (runner: () => Promise<unknown>) => {
-  store.lastQuery = undefined;
-  await runner();
-  return store.lastQuery;
-};
+const capture = (runner: () => Promise<unknown>) => captureQuery(store, runner);
 
 describe('IR canonicalization (Phase 4)', () => {
   test('canonicalizes where comparison into expression form', async () => {
-    const query = await captureQuery(() => queryFactories.selectWhereNameSemmy());
+    const query = await capture(() => queryFactories.selectWhereNameSemmy());
     const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
 
     expect(canonical.where?.kind).toBe('where_binary');
@@ -71,7 +20,7 @@ describe('IR canonicalization (Phase 4)', () => {
   });
 
   test('canonicalizes where boolean chain without where_boolean wrappers', async () => {
-    const query = await captureQuery(() => queryFactories.selectWhereNameSemmy());
+    const query = await capture(() => queryFactories.selectWhereNameSemmy());
     const desugared = desugarSelectQuery(query);
     const synthetic: DesugaredWhereBoolean = {
       kind: 'where_boolean',
@@ -89,7 +38,7 @@ describe('IR canonicalization (Phase 4)', () => {
   });
 
   test('flattens same-operator logical nodes', async () => {
-    const query = await captureQuery(() => queryFactories.whereSequences());
+    const query = await capture(() => queryFactories.whereSequences());
     const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
 
     if (canonical.where?.kind === 'where_logical' && canonical.where.operator === 'and') {
@@ -101,7 +50,7 @@ describe('IR canonicalization (Phase 4)', () => {
   });
 
   test('rewrites some() to where_exists', async () => {
-    const query = await captureQuery(() => queryFactories.selectWhereNameSemmy());
+    const query = await capture(() => queryFactories.selectWhereNameSemmy());
     const desugared = desugarSelectQuery(query);
     const nested = desugared.where as any;
     const canonical = canonicalizeDesugaredSelectQuery({
@@ -118,7 +67,7 @@ describe('IR canonicalization (Phase 4)', () => {
   });
 
   test('rewrites every() to not exists(not ...)', async () => {
-    const query = await captureQuery(() => queryFactories.selectWhereNameSemmy());
+    const query = await capture(() => queryFactories.selectWhereNameSemmy());
     const desugared = desugarSelectQuery(query);
     const nested = desugared.where as any;
     const canonical = canonicalizeDesugaredSelectQuery({
