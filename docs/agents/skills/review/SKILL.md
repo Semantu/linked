@@ -19,20 +19,32 @@ Run only when the user explicitly confirms review mode.
 
 ## Output
 
-Create/update `docs/reports/<nnn>-<topic>-review.md` with:
+Update the active plan file `docs/plans/<nnn>-<topic>.md` with a review findings section.
+
+The plan update MUST include:
 
 - What is complete
 - What is not complete
 - Readiness assessment
 - Gaps/risks
-- Recommended follow-up actions (now vs later)
+- Recommended follow-up actions
+
+Review findings should be emitted in chat for discussion.
+Do not create a separate review report file in this mode.
 
 ## Guardrails
 
 - Do not perform cleanup/release tasks in this mode; use wrapup mode for that.
 - Do not remove `docs/plans/<nnn>-<topic>.md` in review mode; plan removal happens in wrapup after report approval.
+- If big remaining work is identified, discuss tradeoffs/solutions in chat first.
+- Only convert review findings into new not-yet-completed phases/tasks when the user explicitly requests it.
+- After adding new tasks, implementation starts only on explicit user request.
 
 ## Exit criteria
 
-- Review report exists with concrete findings and recommendations.
-- User has explicitly confirmed whether to switch to implementation mode, wrapup mode, or remain in review mode.
+- Plan file has an updated review findings section with concrete findings and recommendations.
+- User has explicitly confirmed whether to:
+  - stay in review mode,
+  - switch to tasks mode to add new work,
+  - switch to implementation mode for approved tasks,
+  - or move to wrapup mode.
