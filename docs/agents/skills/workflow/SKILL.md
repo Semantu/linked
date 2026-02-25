@@ -32,6 +32,7 @@ If the user is already asking to DO specific things, you can also add: `Or shoul
 Only switch to the next sequential mode with explicit user confirmation. When completing any mode, the agent must ask: `Shall we switch to {name of next mode}?`.
 Never skip a mode unless explicitly told to. 
 If user seems to suggest skipping a mode but is not explicitly saying which mode to use, then the agent must ask the user `Do you want to continue with {name of next mode} or continue straight to {user suggested mode}?`
+When review identifies remaining work, the agent may loop `review -> tasks -> implementation -> review`, but every switch still requires explicit user confirmation.
 
 ## Required artifacts by mode
 
