@@ -8,7 +8,18 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 ## When to use
 
 - Default for any task that touches code or modifies planning/docs.
-- If the user explicitly asks for a specific mode, run only that mode.
+
+## Mandatory mode selection at task start
+
+- For every new task/thread, the agent MUST ask the user to choose a starting mode before doing mode-specific work.
+- The agent MUST offer all mode options: `ideation`, `plan`, `tasks`, `implementation`, `review`, `wrapup`.
+- The agent MUST recommend starting with `ideation`.
+- If the user starts by describing implementation/review/etc, the agent MUST still ask for explicit mode selection/confirmation before proceeding.
+
+Use this prompt pattern:
+
+1. `Would you like to start in ideation (recommended), plan, tasks, implementation, review, or wrapup?`
+2. `If you want, I can start directly in <requested-mode>, but please confirm the mode.`
 
 ## Mode sequence
 
@@ -21,11 +32,13 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 
 ## Transition gates
 
-- `ideation -> plan`: only when user requests converting ideation into a plan.
-- `plan -> tasks`: only when user requests task breakdown.
-- `tasks -> implementation`: only when user explicitly requests implementation start and the plan is explicitly approved.
-- `implementation -> review`: when implementation is complete or user requests review mode.
-- `review -> wrapup`: when review outcomes are accepted or user requests wrapup.
+- `ideation -> plan`: only when user explicitly confirms switching to plan mode.
+- `plan -> tasks`: only when user explicitly confirms switching to tasks mode.
+- `tasks -> implementation`: only when user explicitly confirms switching to implementation mode and the plan is explicitly approved.
+- `implementation -> review`: only when user explicitly confirms switching to review mode.
+- `review -> wrapup`: only when user explicitly confirms switching to wrapup mode.
+
+After completing any mode, the agent MUST ask: `Which mode should we enter next?`
 
 ## Required artifacts by mode
 
@@ -43,5 +56,6 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 - A plan MUST be written and maintained on disk at `docs/plans/<nnn>-<topic>.md`.
 - Tool-native plan modes do NOT replace the on-disk plan file requirement.
 - After each completed implementation phase, the on-disk plan file MUST be updated before moving to the next phase.
-- If no deviations/major problems, continue through phases without waiting.
+- Within implementation mode, if no deviations/major problems, continue through implementation phases without waiting.
+- Mode changes are never implicit; every mode switch requires explicit user confirmation.
 - If deviation/blocker/major risk appears, pause and report with focused decision questions.

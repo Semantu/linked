@@ -9,6 +9,10 @@ description: Explore and compare candidate implementation routes before committi
 
 Explore potential routes and architecture choices before locking in implementation direction.
 
+## Entry gate
+
+Run this mode only after the user explicitly confirms ideation mode for the current task.
+
 ## Steps
 
 1. Read relevant code, tests, and docs first.
@@ -26,4 +30,4 @@ Explore potential routes and architecture choices before locking in implementati
 
 - Key decisions and route options are documented.
 - User feedback has narrowed choices.
-- User is ready to request plan mode.
+- User has explicitly confirmed whether to switch to plan mode or stay in ideation mode.

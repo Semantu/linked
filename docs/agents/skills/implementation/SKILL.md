@@ -7,7 +7,7 @@ description: Execute planned tasks phase-by-phase with one commit per phase, req
 
 ## Trigger
 
-Run only after explicit user request to begin implementation, with an approved plan file in `docs/plans`.
+Run only after explicit user confirmation to enter implementation mode, with an approved plan file in `docs/plans`.
 
 ## Steps
 
@@ -36,6 +36,7 @@ Run only after explicit user request to begin implementation, with an approved p
 
 - If the originating ideation doc is ambiguous, pause and ask the user which ideation file to remove.
 - Do not skip plan updates between completed phases.
+- Do not switch to review/wrapup implicitly; ask the user to explicitly confirm the next mode.
 
 ## Exit criteria
 

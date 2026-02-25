@@ -35,4 +35,5 @@ find docs/agents/skills -name SKILL.md | sort
 ## Workflow skill
 
 Prefer using the `workflow` skill for any task that touches code or changes plans/docs.
-If the user requests a specific mode (e.g. “Review: …”), follow only that mode.
+At the start of each new task/thread, ask the user which mode to enter first (recommend `ideation`).
+Before switching between modes, require explicit user confirmation for the next mode.
