@@ -9,17 +9,16 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 
 - Default for any task that touches code or modifies planning/docs.
 
-## Mandatory mode selection at task start
+## Mode selection at task start
 
-- For every new task/thread, the agent MUST ask the user to choose a starting mode before doing mode-specific work.
-- The agent MUST offer all mode options: `ideation`, `plan`, `tasks`, `implementation`, `review`, `wrapup`.
-- The agent MUST recommend starting with `ideation`.
-- If the user starts by describing implementation/review/etc, the agent MUST still ask for explicit mode selection/confirmation before proceeding.
+- If the user has already explicitly chosen a mode (or explicitly called a mode skill), enter that mode directly.
+- If the user has not explicitly chosen a mode and the task will involve implementation/code changes, the agent MUST ask whether to start in `ideation` (brainstorming) or `plan` mode before implementation.
+- The agent does not need to offer all mode options at startup unless the user asks for options.
 
-Use this prompt pattern:
+Use this prompt pattern when mode is not yet explicit:
 
-1. `Would you like to start in ideation (recommended), plan, tasks, implementation, review, or wrapup?`
-2. `If you want, I can start directly in <requested-mode>, but please confirm the mode.`
+1. `Before implementation, should we start with ideation/brainstorming or go straight to plan mode?`
+2. `If you want, we can still switch to another mode later with explicit confirmation.`
 
 ## Mode sequence
 
