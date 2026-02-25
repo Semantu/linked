@@ -7,7 +7,7 @@ description: Finalize cleanup and release prep by removing dead code, improving 
 
 ## Trigger
 
-Run when the user requests wrapup mode, typically after review.
+Run only when the user explicitly confirms wrapup mode.
 
 ## Steps
 

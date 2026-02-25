@@ -7,7 +7,7 @@ description: Review implemented work against original intent, readiness for exte
 
 ## Trigger
 
-Run when the user requests review mode, or after implementation is complete before wrapup.
+Run only when the user explicitly confirms review mode.
 
 ## Review focus
 
@@ -35,4 +35,4 @@ Create/update `docs/reports/<nnn>-<topic>-review.md` with:
 ## Exit criteria
 
 - Review report exists with concrete findings and recommendations.
-- User can decide whether to return to implementation or proceed to wrapup.
+- User has explicitly confirmed whether to switch to implementation mode, wrapup mode, or remain in review mode.
