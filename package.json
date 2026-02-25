@@ -42,6 +42,8 @@
     "build": "npx rimraf ./lib && npx tsc -p tsconfig-cjs.json && npx tsc -p tsconfig-esm.json && node ./scripts/dual-package.js",
     "compile": "echo '💫 Compiling CJS' && npx tsc -p tsconfig-cjs.json && echo '💫 Compiling ESM' && npx tsc -p tsconfig-esm.json",
     "dual-package": "node ./scripts/dual-package.js",
+    "sync:agents": "node ./scripts/sync-agents.mjs",
+    "setup": "npm run sync:agents",
     "test": "npx jest --config jest.config.js"
   },
   "devDependencies": {

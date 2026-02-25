@@ -17,6 +17,20 @@ Linked core gives you a type-safe, schema-parameterized query language and SHACL
 npm install @_linked/core
 ```
 
+## Repository setup (contributors)
+
+After cloning this repository, run:
+
+```bash
+npm install
+npm run setup
+```
+
+`npm run setup` syncs `docs/agents` into local folders for agent tooling:
+
+- `.claude/agents`
+- `.agents/agents`
+
 ```typescript
 import {Shape, LinkedStorage} from '@_linked/core';
 import {linkedPackage} from '@_linked/core/utils/Package';
