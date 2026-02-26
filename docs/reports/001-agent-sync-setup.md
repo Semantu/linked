@@ -17,10 +17,12 @@ This scope introduced two categories of improvements:
 2. Workflow/mode skill hardening
 - Added explicit mode confirmation behavior between modes.
 - Clarified startup mode selection behavior when mode is not explicit.
-- Made review mode plan-centric (`docs/plans/...`) with findings emitted in chat.
+- Made review mode chat-first: findings are discussed in chat and clarified before persisting.
 - Added review loop support (`review -> tasks -> implementation -> review`) with explicit confirmation at each switch.
+- Added review-to-ideation path for deferred future scope.
 - Updated wrapup behavior so PR-related requests trigger wrapup mode.
-- Updated wrapup to require PR-readiness checks and to record wrapup outcomes in the plan `## REVIEW` section.
+- Updated wrapup to require PR-readiness checks and to record outcomes in the plan `## REVIEW` section before report conversion.
+- Clarified changeset handling: skip when no package code/release behavior changed.
 
 # Final decisions and rationale
 
@@ -52,6 +54,7 @@ This scope introduced two categories of improvements:
 - `npm run sync:agents`
 - verified copied `SKILL.md` files in both target directories
 
-# Remaining action
+# Wrapup status
 
-- On user approval, remove `docs/plans/001-agent-sync-setup.md` to complete wrapup lifecycle.
+- Plan lifecycle completed: `docs/plans/001-agent-sync-setup.md` was converted and then removed after approval.
+- Scope is PR-ready.
