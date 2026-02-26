@@ -3,9 +3,10 @@ import path from 'node:path';
 
 const projectRoot = process.cwd();
 const sourceDir = path.join(projectRoot, 'docs', 'agents');
+const skillsSourceDir = path.join(sourceDir, 'skills');
 const targets = [
-  path.join(projectRoot, '.claude', 'agents'),
-  path.join(projectRoot, '.agents', 'agents'),
+  {source: skillsSourceDir, dest: path.join(projectRoot, '.claude', 'skills')},
+  {source: skillsSourceDir, dest: path.join(projectRoot, '.agents', 'skills')},
 ];
 
 if (!existsSync(sourceDir)) {
@@ -13,9 +14,9 @@ if (!existsSync(sourceDir)) {
   process.exit(1);
 }
 
-for (const targetDir of targets) {
-  rmSync(targetDir, {recursive: true, force: true});
-  mkdirSync(path.dirname(targetDir), {recursive: true});
-  cpSync(sourceDir, targetDir, {recursive: true});
-  console.log(`Synced ${sourceDir} -> ${targetDir}`);
+for (const {source, dest} of targets) {
+  rmSync(dest, {recursive: true, force: true});
+  mkdirSync(path.dirname(dest), {recursive: true});
+  cpSync(source, dest, {recursive: true});
+  console.log(`Synced ${source} -> ${dest}`);
 }
