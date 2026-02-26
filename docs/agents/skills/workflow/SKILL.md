@@ -13,6 +13,7 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 
 - If the user has already explicitly chosen a mode (or explicitly called a mode skill), enter that mode directly.
 - If the user has not explicitly chosen a mode and the task will involve implementation/code changes, the agent MUST ask whether to start in `ideation` (brainstorming) or `plan` mode before implementation.
+- If the user asks to create/open/update a PR, or asks for PR title/body/message, treat that as an explicit request to enter `wrapup` mode.
 
 Use this prompt pattern when mode is not yet explicit:
 `Should we start with exploring the options in ideation mode? Or do you want to go straight to planning the details in plan mode?`
@@ -33,6 +34,7 @@ Only switch to the next sequential mode with explicit user confirmation. When co
 Never skip a mode unless explicitly told to. 
 If user seems to suggest skipping a mode but is not explicitly saying which mode to use, then the agent must ask the user `Do you want to continue with {name of next mode} or continue straight to {user suggested mode}?`
 When review identifies remaining work, the agent may loop `review -> tasks -> implementation -> review`, but every switch still requires explicit user confirmation.
+Requests related to PR preparation/publishing are an explicit exception and should route directly to `wrapup` mode.
 
 ## Required artifacts by mode
 

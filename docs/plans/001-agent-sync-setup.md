@@ -66,3 +66,25 @@ Validation results:
 - Pass: `find .agents/agents -name SKILL.md | sort` (7 files)
 
 Status: completed
+
+# REVIEW
+
+## Wrapup outcomes
+
+- Workflow skill now treats PR preparation requests as explicit wrapup requests.
+- Wrapup skill now requires:
+  - writing wrapup outcomes in the active plan under `## REVIEW`
+  - converting plan to report
+  - surfacing PR-readiness gaps to the user
+  - explicit handling for docs-only scope where changeset is not required
+
+## PR readiness
+
+- Documentation updates are complete for this scope.
+- Plan-to-report conversion is complete (see `docs/reports/001-agent-sync-setup.md`).
+- Proposed PR title/body are prepared in the report.
+- Plan removal is pending explicit user approval.
+
+## Changeset decision
+
+- Changeset skipped: no package code or runtime/release behavior changed in this scope (docs/process updates only).

@@ -19,7 +19,7 @@ Run only when the user explicitly confirms review mode.
 
 ## Output
 
-Update the active plan file `docs/plans/<nnn>-<topic>.md` with a review findings section.
+Update the active plan file `docs/plans/<nnn>-<topic>.md` with a `## REVIEW` section at the end of the file.
 
 This section must include:
 - What is complete
