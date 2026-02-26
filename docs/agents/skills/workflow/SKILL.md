@@ -34,6 +34,7 @@ Only switch to the next sequential mode with explicit user confirmation. When co
 Never skip a mode unless explicitly told to. 
 If user seems to suggest skipping a mode but is not explicitly saying which mode to use, then the agent must ask the user `Do you want to continue with {name of next mode} or continue straight to {user suggested mode}?`
 When review identifies remaining work, the agent may loop `review -> tasks -> implementation -> review`, but every switch still requires explicit user confirmation.
+When review defers work for future scope, the agent may switch `review -> ideation`, with explicit user confirmation.
 Requests related to PR preparation/publishing are an explicit exception and should route directly to `wrapup` mode.
 
 ## Required artifacts by mode
@@ -42,7 +43,7 @@ Requests related to PR preparation/publishing are an explicit exception and shou
 - `plan`: update/create `docs/plans/<nnn>-<topic>.md`
 - `tasks`: update the same plan doc with phased tasks and validation criteria
 - `implementation`: update the plan doc after every completed phase; remove the originating ideation doc once implementation starts
-- `review`: update plan doc with findings
+- `review`: emit findings in chat first; after user decisions, update plan with now-work tasks and/or create ideation docs for deferred future work
 - `wrapup`: convert plan into a final report doc in `docs/reports`, then remove the plan doc after report approval
 
 ## Global constraints
