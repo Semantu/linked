@@ -14,6 +14,8 @@ Also treat any user request to prepare/open/update a PR, or draft PR title/body/
 
 1. Update `docs/plans/<nnn>-<topic>.md` by appending a `## REVIEW` section at the end with wrapup outcomes and PR-readiness status.
 2. Convert `docs/plans/<nnn>-<topic>.md` into a report doc in `docs/reports/<nnn>-<topic>.md`.
+   - For this conversion, the report `<nnn>` MUST be the next available 3-digit prefix in `docs/reports` (do not reuse the plan prefix when it conflicts).
+   - Update any references to the report path after conversion.
 3. In the report doc, keep a higher-level overview of what changed and why; remove low-level implementation detail that is not needed for future context.
 4. Consolidate remaining tradeoffs/choices into final decisions made and rationale.
 5. Remove dead code related to the implemented scope.

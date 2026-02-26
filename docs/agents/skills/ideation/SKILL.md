@@ -17,6 +17,7 @@ Run this mode only after the user explicitly confirms ideation mode for the curr
 
 1. Read relevant code, tests, and docs first.
 2. Create/update `docs/ideas/<nnn>-<topic>.md`.
+   - For new ideation docs, `<nnn>` MUST be the next available 3-digit prefix in `docs/ideas`.
 3. For each major architecture decision, list multiple viable approaches when applicable.
 4. For each approach, document tradeoffs, pros/cons, and potential risks.
 5. Capture user feedback and narrow choices.

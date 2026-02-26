@@ -51,3 +51,5 @@ Requests related to PR preparation/publishing are an explicit exception and shou
 - Tool-native plan modes do NOT replace the on-disk plan file requirement.
 - After each completed implementation phase, the on-disk plan file MUST be updated before moving to the next phase.
 - Mode changes are never implicit; every mode switch requires explicit user confirmation.
+- Numbering rule: when creating a new doc in `docs/ideas`, `docs/plans`, or `docs/reports`, `<nnn>` MUST be the next available 3-digit prefix in the destination folder.
+- Conversion rule: when converting/moving docs across folders (for example `ideas -> plans` or `plans -> reports`), do not reuse the old prefix; assign the next available prefix in the destination folder and update references accordingly.

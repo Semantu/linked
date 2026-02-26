@@ -33,6 +33,7 @@ After decisions are clear:
 - If deferred: create ideation docs in `docs/ideas`:
   - group related deferred items into one ideation doc
   - create separate ideation docs only for very different, large deferred tasks
+  - assign the next available 3-digit prefix in `docs/ideas` for each new ideation doc
 
 Then report in chat what was updated and ask the user to review those updates.
 Do not create a separate review report file in this mode.

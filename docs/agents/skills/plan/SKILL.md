@@ -12,6 +12,7 @@ Run only when the user explicitly confirms plan mode (for example: converting id
 ## Steps
 
 1. Create/update `docs/plans/<nnn>-<topic>.md`. This on-disk plan file is mandatory.
+   - When creating a new plan doc (including ideation -> plan conversion), `<nnn>` MUST be the next available 3-digit prefix in `docs/plans`.
 2. Focus on chosen route(s), not all explored options.
 3. Include:
    - Main architecture decisions
