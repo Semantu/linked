@@ -7,11 +7,12 @@ description: Convert chosen ideation decisions into a concrete architecture plan
 
 ## Trigger
 
-Run only when the user requests converting ideation into a plan or updating the plan.
+Run only when the user explicitly confirms plan mode (for example: converting ideation into a plan or updating the plan).
 
 ## Steps
 
 1. Create/update `docs/plans/<nnn>-<topic>.md`. This on-disk plan file is mandatory.
+   - When creating a new plan doc (including ideation -> plan conversion), `<nnn>` MUST be the next available 3-digit prefix in `docs/plans`.
 2. Focus on chosen route(s), not all explored options.
 3. Include:
    - Main architecture decisions
@@ -33,4 +34,4 @@ Run only when the user requests converting ideation into a plan or updating the 
 
 - Plan clearly reflects chosen decisions.
 - Risks and open questions are explicit.
-- User has explicitly approved the plan and is ready to request tasks mode.
+- User has explicitly approved the plan and explicitly confirmed whether to switch to tasks mode or remain in plan mode.

@@ -7,7 +7,7 @@ description: Break an approved plan into ordered phases and concrete tasks with 
 
 ## Trigger
 
-Run only when the user requests task breakdown.
+Run only when the user explicitly confirms tasks mode.
 
 ## Steps
 
@@ -25,4 +25,4 @@ Run only when the user requests task breakdown.
 
 - Every phase has tasks and validation criteria.
 - Execution order/dependencies are clear.
-- User has explicitly approved implementation start, or has confirmed the task plan is ready for that request.
+- User has explicitly confirmed whether to switch to implementation mode or remain in tasks mode.

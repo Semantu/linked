@@ -7,7 +7,7 @@ description: Review implemented work against original intent, readiness for exte
 
 ## Trigger
 
-Run when the user requests review mode, or after implementation is complete before wrapup.
+Run only when the user explicitly confirms review mode.
 
 ## Review focus
 
@@ -19,20 +19,43 @@ Run when the user requests review mode, or after implementation is complete befo
 
 ## Output
 
-Create/update `docs/reports/<nnn>-<topic>-review.md` with:
+Review findings must be emitted in chat first.
+Do not write findings to plan or report files until decisions are clarified with the user.
 
-- What is complete
-- What is not complete
-- Readiness assessment
-- Gaps/risks
-- Recommended follow-up actions (now vs later)
+For each identified gap, ask clarifying questions until both are explicit:
+
+- whether this gap should be handled now in this session or deferred for future work
+- how to approach the gap when multiple implementation routes exist
+
+After decisions are clear:
+
+- If handled now: update the active plan file `docs/plans/<nnn>-<topic>.md` with newly added not-yet-completed phases/tasks.
+- If deferred: create ideation docs in `docs/ideas`:
+  - group related deferred items into one ideation doc
+  - create separate ideation docs only for very different, large deferred tasks
+  - assign the next available 3-digit prefix in `docs/ideas` for each new ideation doc
+
+Then report in chat what was updated and ask the user to review those updates.
+Do not create a separate review report file in this mode.
+
 
 ## Guardrails
 
 - Do not perform cleanup/release tasks in this mode; use wrapup mode for that.
 - Do not remove `docs/plans/<nnn>-<topic>.md` in review mode; plan removal happens in wrapup after report approval.
+- If big remaining work is identified, discuss tradeoffs/solutions in chat first.
+- Only convert review findings into new not-yet-completed phases/tasks after the user confirms scope and approach.
+- After adding new tasks, ask the user to review the updated plan and explicitly ask whether to start implementation with the first new phase.
+- For newly uncovered work, do not switch directly from review to implementation; switch to tasks mode first.
 
 ## Exit criteria
 
-- Review report exists with concrete findings and recommendations.
-- User can decide whether to return to implementation or proceed to wrapup.
+- Gaps are clarified with explicit user decisions (now vs future, and chosen approach where needed).
+- If now-work exists, plan was updated with new phases/tasks and user was asked whether to start implementation of the first new phase.
+- If future-work exists, ideation docs were created according to grouping rules and user was informed.
+- User has explicitly confirmed whether to:
+  - stay in review mode,
+  - switch to tasks mode,
+  - switch to implementation mode for approved next phase,
+  - switch to ideation mode for future work,
+  - or move to wrapup mode.

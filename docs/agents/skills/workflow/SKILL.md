@@ -8,7 +8,17 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 ## When to use
 
 - Default for any task that touches code or modifies planning/docs.
-- If the user explicitly asks for a specific mode, run only that mode.
+
+## Mode selection at task start
+
+- If the user has already explicitly chosen a mode (or explicitly called a mode skill), enter that mode directly.
+- If the user has not explicitly chosen a mode and the task will involve implementation/code changes, the agent MUST ask whether to start in `ideation` (brainstorming) or `plan` mode before implementation.
+- If the user asks to create/open/update a PR, or asks for PR title/body/message, treat that as an explicit request to enter `wrapup` mode.
+
+Use this prompt pattern when mode is not yet explicit:
+`Should we start with exploring the options in ideation mode? Or do you want to go straight to planning the details in plan mode?`
+
+If the user is already asking to DO specific things, you can also add: `Or should I just go ahead and jump to implementation mode?`
 
 ## Mode sequence
 
@@ -20,12 +30,12 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 6. `wrapup`
 
 ## Transition gates
-
-- `ideation -> plan`: only when user requests converting ideation into a plan.
-- `plan -> tasks`: only when user requests task breakdown.
-- `tasks -> implementation`: only when user explicitly requests implementation start and the plan is explicitly approved.
-- `implementation -> review`: when implementation is complete or user requests review mode.
-- `review -> wrapup`: when review outcomes are accepted or user requests wrapup.
+Only switch to the next sequential mode with explicit user confirmation. When completing any mode, the agent must ask: `Shall we switch to {name of next mode}?`.
+Never skip a mode unless explicitly told to. 
+If user seems to suggest skipping a mode but is not explicitly saying which mode to use, then the agent must ask the user `Do you want to continue with {name of next mode} or continue straight to {user suggested mode}?`
+When review identifies remaining work, the agent may loop `review -> tasks -> implementation -> review`, but every switch still requires explicit user confirmation.
+When review defers work for future scope, the agent may switch `review -> ideation`, with explicit user confirmation.
+Requests related to PR preparation/publishing are an explicit exception and should route directly to `wrapup` mode.
 
 ## Required artifacts by mode
 
@@ -33,15 +43,13 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 - `plan`: update/create `docs/plans/<nnn>-<topic>.md`
 - `tasks`: update the same plan doc with phased tasks and validation criteria
 - `implementation`: update the plan doc after every completed phase; remove the originating ideation doc once implementation starts
-- `review`: create/update `docs/reports/<nnn>-<topic>-review.md`
+- `review`: emit findings in chat first; after user decisions, update plan with now-work tasks and/or create ideation docs for deferred future work
 - `wrapup`: convert plan into a final report doc in `docs/reports`, then remove the plan doc after report approval
 
 ## Global constraints
 
-- One commit per implementation phase.
-- Every implementation phase must include validation checks.
-- A plan MUST be written and maintained on disk at `docs/plans/<nnn>-<topic>.md`.
 - Tool-native plan modes do NOT replace the on-disk plan file requirement.
 - After each completed implementation phase, the on-disk plan file MUST be updated before moving to the next phase.
-- If no deviations/major problems, continue through phases without waiting.
-- If deviation/blocker/major risk appears, pause and report with focused decision questions.
+- Mode changes are never implicit; every mode switch requires explicit user confirmation.
+- Numbering rule: when creating a new doc in `docs/ideas`, `docs/plans`, or `docs/reports`, `<nnn>` MUST be the next available 3-digit prefix in the destination folder.
+- Conversion rule: when converting/moving docs across folders (for example `ideas -> plans` or `plans -> reports`), do not reuse the old prefix; assign the next available prefix in the destination folder and update references accordingly.

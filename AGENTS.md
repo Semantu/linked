@@ -35,4 +35,4 @@ find docs/agents/skills -name SKILL.md | sort
 ## Workflow skill
 
 Prefer using the `workflow` skill for any task that touches code or changes plans/docs.
-If the user requests a specific mode (e.g. “Review: …”), follow only that mode.
+If mode is not already explicit, ask whether to start with `ideation` (brainstorming) or `plan` before implementation work.
