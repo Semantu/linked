@@ -572,10 +572,12 @@ Phase 4: Fuseki integration tests
 
 ---
 
-### Phase 2a: Layer 1 — IR → Algebra for SELECT queries
+### Phase 2a: Layer 1 — IR → Algebra for SELECT queries ✅
 
 **Depends on:** Phase 1 only
 **Can run in parallel with:** 2b, 2c, 2d
+
+**Status: COMPLETE** — 27 tests pass in `sparql-algebra.test.ts`. Full compilation clean, no regressions (291/291 tests pass).
 
 **Tasks:**
 1. Implement `src/sparql/irToAlgebra.ts` — `selectToAlgebra(query, options)`:
@@ -683,9 +685,11 @@ Phase 4: Fuseki integration tests
 
 ---
 
-### Phase 2b: Layer 3 — Algebra → SPARQL string serialization
+### Phase 2b: Layer 3 — Algebra → SPARQL string serialization ✅
 
 **Depends on:** Phase 1 only
+
+**Status: COMPLETE** — 61 tests pass in `sparql-serialization.test.ts`. Full compilation clean, no regressions.
 **Can run in parallel with:** 2a, 2c, 2d
 
 **Tasks:**
@@ -810,10 +814,12 @@ All tests use hand-crafted algebra objects — no dependency on `irToAlgebra.ts`
 
 ---
 
-### Phase 2c: Result mapping
+### Phase 2c: Result mapping ✅
 
 **Depends on:** Phase 1 only (uses IR types + SparqlJsonResults type)
 **Can run in parallel with:** 2a, 2b, 2d
+
+**Status: COMPLETE** — 25 tests pass in `sparql-result-mapping.test.ts`. Full compilation clean, no regressions.
 
 **Tasks:**
 1. Implement `src/sparql/resultMapping.ts`:
@@ -901,10 +907,12 @@ All tests use hand-crafted `SparqlJsonResults` objects paired with IR queries fr
 
 ---
 
-### Phase 2d: Layer 1 — IR → Algebra for mutations
+### Phase 2d: Layer 1 — IR → Algebra for mutations ✅
 
 **Depends on:** Phase 1 only
 **Can run in parallel with:** 2a, 2b, 2c
+
+**Status: COMPLETE** — 16 tests pass in `sparql-mutation-algebra.test.ts`. Full compilation clean, no regressions.
 
 **Tasks:**
 1. Add mutation conversion functions to `src/sparql/irToAlgebra.ts`:

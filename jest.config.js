@@ -18,6 +18,10 @@ module.exports = {
     '**/ir-select-golden.test.ts',
     '**/ir-mutation-parity.test.ts',
     '**/sparql-utils.test.ts',
+    '**/sparql-serialization.test.ts',
+    '**/sparql-result-mapping.test.ts',
+    '**/sparql-algebra.test.ts',
+    '**/sparql-mutation-algebra.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {
