@@ -1722,6 +1722,273 @@ Phase 9 (full Fuseki coverage) — depends on 8 because both limitations must be
 
 Phases 7 and 8 are sequential (not parallel) because they both modify the same golden test files. Running them in parallel would create merge conflicts. Phase 9 must wait for both fixes.
 
+---
+
+### Phase 10: Recursive nesting in result mapping
+
+**Status:** Not started
+
+**Depends on:** Phase 9
+**Can run in parallel with:** —
+
+**Problem:** `resultMapping.ts` only supports one level of nesting. `buildNestingDescriptor()` creates flat `nestedGroups` keyed by the immediate traverse from root. For multi-level traversals like `selectNestedFriendsName` (friends.friends.name) or `doubleNestedSubSelect` (friends→bestFriend→name), intermediate nesting levels are flattened — a2 entities end up grouped directly under the root instead of nested under their parent a1 entity.
+
+**Root cause:** The `NestingDescriptor` type is flat:
+```ts
+type NestingDescriptor = {
+  rootVar: string;
+  flatFields: Array<{key, sparqlVar, expression}>;
+  nestedGroups: Array<{key, traverseAlias, fields: Array<{key, sparqlVar, expression}>}>;
+};
+```
+There is no recursive `nestedGroups[].nestedGroups` structure. The walk-up logic in `buildNestingDescriptor()` (lines 209-214) finds the immediate child of root but doesn't track the full traversal chain.
+
+**Affected fixtures:**
+- `selectNestedFriendsName` — friends.friends.name (a0→a1→a2)
+- `doubleNestedSubSelect` — friends.select(f => f.bestFriend.select(…)) (a0→a1→a2)
+- `selectDeepNested` — friends.bestFriend.bestFriend.name (a0→a1→a2→a3)
+- `nestedQueries2` — friends.select(f => [f.firstPet, f.bestFriend.select(…)]) (a0→a1, a1→a2)
+
+**Approach:**
+
+Make `NestingDescriptor` recursive. Each `nestedGroup` can itself contain `nestedGroups`:
+```ts
+type NestedGroup = {
+  key: string;
+  traverseAlias: string;
+  fields: Array<{key, sparqlVar, expression}>;
+  nestedGroups: NestedGroup[];  // recursive
+};
+```
+
+In `buildNestingDescriptor()`, instead of walking up to root and grouping everything flat, build a tree of nested groups matching the traversal chain. In `mapNestedRows()`, recursively descend the tree, grouping bindings at each level.
+
+**Files changed:**
+- `src/sparql/resultMapping.ts` — recursive NestingDescriptor, recursive mapNestedRows
+
+**Open questions:**
+- **Q10a:** Should we handle mixed nesting (some fields flat on an intermediate entity, some nested further)? Example: `friends.select(f => [f.name, f.bestFriend.name])` has both a flat field (name on a1) and a deeper nested field (name on a2). The current model would need each intermediate group to have both `fields` and `nestedGroups`.
+- **Q10b:** How should multi-level nesting interact with single-value traversals (maxCount=1) vs multi-value (friends)? For single-value traversals like `bestFriend.bestFriend.name`, should the result be `{bestFriend: {bestFriend: {name: "..."}}}` or flattened?
+- **Q10c:** Performance concern: for deeply nested queries (3+ levels), the recursive grouping could create many intermediate objects. Is this acceptable, or should we cap nesting depth?
+
+---
+
+### Phase 11: Tighten Fuseki test assertions to OLD test depth
+
+**Status:** Not started
+
+**Depends on:** Phase 10 (nesting must work before we can assert on nested structure)
+**Can run in parallel with:** —
+
+**Problem:** The OLD tests in `OLD/src/tests/query-tests.tsx` had precise assertions:
+- Exact array lengths (`expect(names.length).toBe(4)`)
+- Specific field values per entity (`expect(first.friends[0].name).toBe('Moa')`)
+- Deep nested structure checks (`expect(first.friends[0].friends.some(f => f.id == p3.uri)).toBe(true)`)
+- Type coercion precision (`expect(typeof firstResult.birthDate === 'object').toBe(true)`)
+- Full null/undefined handling per entity
+
+The current Fuseki tests use defensive patterns: `length >= 1`, `toBeDefined()`, structural checks. This gives lower confidence that the full pipeline produces correct results for all fixtures.
+
+**Approach:** Systematically go through each Fuseki test and replace defensive assertions with precise ones matching OLD test patterns. For each test:
+1. Determine exact expected results from test data
+2. Assert exact array lengths
+3. Assert specific field values per entity
+4. For nested results (after Phase 10), assert nested structure depth and content
+5. Verify type coercion (Date objects, boolean primitives, number types)
+
+**Files changed:**
+- `src/tests/sparql-fuseki.test.ts` — tighten all assertions
+
+**Open questions:**
+- **Q11a:** Should we tighten ALL 75 tests, or only the ones where we're confident the SPARQL is semantically correct? The 5 inline-where fixtures (Gap B) and 3 invalid-SPARQL fixtures (Gap C) produce known-incorrect results — tightening assertions on those would just assert the wrong behavior.
+- **Q11b:** Should the tightened tests depend on Fuseki being available (as now), or should we also add non-Fuseki assertion tests that use hand-crafted SPARQL JSON to test result mapping in isolation? The latter would run in CI without Docker.
+- **Q11c:** For nested structure assertions, should we use exact object matching (`toEqual`) or continue with field-by-field assertions? Exact matching is more thorough but more brittle to future changes.
+
+---
+
+### Phase 12: Inline where filter lowering (IR pipeline)
+
+**Status:** Not started
+
+**Depends on:** Phase 9
+**Can run in parallel with:** Phase 10, Phase 13, Phase 14
+
+**Problem:** 5 fixtures produce valid SPARQL but with inline `.where()` predicates silently dropped:
+- `whereFriendsNameEquals` — `p.friends.where(f => f.name.equals('Moa'))` → no FILTER
+- `whereAnd` — `p.friends.where(f => f.name.equals('Moa').and(f.hobby.equals('Jogging')))` → no FILTER
+- `whereOr` — `p.friends.where(f => f.name.equals('Jinx').or(f.hobby.equals('Jogging')))` → no FILTER
+- `whereAndOrAnd` — compound boolean → no FILTER
+- `whereAndOrAndNested` — nested compound boolean → no FILTER
+
+**Root cause analysis:**
+
+The IR pipeline preserves the where predicate during desugaring:
+```
+DSL: p.friends.where(f => f.name.equals('Moa'))
+  → IRDesugar: DesugaredPropertyStep { kind: 'property_step', propertyShapeId, where: DesugaredWhere }
+```
+
+But the predicate is **never processed** after that point:
+1. `IRCanonicalize.ts` only canonicalizes `query.where` (the top-level outer where), not `DesugaredPropertyStep.where` embedded in selections
+2. `IRLower.ts` only processes `canonical.where` and `evaluation_select.where` — it does not inspect property step where predicates
+3. Result: the where predicate is silently discarded when the selection path is lowered to an IR expression
+
+**Approach — two options:**
+
+**Option A: Propagate inline where to IR filter expressions**
+In `IRLower.ts`, when lowering a selection path that contains property steps with `.where`, convert the where predicate to an IR filter expression attached to the traversal. This means:
+- Walking the selection path steps
+- When a step has `.where`, canonicalize it and lower it to an IR expression
+- Attach the expression as a FILTER on the traversal pattern (like the existing `exists_expr` pattern)
+
+This would change the IR output for these fixtures, requiring golden test updates.
+
+**Option B: Lower inline where to EXISTS subpattern**
+Convert inline `.where()` to an EXISTS check at the SPARQL level:
+```sparql
+-- Instead of just: ?a0 <P/friends> ?a0_friends .
+-- Produce: ?a0 <P/friends> ?a0_friends . FILTER EXISTS { ?a0_friends <P/name> ?name . FILTER(?name = "Moa") }
+```
+
+This keeps the traversal as-is but adds a FILTER EXISTS to restrict which values match.
+
+**Files changed:**
+- `src/queries/IRLower.ts` or `src/queries/IRCanonicalize.ts` — propagate inline where
+- `src/sparql/irToAlgebra.ts` — may need changes if IR output changes
+- `src/tests/sparql-select-golden.test.ts` — update 5+ golden tests
+- `src/tests/sparql-fuseki.test.ts` — update 5 tests with real assertions
+
+**Open questions:**
+- **Q12a:** Option A or Option B? Option A is cleaner (filter at IR level) but requires deeper changes to the lowering pipeline. Option B is more localized (SPARQL-layer workaround) but produces more complex SPARQL.
+- **Q12b:** Should the inline where restrict the set of returned values (only return friends matching the filter) or the set of root entities (return persons who have at least one friend matching)? The OLD tests would clarify the expected semantics.
+- **Q12c:** Does this overlap with the `some()` / `every()` quantifier handling? The DSL `p.friends.where(f => ...)` may be semantically equivalent to `p.friends.some(f => ...)`. If so, should the desugar pass normalize `.where()` to `.some()` first?
+
+---
+
+### Phase 13: Fix invalid SPARQL generation (3 fixtures)
+
+**Status:** Not started
+
+**Depends on:** Phase 9
+**Can run in parallel with:** Phase 10, Phase 12, Phase 14
+
+**Problem:** 3 fixtures produce syntactically invalid SPARQL that Fuseki rejects:
+
+**13a. `whereEvery` — incorrect NOT syntax**
+
+Generated: `FILTER(!?a1_name = "Moa" || ?a1_name = "Jinx")`
+Expected: `FILTER(NOT EXISTS { ... FILTER(NOT(?a1_name = "Moa" || ?a1_name = "Jinx")) })`
+
+Root cause: The `every()` quantifier is canonicalized to `where_not(where_exists(path, where_not(predicate)))`. This is semantically correct (∀x.P(x) ≡ ¬∃x.¬P(x)). But in the lowering, the inner `where_not` produces `not_expr`, which the algebra layer serializes as `!expr`. The `!` prefix in SPARQL has higher precedence than `=`, so `!?a1_name = "Moa"` parses as `(!?a1_name) = "Moa"` instead of `!(?a1_name = "Moa")`.
+
+Fix: In `algebraToString.ts`, when serializing `not_expr`, always wrap the inner expression in parentheses: `!(expr)` instead of `!expr`.
+
+**13b. `whereSequences` — `some` as SPARQL operator**
+
+Generated: `FILTER(?a0_friends some "" && ?a0_name = "Semmy")`
+
+Root cause: The `some` quantifier is being lowered as a binary operator instead of being converted to an EXISTS expression. In `IRCanonicalize.ts`, the `WhereMethods.SOME` enum check (lines 145-151) should convert `some` to an `exists` pattern. But the string `'some'` is reaching `lowerWhere()` as a `where_binary` with `operator: 'some'`, meaning the canonicalization's quantifier detection is being bypassed for this code path.
+
+This likely happens because the chained `.some(...).and(...)` in `whereSequences` produces a compound where structure where the `some` part is nested inside the `and` in a way the canonicalization doesn't recurse into.
+
+Fix: Investigate why `some` escapes canonicalization in the chained-sequence pattern. The canonicalization's `toExists()` handling may need to be applied recursively inside compound boolean expressions.
+
+**13c. `countEquals` — COUNT in FILTER instead of HAVING**
+
+Generated: `FILTER(count(?a0_friends) = "2"^^xsd:integer)`
+Expected: `SELECT ?a0 ... GROUP BY ?a0 HAVING(count(?a0_friends) = 2)`
+
+Root cause: `.where(p => p.friends.size().equals(2))` lowers the `size().equals(2)` to a binary expression with an `aggregate_expr` on the left. This binary expression ends up in the WHERE clause of the IR. The SPARQL algebra layer converts it to a FILTER, but aggregates in FILTER are invalid SPARQL — they belong in HAVING.
+
+Fix: In `irToAlgebra.ts` `selectToAlgebra()`, after converting the where clause, detect if the resulting filter expression contains aggregate sub-expressions. If so, extract the aggregate-containing parts to `HAVING` and leave the non-aggregate parts in `FILTER`. This requires:
+1. A helper `containsAggregate(expr)` to detect aggregate sub-expressions
+2. Logic to split a logical expression into aggregate and non-aggregate parts
+3. Adding the aggregate part to `groupBy` / `having` on the plan
+4. The `SparqlSelectPlan` type may need a `having` field (check if it exists)
+
+**Files changed:**
+- `src/sparql/algebraToString.ts` — fix NOT parenthesization (13a)
+- `src/queries/IRCanonicalize.ts` — fix `some` in chained sequences (13b)
+- `src/sparql/irToAlgebra.ts` — detect aggregates in WHERE → move to HAVING (13c)
+- `src/sparql/SparqlAlgebra.ts` — possibly add `having` to SparqlSelectPlan
+- `src/tests/sparql-select-golden.test.ts` — update 3 golden tests
+- `src/tests/sparql-fuseki.test.ts` — update 3 tests to run against Fuseki
+
+**Open questions:**
+- **Q13a:** For the NOT parenthesization fix (13a): is `!(expr)` always correct, or are there cases where the `!` should distribute differently? e.g., `NOT(a AND b)` vs `NOT(a) OR NOT(b)`.
+- **Q13b:** For `whereSequences` (13b): should the fix be in the canonicalization layer (prevent `some` from reaching lowering as a binary operator) or in the lowering layer (catch `some` as operator and convert to EXISTS there)?
+- **Q13c:** For `countEquals` (13c): does `SparqlSelectPlan` already have a `having` field, or does it need to be added? If added, does `algebraToString.ts` already serialize it?
+- **Q13d:** Should all 3 sub-fixes be in one phase or split into separate commits? They touch different layers (serialization, canonicalization, algebra conversion).
+
+---
+
+### Phase 14: Fix remaining edge cases (evaluation_select, context path)
+
+**Status:** Not started
+
+**Depends on:** Phase 9
+**Can run in parallel with:** Phase 10, Phase 12, Phase 13
+
+**Problem:** 2 fixtures produce semantically incorrect SPARQL:
+
+**14a. `customResultEqualsBoolean` — boolean expression lost in projection**
+
+`Person.select(p => ({isBestFriend: p.bestFriend.equals(entity('p3'))}))` generates:
+```sparql
+SELECT DISTINCT ?a0 ?a1
+WHERE { ?a0 rdf:type <P> . OPTIONAL { ?a0 <P/bestFriend> ?a0_bestFriend . } }
+```
+
+The boolean comparison `bestFriend.equals(entity('p3'))` is lost. The projection should be:
+```sparql
+SELECT DISTINCT ?a0 (?a0_bestFriend = <linked://tmp/entities/p3> AS ?isBestFriend)
+```
+
+Root cause: In `IRLower.ts`, `evaluation_select` with a where predicate is lowered to an `IRExpression` and becomes a projection seed. But in `irToAlgebra.ts`, the projection processing via `resolveExpressionVariable()` (line 294) only handles `alias_expr` and `property_expr` — a `binary_expr` returns `null`, causing the fallback to project just the alias name. The binary expression is never serialized into a `(expr AS ?alias)` projected expression.
+
+Fix: In `irToAlgebra.ts` projection building (step 7, lines 278-302), when a projection item's expression is NOT a simple variable/alias/aggregate, serialize it as `(expression AS ?alias)` in the SELECT clause. This requires adding a `bind` or `expression_alias` variant to `SparqlProjectionItem`.
+
+**14b. `whereWithContextPath` — tautological FILTER**
+
+`Person.select(p => p.name).where(p => { const userName = getQueryContext<Person>('user').name; return p.friends.some(f => f.name.equals(userName)); })` generates:
+```sparql
+FILTER(?a1_name = ?a1_name)
+```
+
+The context path `getQueryContext('user').name` resolves to the same variable `?a1_name` instead of resolving to the context user entity's name value.
+
+Root cause: `getQueryContext('user')` returns a shape proxy. When `.name` is accessed, it builds a path expression through the proxy. But since the proxy isn't bound to a specific entity in the query, the path resolves to the same variable that the inner `f.name` resolves to.
+
+Fix: The context path should resolve to a concrete value (the actual name of the context user) or to a different variable bound via a separate traversal from the context entity.
+
+**Files changed:**
+- `src/sparql/irToAlgebra.ts` — project expressions as `(expr AS ?alias)` (14a)
+- `src/sparql/SparqlAlgebra.ts` — add expression projection item type (14a)
+- `src/sparql/algebraToString.ts` — serialize expression projections (14a)
+- `src/queries/IRLower.ts` or context resolution — fix context path binding (14b)
+- `src/tests/sparql-select-golden.test.ts` — update 2 golden tests
+- `src/tests/sparql-fuseki.test.ts` — update 2 tests
+
+**Open questions:**
+- **Q14a:** For the expression projection (14a): should we support arbitrary expressions in SELECT (e.g. `(expr AS ?alias)`), or only comparison expressions? SPARQL allows any expression in a BIND/projected expression, but we only need comparison for now.
+- **Q14b:** For context path (14b): what is the intended semantics of `getQueryContext('user').name`? Should it resolve to a literal value (eagerly evaluate the context user's name from the store) or to a SPARQL variable bound to the context entity's name via a separate pattern? The eager approach is simpler but requires a store read at query-build time. The SPARQL approach is purer but more complex.
+- **Q14c:** Is `customResultEqualsBoolean` a high-priority use case? The DSL pattern `{isBestFriend: p.bestFriend.equals(entity)}` is unusual — most users would use `.where()` for filtering instead of projecting a boolean. If low priority, we could defer this.
+- **Q14d:** Is `whereWithContextPath` a high-priority use case? The pattern of accessing properties of a context entity in a where clause is niche. If low priority, we could defer this.
+
+---
+
+**Dependency graph for Phases 10-14:**
+```
+Phase 9 (complete)
+  ├─→ Phase 10 (recursive nesting) ─→ Phase 11 (tighten assertions)
+  ├─→ Phase 12 (inline where lowering) ─────────┐
+  ├─→ Phase 13 (invalid SPARQL fixes)            ├─→ [all complete → full parity]
+  └─→ Phase 14 (edge cases: eval projection,     │
+                 context path)  ──────────────────┘
+```
+
+Phases 12, 13, 14 can run in parallel (different files, different layers). Phase 10 is independent. Phase 11 depends on Phase 10 (needs recursive nesting to assert on nested structure) and benefits from 12-14 (fewer "known incorrect" caveats).
+
 ### Phase summary
 
 | Phase | Description | Depends on | Parallel group |
@@ -1738,3 +2005,8 @@ Phases 7 and 8 are sequential (not parallel) because they both modify the same g
 | 7 | Fix URI-vs-literal in FILTER ✅ | 6 | — |
 | 8 | Fix nested result grouping ✅ | 7 | — |
 | 9 | Full Fuseki coverage (all 75 fixtures) ✅ | 8 | — |
+| 10 | Recursive nesting in result mapping | 9 | — |
+| 11 | Tighten Fuseki assertions to OLD depth | 10 | — |
+| 12 | Inline where filter lowering (IR pipeline) | 9 | **parallel** (12,13,14) |
+| 13 | Fix invalid SPARQL (3 fixtures) | 9 | **parallel** (12,13,14) |
+| 14 | Fix edge cases (eval projection, context path) | 9 | **parallel** (12,13,14) |
