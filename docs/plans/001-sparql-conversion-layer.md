@@ -1774,6 +1774,144 @@ In `buildNestingDescriptor()`, instead of walking up to root and grouping everyt
 - **Q10c:** Performance concern: for deeply nested queries (3+ levels), the recursive grouping could create many intermediate objects. Is this acceptable, or should we cap nesting depth?
   - **Recommendation:** No depth cap needed. Practical queries rarely exceed 3-4 levels of nesting, and the recursive grouping overhead is negligible compared to the SPARQL query execution cost. The row count from Fuseki is the real bottleneck, not the JS grouping. If performance becomes an issue later, it can be addressed with lazy construction, but pre-optimizing here adds complexity without benefit.
 
+**Implementation details:**
+
+*1. Make `NestingDescriptor` recursive — `src/sparql/resultMapping.ts`*
+
+Replace the flat type (lines 141-160) with:
+```ts
+type FieldDescriptor = {
+  key: string;
+  sparqlVar: string;
+  expression: IRExpression;
+};
+
+type NestedGroup = {
+  key: string;            // result key (e.g. "friends", "bestFriend")
+  traverseAlias: string;  // SPARQL variable to group by (e.g. "a1")
+  fields: FieldDescriptor[];
+  nestedGroups: NestedGroup[];
+};
+
+type NestingDescriptor = {
+  rootVar: string;
+  flatFields: FieldDescriptor[];
+  nestedGroups: NestedGroup[];
+};
+```
+
+*2. Rewrite `buildNestingDescriptor()` — `src/sparql/resultMapping.ts` lines 166-239*
+
+Current logic (lines 209-214) walks UP the traversal chain to find the immediate child of root, then groups everything flat at that level. This needs to build a tree instead:
+
+```ts
+// For each field, build the full alias chain from root to the source alias.
+// Example: friends.bestFriend.name → chain is [a1, a2], field is on a2.
+//
+// Algorithm:
+//   1. For each resultMap entry, determine its sourceAlias from the expression.
+//   2. Build the alias chain: walk traverseMap from sourceAlias back to root,
+//      collecting [a2, a1] (reversed) → then reverse to get [a1, a2].
+//   3. Walk the chain through the NestedGroup tree, creating groups as needed.
+//   4. Attach the field to the group corresponding to its sourceAlias.
+function buildAliasChain(
+  sourceAlias: string,
+  rootAlias: string,
+  traverseMap: Map<string, {from: string; property: string}>,
+): Array<{alias: string; property: string}> {
+  const chain: Array<{alias: string; property: string}> = [];
+  let current = sourceAlias;
+  while (current !== rootAlias) {
+    const info = traverseMap.get(current);
+    if (!info) break;
+    chain.unshift({alias: current, property: info.property});
+    current = info.from;
+  }
+  return chain;
+}
+```
+
+Then walk the chain through the tree to insert each field at the correct depth:
+```ts
+function insertIntoTree(
+  root: {flatFields: FieldDescriptor[]; nestedGroups: NestedGroup[]},
+  chain: Array<{alias: string; property: string}>,
+  field: FieldDescriptor,
+): void {
+  if (chain.length === 0) {
+    root.flatFields.push(field);
+    return;
+  }
+  // Find or create group for chain[0]
+  let group = root.nestedGroups.find(g => g.traverseAlias === chain[0].alias);
+  if (!group) {
+    group = {
+      key: localName(chain[0].property),
+      traverseAlias: chain[0].alias,
+      fields: [],
+      nestedGroups: [],
+    };
+    root.nestedGroups.push(group);
+  }
+  // Recurse with remaining chain
+  insertIntoTree(group, chain.slice(1), field);
+}
+```
+
+*3. Rewrite `mapNestedRows()` — `src/sparql/resultMapping.ts` lines 339-415*
+
+Make it recursive. Extract a helper that processes a single nesting level:
+
+```ts
+function groupBindings(
+  bindings: SparqlBinding[],
+  groupAlias: string,
+  fields: FieldDescriptor[],
+  nestedGroups: NestedGroup[],
+): ResultRow[] {
+  // Group bindings by the groupAlias variable
+  const groups = new Map<string, {first: SparqlBinding; all: SparqlBinding[]}>();
+  for (const binding of bindings) {
+    const val = binding[groupAlias];
+    if (!val) continue;
+    const id = val.value;
+    let group = groups.get(id);
+    if (!group) {
+      group = {first: binding, all: []};
+      groups.set(id, group);
+    }
+    group.all.push(binding);
+  }
+
+  const rows: ResultRow[] = [];
+  for (const [id, group] of groups) {
+    const row: ResultRow = {id};
+    // Flat fields from first binding
+    for (const field of fields) {
+      const val = group.first[field.sparqlVar];
+      row[field.key] = val ? (val.type === 'uri' ? {id: val.value} : coerceValue(val)) : null;
+    }
+    // Recursively process nested groups
+    for (const nested of nestedGroups) {
+      row[nested.key] = groupBindings(
+        group.all,
+        nested.traverseAlias,
+        nested.fields,
+        nested.nestedGroups,
+      );
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+```
+
+*4. Things to consider:*
+- The `isUriExpression()` check (line 133-135) should be preserved in the recursive helper for correct type coercion.
+- The current `mapFlatRows()` function should remain unchanged — it handles the no-nesting case efficiently.
+- The `mapSparqlSelectResult()` entry point (lines 255-289) dispatches to `mapFlatRows` or `mapNestedRows` — this stays the same.
+- Test with `selectNestedFriendsName` (3 levels: a0→a1→a2) and `nestedQueries2` (mixed: a1 has both flat field and sub-group) to verify correctness.
+
 ---
 
 ### Phase 11: Tighten Fuseki test assertions to OLD test depth
@@ -1809,6 +1947,67 @@ The current Fuseki tests use defensive patterns: `length >= 1`, `toBeDefined()`,
   - **Recommendation:** Add non-Fuseki result-mapping tests using hand-crafted SPARQL JSON bindings. These would test `mapNestedRows()` and `mapFlatRows()` in isolation without Docker, providing CI coverage for the result-mapping layer. Keep the Fuseki tests as end-to-end verification. The hand-crafted tests are especially valuable for Phase 10 (recursive nesting) since they can test arbitrary nesting depths with predictable input. These could live in a separate file like `src/tests/sparql-result-mapping.test.ts`.
 - **Q11c:** For nested structure assertions, should we use exact object matching (`toEqual`) or continue with field-by-field assertions? Exact matching is more thorough but more brittle to future changes.
   - **Recommendation:** Use `toEqual` for leaf values and structural shape, but field-by-field for the overall result. Specifically: assert exact array lengths, assert specific field values with `toBe`/`toEqual`, and assert nested object shapes structurally. Avoid `toEqual` on the entire result object because it breaks when new fields are added to the result shape. The OLD tests use this approach — they check `length`, then access specific elements by index and assert individual fields.
+
+**Implementation details:**
+
+*1. Add result-mapping unit tests — new file `src/tests/sparql-result-mapping.test.ts`*
+
+Test `mapSparqlSelectResult()`, `mapFlatRows()`, and the recursive `mapNestedRows()` with hand-crafted SPARQL JSON bindings. This file runs in CI without Docker. Example:
+```ts
+import {mapSparqlSelectResult, SparqlJsonResults} from '../sparql/resultMapping';
+import {IRSelectQuery} from '../queries/IntermediateRepresentation';
+
+describe('result mapping', () => {
+  it('maps flat rows with type coercion', () => {
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_name', 'a0_birthDate']},
+      results: {bindings: [
+        {a0: {type: 'uri', value: 'urn:p1'}, a0_name: {type: 'literal', value: 'Semmy'}, a0_birthDate: {type: 'literal', value: '2020-01-01T00:00:00Z', datatype: 'http://www.w3.org/2001/XMLSchema#dateTime'}},
+      ]},
+    };
+    // Build matching IRSelectQuery...
+    const result = mapSparqlSelectResult(json, query);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('Semmy');
+    expect(result[0].birthDate).toBeInstanceOf(Date);
+  });
+
+  it('groups 2-level nesting (friends.name)', () => { /* ... */ });
+  it('groups 3-level nesting (friends.bestFriend.name)', () => { /* ... */ });
+  it('handles mixed nesting (flat + nested on same group)', () => { /* ... */ });
+});
+```
+
+*2. Tighten Fuseki test assertions — `src/tests/sparql-fuseki.test.ts`*
+
+For each test, derive exact expected values from the test data constants at the top of the file. The test data has:
+- p1 (Semmy): hobby=Jogging, friends=[p2,p3], bestFriend=p3, birthDate=1990-01-01, isRealPerson=false, pets=[]
+- p2 (Moa): hobby=Jogging, friends=[p1,p3], bestFriend=p1, birthDate=1995-06-15, isRealPerson=true, pets=[pet1]
+- p3 (Jinx): hobby=Chess, friends=[p1], bestFriend=p2, isRealPerson=true
+- pet1: bestFriend=pet1 (self)
+- dog1: guardDogLevel=5, bestFriend=pet1
+- e1 (Alice): department=Engineering, bestFriend=e2
+- e2 (Bob): department=Sales
+
+Example tightening pattern (before/after):
+```ts
+// BEFORE:
+expect(result.length).toBeGreaterThanOrEqual(1);
+expect(result[0]).toHaveProperty('name');
+
+// AFTER:
+expect(result).toHaveLength(4); // p1, p2, p3, and one more
+const semmy = result.find(r => r.name === 'Semmy');
+expect(semmy).toBeDefined();
+expect(semmy.name).toBe('Semmy');
+```
+
+*3. Things to consider:*
+- Order of results from Fuseki is not guaranteed unless ORDER BY is used. Use `find()` rather than index-based access for unordered queries.
+- For ordered queries (`sortByAsc`, `sortByDesc`), index-based access is appropriate.
+- For nested arrays (friends), sort by a predictable key (id or name) before asserting order.
+- Mark the 8 known-broken fixtures with `// TODO: tighten after Phase 12/13` rather than asserting wrong behavior.
+- The non-Fuseki result-mapping tests can be developed before or in parallel with Phases 10-14, since they use hand-crafted input.
 
 ---
 
@@ -1878,6 +2077,124 @@ This keeps the traversal as-is but adds a FILTER EXISTS to restrict which values
 - **Q12c:** Does this overlap with the `some()` / `every()` quantifier handling? The DSL `p.friends.where(f => ...)` may be semantically equivalent to `p.friends.some(f => ...)`. If so, should the desugar pass normalize `.where()` to `.some()` first?
   - **Recommendation:** They are semantically different and should remain separate. `.where()` filters which values are returned for a property (value-level filtering), while `.some()` is a boolean existence check used in outer WHERE clauses (entity-level filtering). Example: `p.friends.where(f => f.name.equals('Moa'))` returns only friends named Moa. `p.friends.some(f => f.name.equals('Moa'))` returns true/false for whether any friend is named Moa. They produce different SPARQL patterns: `.where()` → FILTER inside the traversal OPTIONAL; `.some()` → EXISTS subquery in WHERE. No normalization should occur.
 
+**Implementation details:**
+
+*1. Where the fix goes — `src/queries/IRProjection.ts` `lowerSelectionPathExpression()` (lines 36-77)*
+
+This is the function that converts `DesugaredSelectionPath` → `IRExpression`. Currently it iterates through steps, creating traversals for intermediate property steps and returning a `property_expr` for the last step. It completely ignores `step.where`. The fix adds inline where processing here.
+
+Current code (simplified):
+```ts
+for (let i = 0; i < path.steps.length; i++) {
+  const step = path.steps[i];
+  if (step.kind === 'property_step') {
+    if (isLast) {
+      return {kind: 'property_expr', sourceAlias: currentAlias, property: step.propertyShapeId};
+    }
+    currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId);
+    // ← step.where is never checked here
+  }
+}
+```
+
+*2. Approach: attach inline filter to IR traversal patterns*
+
+When a property step has `.where`, we need to:
+1. Canonicalize the where predicate: `canonicalizeWhere(step.where)`
+2. Lower it to an IR expression using the traversed alias as root
+3. Attach the resulting filter to the traversal pattern
+
+The challenge is that `lowerSelectionPathExpression()` only returns an `IRExpression` — it doesn't have a way to attach side-effect patterns. The patterns are accumulated in `LoweringContext` in `IRLower.ts` via `getOrCreateTraversal()`.
+
+**Option A (recommended): Collect inline filters in LoweringContext**
+
+Add a `inlineFilters` map to `LoweringContext`:
+```ts
+class LoweringContext {
+  // ... existing fields ...
+  private inlineFilters = new Map<string, IRExpression[]>(); // traverseAlias → filters
+
+  addInlineFilter(traverseAlias: string, filter: IRExpression): void {
+    const existing = this.inlineFilters.get(traverseAlias) || [];
+    existing.push(filter);
+    this.inlineFilters.set(traverseAlias, existing);
+  }
+
+  getInlineFilters(): Map<string, IRExpression[]> {
+    return this.inlineFilters;
+  }
+}
+```
+
+Then in `lowerSelectionPathExpression()` (or a wrapper called from `collectProjectionSeeds`), when a step has `.where`:
+```ts
+if (step.kind === 'property_step' && step.where) {
+  const traverseAlias = options.resolveTraversal(currentAlias, step.propertyShapeId);
+  const canonical = canonicalizeWhere(step.where);
+  const filterExpr = lowerWhere(canonical, ctx, {
+    rootAlias: traverseAlias,
+    resolveTraversal: options.resolveTraversal,
+  });
+  ctx.addInlineFilter(traverseAlias, filterExpr);
+  currentAlias = traverseAlias;
+}
+```
+
+*3. Consuming inline filters in `irToAlgebra.ts`*
+
+In `selectToAlgebra()`, after building the algebra tree (step 4), check for inline filters. For each traverse triple that has inline filters, wrap the OPTIONAL with a FILTER inside it:
+
+```ts
+// Current: OPTIONAL { ?a0 <P/friends> ?a1 . }
+// With filter: OPTIONAL { ?a0 <P/friends> ?a1 . ?a1 <P/name> ?a1_name . FILTER(?a1_name = "Moa") }
+```
+
+This requires either:
+- Adding an `inlineFilters` field to `IRSelectQuery` (passed from lowering)
+- Or attaching filters to the `IRTraversePattern` itself
+
+The cleaner approach is to add `filter?: IRExpression` to `IRTraversePattern`:
+```ts
+// In IntermediateRepresentation.ts:
+export type IRTraversePattern = {
+  kind: 'traverse';
+  from: string;
+  to: string;
+  property: string;
+  filter?: IRExpression;  // ← NEW: inline where filter
+};
+```
+
+Then in `irToAlgebra.ts` `processPattern()`, when a traverse has a filter, include it inside the OPTIONAL block by using `wrapOptional()` with a `SparqlFilter` node.
+
+*4. Expected SPARQL output for `whereFriendsNameEquals`:*
+```sparql
+SELECT DISTINCT ?a0 ?a1
+WHERE {
+  ?a0 rdf:type <P> .
+  OPTIONAL {
+    ?a0 <P/friends> ?a1 .
+    ?a1 <P/name> ?a1_name .
+    FILTER(?a1_name = "Moa")
+  }
+}
+```
+
+The FILTER inside OPTIONAL means: the OPTIONAL succeeds only when the friend's name is "Moa". Friends not matching are excluded (their bindings are null).
+
+*5. Files changed (refined):*
+- `src/queries/IntermediateRepresentation.ts` — add `filter?: IRExpression` to `IRTraversePattern`
+- `src/queries/IRProjection.ts` or `src/queries/IRLower.ts` — process `step.where` during lowering
+- `src/sparql/irToAlgebra.ts` — emit FILTER inside OPTIONAL for filtered traversals
+- `src/tests/sparql-select-golden.test.ts` — update 5 golden tests
+- `src/tests/sparql-fuseki.test.ts` — update 5 tests with precise assertions
+
+*6. Things to consider:*
+- The inline where's predicate may reference properties on the traversed entity that need their own OPTIONAL triples inside the block. For `f.name.equals('Moa')`, the property triple `?a1 <P/name> ?a1_name` must be inside the OPTIONAL, not outside.
+- For compound filters (`.where(f => f.name.equals('Moa').and(f.hobby.equals('Jogging')))`), multiple property triples may be needed inside the OPTIONAL.
+- The `processExpressionForProperties()` function in `irToAlgebra.ts` discovers property triples — but they currently go to the outer `optionalPropertyTriples` list. Filtered traversals need their property triples co-located inside the OPTIONAL block.
+- This is the most architecturally significant change of all phases 10-14 because it modifies the IR shape and the SPARQL algebra construction pattern. Plan carefully around the interaction with existing OPTIONAL wrapping logic.
+
 ---
 
 ### Phase 13: Fix invalid SPARQL generation (3 fixtures)
@@ -1939,6 +2256,156 @@ Fix: In `irToAlgebra.ts` `selectToAlgebra()`, after converting the where clause,
 - **Q13d:** Should all 3 sub-fixes be in one phase or split into separate commits? They touch different layers (serialization, canonicalization, algebra conversion).
   - **Recommendation:** Keep as one phase, one commit. While they touch different layers, they are small, self-contained fixes with no interaction between them. Splitting into 3 separate phases adds coordination overhead without benefit. Each sub-fix is 5-20 lines of code. The tests for all 3 are in the same file, and the golden test updates can be verified together. However, implement and test them in order (13a → 13b → 13c) since 13a is the simplest and 13c is the most involved.
 
+**Implementation details:**
+
+**13a. NOT parenthesization fix — `src/sparql/algebraToString.ts` line 111-112**
+
+One-line fix. Current:
+```ts
+case 'not_expr':
+  return `!${serializeExpression(expr.inner, collector)}`;
+```
+Change to:
+```ts
+case 'not_expr':
+  return `!(${serializeExpression(expr.inner, collector)})`;
+```
+
+This produces `!(expr)` for all NOT expressions. The extra parentheses are harmless for simple expressions (e.g., `!(true)`) and necessary for compound ones (e.g., `!(?x = "Moa" || ?x = "Jinx")`).
+
+Expected golden SPARQL change for `whereEvery`:
+```sparql
+-- BEFORE: FILTER(!?a1_name = "Moa" || ?a1_name = "Jinx")
+-- AFTER:  FILTER(!(EXISTS { ... FILTER(!(?a1_name = "Moa" || ?a1_name = "Jinx")) }))
+```
+Wait — actually the full whereEvery output wraps in NOT EXISTS already. The parenthesization affects the inner `!` only:
+```sparql
+FILTER(!EXISTS {
+  ?a0 <P/friends> ?a1 .
+  FILTER(!(?a1_name = "Moa" || ?a1_name = "Jinx"))
+})
+```
+
+**13b. `some` in chained sequences — `src/queries/IRCanonicalize.ts` line 158**
+
+The exact bug: in `canonicalizeWhere()` when processing a `where_boolean` (lines 157-168):
+```ts
+const grouped = where as DesugaredWhereBoolean;
+let current: CanonicalWhereExpression = toComparison(grouped.first);  // ← BUG HERE
+```
+
+`grouped.first` is the `DesugaredWhereComparison` for the SOME quantifier. But `toComparison()` (lines 45-54) just wraps it as a `CanonicalWhereComparison` without checking for SOME/EVERY. The SOME/EVERY check at lines 146-153 only fires for top-level `where_comparison`, not for the `first` element of a `where_boolean`.
+
+Fix: Replace `toComparison(grouped.first)` with a function that checks for quantifiers:
+```ts
+// Change line 158 from:
+let current: CanonicalWhereExpression = toComparison(grouped.first);
+// To:
+let current: CanonicalWhereExpression = canonicalizeComparison(grouped.first);
+
+// Add helper:
+const canonicalizeComparison = (
+  comparison: DesugaredWhereComparison,
+): CanonicalWhereExpression => {
+  if (
+    comparison.operator === WhereMethods.SOME ||
+    comparison.operator === WhereMethods.EVERY ||
+    (comparison.operator as unknown as string) === 'some' ||
+    (comparison.operator as unknown as string) === 'every'
+  ) {
+    return toExists(comparison);
+  }
+  return toComparison(comparison);
+};
+```
+
+This reuses the existing SOME/EVERY detection logic and applies it to the `first` element of boolean compounds. The `toExists()` function already handles the conversion correctly.
+
+Expected golden SPARQL change for `whereSequences`:
+```sparql
+-- BEFORE: FILTER(?a0_friends some "" && ?a0_name = "Semmy")
+-- AFTER:  FILTER(EXISTS { ?a0 <P/friends> ?a1 . ?a1 <P/name> ?a1_name . FILTER(?a1_name = "Jinx") } && ?a0_name = "Semmy")
+```
+
+**13c. COUNT in FILTER → HAVING — `src/sparql/irToAlgebra.ts`**
+
+The fix requires changes in `selectToAlgebra()` at step 5 (lines 246-253) and step 8 (lines 322-328).
+
+*Step 1: Add `containsAggregate()` helper:*
+```ts
+function containsAggregate(expr: SparqlExpression): boolean {
+  switch (expr.kind) {
+    case 'aggregate_expr': return true;
+    case 'binary_expr': return containsAggregate(expr.left) || containsAggregate(expr.right);
+    case 'logical_expr': return expr.exprs.some(containsAggregate);
+    case 'not_expr': return containsAggregate(expr.inner);
+    case 'function_expr': return expr.args.some(containsAggregate);
+    default: return false;
+  }
+}
+```
+
+*Step 2: In step 5 (where clause → filter), check for aggregates:*
+```ts
+if (query.where) {
+  const filterExpr = convertExpression(query.where, registry, optionalPropertyTriples);
+  if (containsAggregate(filterExpr)) {
+    // Move to HAVING instead of FILTER
+    havingExpr = filterExpr;  // Store for later
+  } else {
+    algebra = {type: 'filter', expression: filterExpr, inner: algebra};
+  }
+}
+```
+
+*Step 3: In step 8 (GROUP BY), if havingExpr is set, add it and ensure GROUP BY is present:*
+```ts
+if (havingExpr) {
+  hasAggregates = true;
+  // GROUP BY all non-aggregate projected variables
+  groupBy = projection
+    .filter((p): p is {kind: 'variable'; name: string} => p.kind === 'variable')
+    .map((p) => p.name);
+}
+
+// In the return statement:
+return {
+  // ... existing fields ...
+  groupBy,
+  having: havingExpr,  // ← NEW
+};
+```
+
+`SparqlSelectPlan` already has `having?: SparqlExpression` (line 174 of `SparqlAlgebra.ts`), and `algebraToString.ts` already serializes it (lines 262-265):
+```ts
+if (plan.having) {
+  const havingExpr = serializeExpression(plan.having, collector);
+  clauses.push(`HAVING(${havingExpr})`);
+}
+```
+
+So no changes needed in the algebra types or serializer — only in `irToAlgebra.ts`.
+
+Expected golden SPARQL change for `countEquals`:
+```sparql
+-- BEFORE:
+SELECT DISTINCT ?a0
+WHERE { ... FILTER(count(?a0_friends) = "2"^^xsd:integer) }
+
+-- AFTER:
+SELECT ?a0
+WHERE { ... }
+GROUP BY ?a0
+HAVING(count(?a0_friends) = "2"^^xsd:integer)
+```
+
+Note: DISTINCT is removed when GROUP BY is present (already handled by `distinct: !hasAggregates ? true : undefined`).
+
+*Things to consider:*
+- For 13c, if a WHERE clause has both aggregate and non-aggregate parts combined with AND/OR, we'd need to split them. For `countEquals` the entire expression is aggregate-containing, so no splitting is needed. Splitting logic should be implemented but can be simple: if a `logical_expr` has mixed parts, extract aggregate parts to HAVING and leave the rest in FILTER. If needed, this can be a follow-up.
+- For 13b, verify the fix also handles the OLD test's `where_sequences` pattern (which uses `.some().and()`) — the test data should produce correct results.
+- All three fixes are independent and can be tested individually.
+
 ---
 
 ### Phase 14: Fix remaining edge cases (evaluation_select, context path)
@@ -1997,6 +2464,179 @@ Fix: The context path should resolve to a concrete value (the actual name of the
   - **Recommendation:** Medium priority. It's a valid DSL pattern that demonstrates computed projections — a building block for more complex derived fields in the future. The fix is small (10-20 lines in `irToAlgebra.ts` projection building + a `SparqlProjectionItem` variant). Recommend including it in Phase 14 since the effort is low and it rounds out the expression support.
 - **Q14d:** Is `whereWithContextPath` a high-priority use case? The pattern of accessing properties of a context entity in a where clause is niche. If low priority, we could defer this.
   - **Recommendation:** Low priority, but still worth implementing in Phase 14. The `getQueryContext` feature is explicitly part of the DSL API and has 2 fixtures testing it (`whereWithContext` works correctly, `whereWithContextPath` does not). Having half the context feature broken would be confusing for users. The fix requires understanding how the desugarer resolves context property paths, which is a contained change in `IRDesugar.ts` or `IRLower.ts`. If time is tight, this could be deferred to a separate phase, but it pairs naturally with 14a since both are about expression handling in projections/filters.
+
+**Implementation details:**
+
+**14a. Expression projection — `(expr AS ?alias)` in SELECT**
+
+*Step 1: Add `expression` variant to `SparqlProjectionItem` — `src/sparql/SparqlAlgebra.ts` line 149-151*
+
+Current:
+```ts
+export type SparqlProjectionItem =
+  | {kind: 'variable'; name: string}
+  | {kind: 'aggregate'; expression: SparqlAggregateExpr; alias: string};
+```
+Add:
+```ts
+export type SparqlProjectionItem =
+  | {kind: 'variable'; name: string}
+  | {kind: 'aggregate'; expression: SparqlAggregateExpr; alias: string}
+  | {kind: 'expression'; expression: SparqlExpression; alias: string};
+```
+
+*Step 2: Handle in `selectPlanToSparql()` — `src/sparql/algebraToString.ts` lines 237-245*
+
+Current projection serialization handles `variable` and `aggregate`. Add `expression`:
+```ts
+const projectionParts = plan.projection.map((item) => {
+  if (item.kind === 'variable') {
+    return `?${item.name}`;
+  } else if (item.kind === 'aggregate') {
+    const aggExpr = serializeExpression(item.expression, collector);
+    return `(${aggExpr} AS ?${item.alias})`;
+  } else {
+    // expression projection: (expr AS ?alias)
+    const expr = serializeExpression(item.expression, collector);
+    return `(${expr} AS ?${item.alias})`;
+  }
+});
+```
+
+*Step 3: Generate `expression` projection in `irToAlgebra.ts` — lines 292-301*
+
+Current code for non-aggregate expressions:
+```ts
+} else {
+  const varName = resolveExpressionVariable(item.expression, registry);
+  if (varName && varName !== rootAlias) {
+    projection.push({kind: 'variable', name: varName});
+  } else if (!varName) {
+    projection.push({kind: 'variable', name: item.alias});  // ← FALLBACK: loses expression
+  }
+}
+```
+
+Fix the `!varName` branch to emit expression projection:
+```ts
+} else if (!varName) {
+  // Non-variable expression (binary_expr, function_expr, etc.)
+  // → project as (expr AS ?alias)
+  const sparqlExpr = convertExpression(item.expression, registry, optionalPropertyTriples);
+  projection.push({kind: 'expression', expression: sparqlExpr, alias: item.alias});
+}
+```
+
+*Step 4: Also handle in GROUP BY inference (step 8, lines 321-328)*
+
+Currently GROUP BY collects `kind === 'variable'` items. The `expression` kind should not be a GROUP BY target. The existing filter already handles this correctly since it only checks for `p.kind === 'variable'`.
+
+Expected golden SPARQL for `customResultEqualsBoolean`:
+```sparql
+SELECT DISTINCT ?a0 (?a0_bestFriend = <linked://tmp/entities/p3> AS ?isBestFriend)
+WHERE {
+  ?a0 rdf:type <P> .
+  OPTIONAL { ?a0 <P/bestFriend> ?a0_bestFriend . }
+}
+```
+
+**14b. Context path tautology — `src/queries/IRLower.ts`**
+
+The bug is in `lowerWhereArg()` (lines 85-109). When the argument is an `arg_path` with a `subject` (context entity reference), the path is lowered using the same `options` as the main query:
+
+```ts
+if ('kind' in arg && arg.kind === 'arg_path') {
+  const argPath = arg as {kind: 'arg_path'; path: DesugaredSelectionPath};
+  return lowerPath(argPath.path, options);  // ← Uses SAME options.rootAlias
+}
+```
+
+The `argPath.path` contains a property step for `.name`, and since `options.rootAlias` resolves within the `some()` context (which is the exists subquery's `existsRootAlias`), `lowerPath()` produces `{kind: 'property_expr', sourceAlias: existsRootAlias, property: 'P/name'}` — the same variable as `f.name`.
+
+*Fix: When an `arg_path` has a `subject`, use the subject's IRI as a fixed starting point instead of the query's root alias.*
+
+The `arg_path` type in `IRDesugar.ts` already carries the subject:
+```ts
+{
+  kind: 'arg_path';
+  subject?: ShapeReferenceValue;  // ← The context entity reference
+  path: DesugaredSelectionPath;
+}
+```
+
+In `lowerWhereArg()`, when `argPath.subject` is present:
+```ts
+if ('kind' in arg && arg.kind === 'arg_path') {
+  const argPath = arg as {kind: 'arg_path'; subject?: ShapeReferenceValue; path: DesugaredSelectionPath};
+  if (argPath.subject) {
+    // Context entity path — create a separate traversal from the context IRI
+    // The subject is a context entity reference with an IRI
+    const contextIri = argPath.subject.id;
+    // Generate a unique alias for the context entity
+    const contextAlias = ctx.generateAlias();
+    // Register a pattern that binds the context entity's property
+    // This will produce a triple: <context_iri> <P/name> ?ctx_name .
+    const contextOptions: PathLoweringOptions = {
+      rootAlias: contextAlias,
+      resolveTraversal: (from, prop) => ctx.getOrCreateTraversal(from, prop),
+    };
+    // Add a "fixed" pattern: bind contextAlias to the IRI
+    // This is a BIND(<iri> AS ?contextAlias) or a VALUES clause
+    // Simplest: emit the property triple with the IRI as subject directly
+    // i.e., <context_iri> <P/name> ?ctx_name .
+    return lowerContextPath(argPath.path, contextIri, ctx);
+  }
+  return lowerPath(argPath.path, options);
+}
+```
+
+The `lowerContextPath()` helper would need to create a new IR pattern:
+```ts
+function lowerContextPath(
+  path: DesugaredSelectionPath,
+  contextIri: string,
+  ctx: LoweringContext,
+): IRExpression {
+  // For a path like [property_step("name")]:
+  // Emit an IR expression that will produce:
+  //   <contextIri> <P/name> ?ctx_name .
+  // And return property_expr referencing ?ctx_name
+  const lastStep = path.steps[path.steps.length - 1];
+  if (lastStep.kind === 'property_step') {
+    // Create a unique variable for the context property
+    const ctxVar = `ctx_${propertySuffix(lastStep.propertyShapeId)}`;
+    // Add a context pattern to the lowering context
+    ctx.addContextPattern({
+      kind: 'context_bind',
+      iri: contextIri,
+      property: lastStep.propertyShapeId,
+      variable: ctxVar,
+    });
+    return {kind: 'alias_expr', alias: ctxVar};
+  }
+  // Fallback
+  return {kind: 'literal_expr', value: null};
+}
+```
+
+This requires a new IR pattern type (`context_bind`) or reuse of the existing `shape_scan`/`traverse` patterns with the IRI as a fixed subject. The cleanest approach may be to emit an extra triple directly in the algebra layer.
+
+**Alternative simpler approach for 14b:** Instead of a new IR pattern, emit a `reference_expr` for the context IRI and let the property path resolve relative to it. This would produce:
+```sparql
+FILTER EXISTS {
+  ?a0 <P/friends> ?a1 .
+  <context_user_iri> <P/name> ?ctx_name .
+  FILTER(?a1_name = ?ctx_name)
+}
+```
+
+The `<context_user_iri> <P/name> ?ctx_name .` triple binds the context entity's name. This triple needs to appear inside the EXISTS block, which means the lowering of `where_exists` must include it.
+
+*Things to consider:*
+- 14a is straightforward (3 files, ~15 lines each). Implement first.
+- 14b is more complex due to the cross-cutting nature of context paths. The context entity needs to be bound via a triple pattern, and this pattern needs to appear in the right scope (inside EXISTS for some/every, in outer WHERE for direct where).
+- For 14b, the `arg_path.subject` field is already present and carries the context entity's IRI. The subject IRI (`arg.subject.id`) is the key to generating the correct SPARQL pattern.
+- If 14b proves too complex, it can be deferred to a follow-up phase without blocking Phase 11 (only 1 of 75 fixtures affected).
 
 ---
 
