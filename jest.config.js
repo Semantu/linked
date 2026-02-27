@@ -24,6 +24,7 @@ module.exports = {
     '**/sparql-mutation-algebra.test.ts',
     '**/sparql-select-golden.test.ts',
     '**/sparql-mutation-golden.test.ts',
+    '**/sparql-negative.test.ts',
     '**/sparql-fuseki.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],

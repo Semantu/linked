@@ -12,7 +12,10 @@
  */
 
 const FUSEKI_BASE_URL = process.env.FUSEKI_BASE_URL || 'http://localhost:3030';
+const FUSEKI_ADMIN_PASSWORD = process.env.FUSEKI_ADMIN_PASSWORD || 'admin';
 const DATASET_NAME = 'nashville-test';
+
+const adminAuth = `Basic ${Buffer.from(`admin:${FUSEKI_ADMIN_PASSWORD}`).toString('base64')}`;
 
 /**
  * Check whether a Fuseki server is reachable.
@@ -37,7 +40,10 @@ export async function isFusekiAvailable(): Promise<boolean> {
 export async function createTestDataset(): Promise<void> {
   const response = await fetch(`${FUSEKI_BASE_URL}/$/datasets`, {
     method: 'POST',
-    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: adminAuth,
+    },
     body: `dbName=${DATASET_NAME}&dbType=mem`,
   });
   if (!response.ok && response.status !== 409) {
@@ -53,7 +59,7 @@ export async function createTestDataset(): Promise<void> {
 export async function deleteTestDataset(): Promise<void> {
   const response = await fetch(
     `${FUSEKI_BASE_URL}/$/datasets/${DATASET_NAME}`,
-    {method: 'DELETE'},
+    {method: 'DELETE', headers: {Authorization: adminAuth}},
   );
   if (!response.ok && response.status !== 404) {
     throw new Error(

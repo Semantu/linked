@@ -44,7 +44,8 @@
     "dual-package": "node ./scripts/dual-package.js",
     "sync:agents": "node ./scripts/sync-agents.mjs",
     "setup": "npm run sync:agents",
-    "test": "npx jest --config jest.config.js"
+    "test": "npx jest --config jest.config.js",
+    "test:fuseki": "docker compose -f src/tests/docker-compose.test.yml up -d --wait && npx jest --config jest.config.js --testPathPattern='sparql-fuseki' --verbose; EXIT=$?; docker compose -f src/tests/docker-compose.test.yml down; exit $EXIT"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",

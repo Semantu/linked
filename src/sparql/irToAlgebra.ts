@@ -595,7 +595,7 @@ function convertExistsPattern(
     }
 
     default:
-      return {type: 'bgp', triples: []};
+      throw new Error(`Unsupported pattern kind in EXISTS: ${(pattern as any).kind}`);
   }
 }
 
@@ -898,7 +898,7 @@ export function deleteToAlgebra(
 }
 
 // ---------------------------------------------------------------------------
-// Convenience wrappers (stubs — wired in Phase 3 when algebraToString exists)
+// Convenience wrappers: IR → algebra → SPARQL string in one call
 // ---------------------------------------------------------------------------
 
 /**

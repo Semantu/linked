@@ -18,7 +18,7 @@ export {
   deleteToAlgebra,
 } from './irToAlgebra.js';
 
-// High-level IR → SPARQL string (stubs until Phase 3)
+// High-level IR → SPARQL string (convenience wrappers)
 export {
   selectToSparql,
   createToSparql,
