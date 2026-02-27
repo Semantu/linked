@@ -20,6 +20,7 @@ Run only when the user explicitly confirms plan mode (for example: converting id
    - Small code examples
    - Potential pitfalls
    - Remaining unclear areas/decisions
+   - **Inter-component contracts**: When the architecture has separable parts (layers, modules, packages), make the contracts between them explicit — type definitions, function signatures, shared data structures. These contracts enable parallel implementation in tasks mode.
 4. Mention tradeoffs only to explain why chosen paths were selected.
 5. Continuously refine the plan with user feedback until it is explicitly approved for implementation.
 

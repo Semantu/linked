@@ -12,13 +12,11 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 ## Mode selection at task start
 
 - If the user has already explicitly chosen a mode (or explicitly called a mode skill), enter that mode directly.
-- If the user has not explicitly chosen a mode and the task will involve implementation/code changes, the agent MUST ask whether to start in `ideation` (brainstorming) or `plan` mode before implementation.
+- **Auto-enter ideation**: If the user is clearly brainstorming — weighing trade-offs, thinking out loud, exploring options — enter `ideation` mode directly without asking. This exception applies **only to ideation** (the first mode in the sequence). For all other starting modes (plan, implementation, etc.), always ask first.
+- If the user is not clearly ideating, ask using this prompt pattern:
+  `Should we start with exploring the options in ideation mode? Or do you want to go straight to planning the details in plan mode?`
+  If the user is already asking to DO specific things, you can also add: `Or should I just go ahead and jump to implementation mode?`
 - If the user asks to create/open/update a PR, or asks for PR title/body/message, treat that as an explicit request to enter `wrapup` mode.
-
-Use this prompt pattern when mode is not yet explicit:
-`Should we start with exploring the options in ideation mode? Or do you want to go straight to planning the details in plan mode?`
-
-If the user is already asking to DO specific things, you can also add: `Or should I just go ahead and jump to implementation mode?`
 
 ## Mode sequence
 
