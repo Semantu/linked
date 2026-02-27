@@ -99,10 +99,10 @@ const lowerWhereArg = (
       return lowerPath(argPath.path, options);
     }
     if (isShapeRef(arg)) {
-      return {kind: 'literal_expr', value: arg.id};
+      return {kind: 'reference_expr', value: arg.id};
     }
     if (isNodeRef(arg)) {
-      return {kind: 'literal_expr', value: (arg as NodeReferenceValue).id};
+      return {kind: 'reference_expr', value: (arg as NodeReferenceValue).id};
     }
   }
   return {kind: 'literal_expr', value: null};

@@ -244,7 +244,7 @@ WHERE {
   OPTIONAL {
     ?a0 <${P}/name> ?a0_name .
   }
-  FILTER(?a0 = "linked://tmp/entities/p1")
+  FILTER(?a0 = <linked://tmp/entities/p1>)
 }
 LIMIT 1`);
   });
@@ -259,7 +259,7 @@ describe('SPARQL golden — nested traversals', () => {
     const sparql = await goldenSelect(queryFactories.selectFriendsName);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name
+SELECT DISTINCT ?a0 ?a1_name ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -273,7 +273,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.selectNestedFriendsName);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a2_name
+SELECT DISTINCT ?a0 ?a2_name ?a1 ?a2
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -288,7 +288,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.selectMultiplePaths);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a0_name ?a0_friends ?a1_name
+SELECT DISTINCT ?a0 ?a0_name ?a0_friends ?a1_name ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/bestFriend> ?a1 .
@@ -308,7 +308,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.selectBestFriendName);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name
+SELECT DISTINCT ?a0 ?a1_name ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/bestFriend> ?a1 .
@@ -322,7 +322,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.selectDeepNested);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a3_name
+SELECT DISTINCT ?a0 ?a3_name ?a1 ?a2 ?a3
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -338,7 +338,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.selectDuplicatePaths);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name ?a1_hobby ?a1_isRealPerson
+SELECT DISTINCT ?a0 ?a1_name ?a1_hobby ?a1_isRealPerson ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/bestFriend> ?a1 .
@@ -358,7 +358,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.nestedObjectProperty);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_bestFriend
+SELECT DISTINCT ?a0 ?a1_bestFriend ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -468,7 +468,7 @@ WHERE {
   OPTIONAL {
     ?a0 <${P}/bestFriend> ?a0_bestFriend .
   }
-  FILTER(?a0_bestFriend = "linked://tmp/entities/p3")
+  FILTER(?a0_bestFriend = <linked://tmp/entities/p3>)
 }`);
   });
 
@@ -522,7 +522,7 @@ LIMIT 1`);
     const sparql = await goldenSelect(queryFactories.whereSomeImplicit);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0
+SELECT DISTINCT ?a0 ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -597,7 +597,7 @@ WHERE {
   OPTIONAL {
     ?a0 <${P}/bestFriend> ?a0_bestFriend .
   }
-  FILTER(?a0_bestFriend = "user-1")
+  FILTER(?a0_bestFriend = <user-1>)
 }`);
   });
 
@@ -757,7 +757,7 @@ describe('SPARQL golden — sub-selects', () => {
     const sparql = await goldenSelect(queryFactories.subSelectSingleProp);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name
+SELECT DISTINCT ?a0 ?a1_name ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/bestFriend> ?a1 .
@@ -771,7 +771,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.subSelectPluralCustom);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name ?a1_hobby
+SELECT DISTINCT ?a0 ?a1_name ?a1_hobby ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -788,7 +788,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.subSelectAllProperties);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name ?a1_hobby ?a1_nickNames ?a1_birthDate ?a1_isRealPerson ?a1_bestFriend ?a1_friends ?a1_pets ?a1_firstPet ?a1_pluralTestProp ?a1_label ?a1_type
+SELECT DISTINCT ?a0 ?a1_name ?a1_hobby ?a1_nickNames ?a1_birthDate ?a1_isRealPerson ?a1_bestFriend ?a1_friends ?a1_pets ?a1_firstPet ?a1_pluralTestProp ?a1_label ?a1_type ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -835,7 +835,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.subSelectAllPropertiesSingle);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name ?a1_hobby ?a1_nickNames ?a1_birthDate ?a1_isRealPerson ?a1_bestFriend ?a1_friends ?a1_pets ?a1_firstPet ?a1_pluralTestProp ?a1_label ?a1_type
+SELECT DISTINCT ?a0 ?a1_name ?a1_hobby ?a1_nickNames ?a1_birthDate ?a1_isRealPerson ?a1_bestFriend ?a1_friends ?a1_pets ?a1_firstPet ?a1_pluralTestProp ?a1_label ?a1_type ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/bestFriend> ?a1 .
@@ -882,7 +882,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.subSelectAllPrimitives);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name ?a1_birthDate ?a1_isRealPerson
+SELECT DISTINCT ?a0 ?a1_name ?a1_birthDate ?a1_isRealPerson ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/bestFriend> ?a1 .
@@ -902,7 +902,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.subSelectArray);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name ?a1_hobby
+SELECT DISTINCT ?a0 ?a1_name ?a1_hobby ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -919,7 +919,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.doubleNestedSubSelect);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a2_name
+SELECT DISTINCT ?a0 ?a2_name ?a1 ?a2
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -934,7 +934,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.nestedQueries2);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_firstPet
+SELECT DISTINCT ?a0 ?a1_firstPet ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -954,7 +954,7 @@ describe('SPARQL golden — shape casting', () => {
     const sparql = await goldenSelect(queryFactories.selectShapeSetAs);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_guardDogLevel
+SELECT DISTINCT ?a0 ?a1_guardDogLevel ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/pets> ?a1 .
@@ -968,7 +968,7 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.selectShapeAs);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_guardDogLevel
+SELECT DISTINCT ?a0 ?a1_guardDogLevel ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/firstPet> ?a1 .
@@ -1043,7 +1043,7 @@ describe('SPARQL golden — preload', () => {
     const sparql = await goldenSelect(queryFactories.preloadBestFriend);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name
+SELECT DISTINCT ?a0 ?a1_name ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/bestFriend> ?a1 .

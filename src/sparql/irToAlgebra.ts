@@ -101,6 +101,32 @@ function joinNodes(
 }
 
 // ---------------------------------------------------------------------------
+// Pattern helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively collects all traversal alias target variables from IR patterns.
+ * Used to ensure traversal aliases appear in the SELECT projection for result grouping.
+ */
+function collectTraversalAliases(patterns: IRGraphPattern[]): string[] {
+  const aliases: string[] = [];
+  for (const p of patterns) {
+    if (p.kind === 'traverse') {
+      aliases.push(p.to);
+    } else if (p.kind === 'join') {
+      aliases.push(...collectTraversalAliases(p.patterns));
+    } else if (p.kind === 'optional') {
+      aliases.push(...collectTraversalAliases([p.pattern]));
+    } else if (p.kind === 'union') {
+      for (const branch of p.branches) {
+        aliases.push(...collectTraversalAliases([branch]));
+      }
+    }
+  }
+  return aliases;
+}
+
+// ---------------------------------------------------------------------------
 // Variable Registry
 // ---------------------------------------------------------------------------
 
@@ -275,6 +301,23 @@ export function selectToAlgebra(
     }
   }
 
+  // 7b. Include traversal aliases needed for result grouping
+  //     When nested results are projected (e.g. p.friends.name), the result
+  //     mapping needs the traversal alias variable (?a1) in the bindings to
+  //     group nested rows by entity. Without this, mapNestedRows() can't
+  //     identify which nested fields belong to which traversed entity.
+  const projectedNames = new Set<string>();
+  for (const p of projection) {
+    if (p.kind === 'variable') projectedNames.add(p.name);
+    else if (p.kind === 'aggregate') projectedNames.add(p.alias);
+  }
+  for (const alias of collectTraversalAliases(query.patterns)) {
+    if (!projectedNames.has(alias)) {
+      projection.push({kind: 'variable', name: alias});
+      projectedNames.add(alias);
+    }
+  }
+
   // 8. GROUP BY inference
   let groupBy: string[] | undefined;
   if (hasAggregates) {
@@ -416,6 +459,7 @@ function processExpressionForProperties(
       }
       break;
     case 'literal_expr':
+    case 'reference_expr':
     case 'alias_expr':
       // No property references to discover
       break;
@@ -460,6 +504,9 @@ function convertExpression(
       }
       return {kind: 'literal_expr', value: String(value)};
     }
+
+    case 'reference_expr':
+      return {kind: 'iri_expr', value: expr.value};
 
     case 'alias_expr':
       return {kind: 'variable_expr', name: expr.alias};

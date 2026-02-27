@@ -79,6 +79,7 @@ export type IRExistsPattern = {
 
 export type IRExpression =
   | IRLiteralExpression
+  | IRReferenceExpression
   | IRAliasExpression
   | IRPropertyExpression
   | IRBinaryExpression
@@ -91,6 +92,11 @@ export type IRExpression =
 export type IRLiteralExpression = {
   kind: 'literal_expr';
   value: IRValue;
+};
+
+export type IRReferenceExpression = {
+  kind: 'reference_expr';
+  value: string;
 };
 
 export type IRAliasExpression = {
