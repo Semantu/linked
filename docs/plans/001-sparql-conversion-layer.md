@@ -1768,8 +1768,11 @@ In `buildNestingDescriptor()`, instead of walking up to root and grouping everyt
 
 **Open questions:**
 - **Q10a:** Should we handle mixed nesting (some fields flat on an intermediate entity, some nested further)? Example: `friends.select(f => [f.name, f.bestFriend.name])` has both a flat field (name on a1) and a deeper nested field (name on a2). The current model would need each intermediate group to have both `fields` and `nestedGroups`.
+  - **Recommendation:** Yes, this is required. The proposed recursive `NestedGroup` type already supports it naturally — each group has both `fields` (flat on that entity) and `nestedGroups` (deeper nesting). The fixture `nestedQueries2` explicitly uses this pattern: `friends.select(f => [f.firstPet, f.bestFriend.select(...)])` has both a flat object property and a deeper nested sub-select on the same intermediate entity.
 - **Q10b:** How should multi-level nesting interact with single-value traversals (maxCount=1) vs multi-value (friends)? For single-value traversals like `bestFriend.bestFriend.name`, should the result be `{bestFriend: {bestFriend: {name: "..."}}}` or flattened?
+  - **Recommendation:** Preserve nesting structure regardless of cardinality. Single-value traversals should produce a single nested object (`{bestFriend: {bestFriend: {name: "..."}}}`) while multi-value produce arrays. The cardinality information (maxCount) is already available in the IR through `PropertyShape`. The result mapping layer should use this to decide between wrapping in an array vs returning a single object, but the nesting depth should always match the traversal depth. This is consistent with how the OLD tests assert nested results.
 - **Q10c:** Performance concern: for deeply nested queries (3+ levels), the recursive grouping could create many intermediate objects. Is this acceptable, or should we cap nesting depth?
+  - **Recommendation:** No depth cap needed. Practical queries rarely exceed 3-4 levels of nesting, and the recursive grouping overhead is negligible compared to the SPARQL query execution cost. The row count from Fuseki is the real bottleneck, not the JS grouping. If performance becomes an issue later, it can be addressed with lazy construction, but pre-optimizing here adds complexity without benefit.
 
 ---
 
@@ -1777,7 +1780,7 @@ In `buildNestingDescriptor()`, instead of walking up to root and grouping everyt
 
 **Status:** Not started
 
-**Depends on:** Phase 10 (nesting must work before we can assert on nested structure)
+**Depends on:** Phase 10 (nesting must work before asserting nested structure), Phase 12, 13, 14 (recommended — fixes produce correct results before tightening assertions)
 **Can run in parallel with:** —
 
 **Problem:** The OLD tests in `OLD/src/tests/query-tests.tsx` had precise assertions:
@@ -1801,8 +1804,11 @@ The current Fuseki tests use defensive patterns: `length >= 1`, `toBeDefined()`,
 
 **Open questions:**
 - **Q11a:** Should we tighten ALL 75 tests, or only the ones where we're confident the SPARQL is semantically correct? The 5 inline-where fixtures (Gap B) and 3 invalid-SPARQL fixtures (Gap C) produce known-incorrect results — tightening assertions on those would just assert the wrong behavior.
+  - **Recommendation:** Only tighten the tests where SPARQL is semantically correct (~60 fixtures). The 5 inline-where fixtures should be tightened after Phase 12 fixes them, and the 3 invalid-SPARQL fixtures after Phase 13. This avoids encoding wrong behavior as expected. Phase 11 should come after 12 and 13 in the dependency graph, or at minimum mark those 8 tests with `// TODO: tighten after Phase 12/13` comments.
 - **Q11b:** Should the tightened tests depend on Fuseki being available (as now), or should we also add non-Fuseki assertion tests that use hand-crafted SPARQL JSON to test result mapping in isolation? The latter would run in CI without Docker.
+  - **Recommendation:** Add non-Fuseki result-mapping tests using hand-crafted SPARQL JSON bindings. These would test `mapNestedRows()` and `mapFlatRows()` in isolation without Docker, providing CI coverage for the result-mapping layer. Keep the Fuseki tests as end-to-end verification. The hand-crafted tests are especially valuable for Phase 10 (recursive nesting) since they can test arbitrary nesting depths with predictable input. These could live in a separate file like `src/tests/sparql-result-mapping.test.ts`.
 - **Q11c:** For nested structure assertions, should we use exact object matching (`toEqual`) or continue with field-by-field assertions? Exact matching is more thorough but more brittle to future changes.
+  - **Recommendation:** Use `toEqual` for leaf values and structural shape, but field-by-field for the overall result. Specifically: assert exact array lengths, assert specific field values with `toBe`/`toEqual`, and assert nested object shapes structurally. Avoid `toEqual` on the entire result object because it breaks when new fields are added to the result shape. The OLD tests use this approach — they check `length`, then access specific elements by index and assert individual fields.
 
 ---
 
@@ -1860,8 +1866,17 @@ This keeps the traversal as-is but adds a FILTER EXISTS to restrict which values
 
 **Open questions:**
 - **Q12a:** Option A or Option B? Option A is cleaner (filter at IR level) but requires deeper changes to the lowering pipeline. Option B is more localized (SPARQL-layer workaround) but produces more complex SPARQL.
+  - **Recommendation:** Option A (IR-level). The `DesugaredPropertyStep.where` is already preserved during desugaring (populated via `toWhere()` in `IRDesugar.ts` line 182). The fix should be in `IRLower.ts`: when lowering a selection path that contains a property step with `.where`, canonicalize the where predicate and lower it to an IR filter expression attached to the traversal. This keeps the filter logic in the IR layer where all other filter processing happens, rather than leaking semantic interpretation into the SPARQL algebra layer. The SPARQL output will be a FILTER inside the pattern block for that traversal, which is clean standard SPARQL.
 - **Q12b:** Should the inline where restrict the set of returned values (only return friends matching the filter) or the set of root entities (return persons who have at least one friend matching)? The OLD tests would clarify the expected semantics.
+  - **Recommendation:** Restrict the returned values. The OLD tests confirm this unambiguously:
+    - `"can use where() to filter a string"` (OLD line 524): `p.friends.where(f => f.name.equals('Moa'))` → asserts `first.friends.length === 1` and `first.friends[0].id === p2.uri` — only the matching friend is returned
+    - `"where and"` (OLD line 564): asserts `first.friends.length === 1` — only friends matching both conditions
+    - `"where or"` (OLD line 580): asserts `first.friends.length === 2` — friends matching either condition
+    - `"where on literal"` (OLD line 552): `p.hobby.where(h => h.equals(p2.hobby))` → asserts `p1Result.hobby` is undefined when it doesn't match
+
+    In SPARQL terms, this means the where predicate should be a FILTER on the traversal variable within the OPTIONAL block, not an outer EXISTS pattern. The OPTIONAL ensures the variable binding is absent when the filter doesn't match, which maps to undefined/null in the result.
 - **Q12c:** Does this overlap with the `some()` / `every()` quantifier handling? The DSL `p.friends.where(f => ...)` may be semantically equivalent to `p.friends.some(f => ...)`. If so, should the desugar pass normalize `.where()` to `.some()` first?
+  - **Recommendation:** They are semantically different and should remain separate. `.where()` filters which values are returned for a property (value-level filtering), while `.some()` is a boolean existence check used in outer WHERE clauses (entity-level filtering). Example: `p.friends.where(f => f.name.equals('Moa'))` returns only friends named Moa. `p.friends.some(f => f.name.equals('Moa'))` returns true/false for whether any friend is named Moa. They produce different SPARQL patterns: `.where()` → FILTER inside the traversal OPTIONAL; `.some()` → EXISTS subquery in WHERE. No normalization should occur.
 
 ---
 
@@ -1916,9 +1931,13 @@ Fix: In `irToAlgebra.ts` `selectToAlgebra()`, after converting the where clause,
 
 **Open questions:**
 - **Q13a:** For the NOT parenthesization fix (13a): is `!(expr)` always correct, or are there cases where the `!` should distribute differently? e.g., `NOT(a AND b)` vs `NOT(a) OR NOT(b)`.
+  - **Recommendation:** `!(expr)` is always correct. In SPARQL, `!` is the unary negation operator with higher precedence than binary operators, so wrapping in parentheses is the standard fix. The current code in `algebraToString.ts` (line 111) serializes as `` `!${serializeExpression(expr.inner)}` `` without parens — changing to `` `!(${serializeExpression(expr.inner)})` `` is a one-line fix. De Morgan distribution (`NOT(a AND b)` → `NOT(a) OR NOT(b)`) is a semantic optimization, not a correctness requirement — the SPARQL engine handles it internally. No distribution needed.
 - **Q13b:** For `whereSequences` (13b): should the fix be in the canonicalization layer (prevent `some` from reaching lowering as a binary operator) or in the lowering layer (catch `some` as operator and convert to EXISTS there)?
+  - **Recommendation:** Fix in canonicalization. The `canonicalizeWhere()` function in `IRCanonicalize.ts` already handles `WhereMethods.SOME` (lines 147-152) and has recursive handling via `toExists()` (line 74). The bug is likely that in the chained pattern `.some(...).and(...)`, the `some` is nested inside a compound boolean in a way the recursion doesn't reach. The fix should ensure `canonicalizeWhere()` recurses into all operands of `where_binary` / `where_boolean` nodes and converts any `some` found inside them. This keeps the single-responsibility principle: canonicalization normalizes quantifiers, lowering translates canonical forms.
 - **Q13c:** For `countEquals` (13c): does `SparqlSelectPlan` already have a `having` field, or does it need to be added? If added, does `algebraToString.ts` already serialize it?
+  - **Recommendation:** `SparqlSelectPlan` already has a `having?: SparqlExpression` field (defined in `SparqlAlgebra.ts` line 175). Need to verify whether `algebraToString.ts` serializes it — if not, adding `HAVING(expr)` serialization is straightforward. The main work is in `irToAlgebra.ts`: detect that the WHERE filter expression contains an `aggregate_expr`, extract it, and assign it to the plan's `having` field instead of the `algebra` FILTER. A `containsAggregate(expr: SparqlExpression): boolean` helper would walk the expression tree to detect this.
 - **Q13d:** Should all 3 sub-fixes be in one phase or split into separate commits? They touch different layers (serialization, canonicalization, algebra conversion).
+  - **Recommendation:** Keep as one phase, one commit. While they touch different layers, they are small, self-contained fixes with no interaction between them. Splitting into 3 separate phases adds coordination overhead without benefit. Each sub-fix is 5-20 lines of code. The tests for all 3 are in the same file, and the golden test updates can be verified together. However, implement and test them in order (13a → 13b → 13c) since 13a is the simplest and 13c is the most involved.
 
 ---
 
@@ -1971,23 +1990,27 @@ Fix: The context path should resolve to a concrete value (the actual name of the
 
 **Open questions:**
 - **Q14a:** For the expression projection (14a): should we support arbitrary expressions in SELECT (e.g. `(expr AS ?alias)`), or only comparison expressions? SPARQL allows any expression in a BIND/projected expression, but we only need comparison for now.
+  - **Recommendation:** Support arbitrary expressions in `(expr AS ?alias)`. The implementation cost is nearly identical either way — `resolveExpressionVariable()` in `irToAlgebra.ts` (line 652) currently returns `null` for non-variable expressions. The fix is to handle the `null` case by converting the full IR expression to a `SparqlExpression` and emitting it as `(serialized_expr AS ?alias)`. Restricting to comparison-only adds a type check with no benefit. The `SparqlProjectionItem` type would need an `expression?: SparqlExpression` variant alongside the existing `variable: string` variant.
 - **Q14b:** For context path (14b): what is the intended semantics of `getQueryContext('user').name`? Should it resolve to a literal value (eagerly evaluate the context user's name from the store) or to a SPARQL variable bound to the context entity's name via a separate pattern? The eager approach is simpler but requires a store read at query-build time. The SPARQL approach is purer but more complex.
+  - **Recommendation:** Use the SPARQL variable approach — bind the context entity to a variable via a separate triple pattern. The current pipeline already handles `getQueryContext('user')` correctly (lowers to `reference_expr` → `iri_expr`). The problem is only with `.name` path access on the context. The fix: when a context reference is followed by a property path in the where clause, emit a separate triple pattern `<context_entity_iri> <P/name> ?ctx_name .` and use `?ctx_name` in the FILTER instead of resolving to the same variable as `f.name`. This keeps query construction pure (no store reads at build time) and is consistent with how SPARQL works. The eager approach would break the "queries are data" principle where queries can be serialized and sent to remote endpoints.
 - **Q14c:** Is `customResultEqualsBoolean` a high-priority use case? The DSL pattern `{isBestFriend: p.bestFriend.equals(entity)}` is unusual — most users would use `.where()` for filtering instead of projecting a boolean. If low priority, we could defer this.
+  - **Recommendation:** Medium priority. It's a valid DSL pattern that demonstrates computed projections — a building block for more complex derived fields in the future. The fix is small (10-20 lines in `irToAlgebra.ts` projection building + a `SparqlProjectionItem` variant). Recommend including it in Phase 14 since the effort is low and it rounds out the expression support.
 - **Q14d:** Is `whereWithContextPath` a high-priority use case? The pattern of accessing properties of a context entity in a where clause is niche. If low priority, we could defer this.
+  - **Recommendation:** Low priority, but still worth implementing in Phase 14. The `getQueryContext` feature is explicitly part of the DSL API and has 2 fixtures testing it (`whereWithContext` works correctly, `whereWithContextPath` does not). Having half the context feature broken would be confusing for users. The fix requires understanding how the desugarer resolves context property paths, which is a contained change in `IRDesugar.ts` or `IRLower.ts`. If time is tight, this could be deferred to a separate phase, but it pairs naturally with 14a since both are about expression handling in projections/filters.
 
 ---
 
 **Dependency graph for Phases 10-14:**
 ```
 Phase 9 (complete)
-  ├─→ Phase 10 (recursive nesting) ─→ Phase 11 (tighten assertions)
-  ├─→ Phase 12 (inline where lowering) ─────────┐
-  ├─→ Phase 13 (invalid SPARQL fixes)            ├─→ [all complete → full parity]
-  └─→ Phase 14 (edge cases: eval projection,     │
-                 context path)  ──────────────────┘
+  ├─→ Phase 10 (recursive nesting) ──────────────┐
+  ├─→ Phase 12 (inline where lowering) ──────────┤
+  ├─→ Phase 13 (invalid SPARQL fixes)            ├─→ Phase 11 (tighten assertions)
+  └─→ Phase 14 (edge cases: eval projection,     │       ↓
+                 context path)  ──────────────────┘   [full parity]
 ```
 
-Phases 12, 13, 14 can run in parallel (different files, different layers). Phase 10 is independent. Phase 11 depends on Phase 10 (needs recursive nesting to assert on nested structure) and benefits from 12-14 (fewer "known incorrect" caveats).
+Phases 10, 12, 13, 14 can all run in parallel (different files, different layers). Phase 11 (assertion tightening) should come last — after Phases 10, 12, 13, and 14 fix the underlying issues, so assertions encode correct behavior rather than known-incorrect results.
 
 ### Phase summary
 
@@ -2005,8 +2028,8 @@ Phases 12, 13, 14 can run in parallel (different files, different layers). Phase
 | 7 | Fix URI-vs-literal in FILTER ✅ | 6 | — |
 | 8 | Fix nested result grouping ✅ | 7 | — |
 | 9 | Full Fuseki coverage (all 75 fixtures) ✅ | 8 | — |
-| 10 | Recursive nesting in result mapping | 9 | — |
-| 11 | Tighten Fuseki assertions to OLD depth | 10 | — |
-| 12 | Inline where filter lowering (IR pipeline) | 9 | **parallel** (12,13,14) |
-| 13 | Fix invalid SPARQL (3 fixtures) | 9 | **parallel** (12,13,14) |
-| 14 | Fix edge cases (eval projection, context path) | 9 | **parallel** (12,13,14) |
+| 10 | Recursive nesting in result mapping | 9 | **parallel** (10,12,13,14) |
+| 11 | Tighten Fuseki assertions to OLD depth | 10,12,13,14 | — |
+| 12 | Inline where filter lowering (IR pipeline) | 9 | **parallel** (10,12,13,14) |
+| 13 | Fix invalid SPARQL (3 fixtures) | 9 | **parallel** (10,12,13,14) |
+| 14 | Fix edge cases (eval projection, context path) | 9 | **parallel** (10,12,13,14) |
