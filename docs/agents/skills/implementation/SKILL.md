@@ -20,6 +20,16 @@ Run only after explicit user confirmation to enter implementation mode, with an 
 7. Continue to next phase without pausing only if there are no deviations and no major problems.
 8. If any deviation/blocker/major risk appears, pause and report.
 
+## Parallel execution
+
+When the plan marks phases as parallelizable, use the Task tool (or any available sub-agent spawning tool) to run them concurrently:
+
+- **Spawn one sub-agent per independent phase** using `run_in_background: true`. Give each agent a self-contained prompt with all context it needs (file paths, types, contracts, test specifications, validation criteria).
+- **Avoid file conflicts**: If two phases write to the same file, combine them into a single agent or sequence them. Different agents should own different files.
+- **Shared files** (barrel exports, test config): Let each agent add its own entries. After all agents complete, verify the shared files have no duplicates or conflicts.
+- **Wait and verify**: After all parallel agents finish, run a full integration check (compile + full test suite) before committing. This catches cross-agent conflicts in shared files.
+- **Single commit for parallel group**: All work from a parallel group goes into one commit after integration verification passes.
+
 ## Required pause report content
 
 - What was done

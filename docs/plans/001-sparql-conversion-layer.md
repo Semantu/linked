@@ -1251,6 +1251,65 @@ Test data loaded in `beforeAll` (matching OLD test setup):
 
 ---
 
+### Phase 5: Fuseki Docker setup + live integration verification
+
+**Depends on:** Phase 4
+**Can run in parallel with:** Phase 6
+
+**Tasks:**
+1. Create `docker-compose.test.yml` at project root — minimal Fuseki service for tests:
+   - Use `secoresearch/fuseki:5.5.0` image (same as create_now project)
+   - Expose port 3030 (default, no host remap needed for tests)
+   - No assembler config — tests create datasets via HTTP API (`createTestDataset()` already does this)
+   - Add healthcheck (wget to localhost:3030)
+   - No persistent volumes (ephemeral test data)
+2. Add npm script `test:fuseki` to `package.json`:
+   - Starts Fuseki via `docker compose -f docker-compose.test.yml up -d --wait`
+   - Runs `npx jest --config jest.config.js --testPathPattern='sparql-fuseki'`
+   - Stops Fuseki via `docker compose -f docker-compose.test.yml down`
+3. Run `npm run test:fuseki` and verify all 19 integration tests actually pass against a live Fuseki instance.
+4. Fix any issues found when running against real Fuseki (query syntax, result format, endpoint behavior).
+
+**Validation:**
+- `docker compose -f docker-compose.test.yml up -d --wait` starts Fuseki successfully.
+- `npx jest --config jest.config.js --testPathPattern='sparql-fuseki' --verbose` runs all 19 tests against live Fuseki; all pass.
+- `docker compose -f docker-compose.test.yml down` cleans up without errors.
+- Existing tests still pass: `npx jest --config jest.config.js` shows no regressions.
+
+**Commit:** `test(sparql): add Docker Compose for Fuseki integration tests`
+
+---
+
+### Phase 6: Negative and error-path tests
+
+**Depends on:** Phase 3
+**Can run in parallel with:** Phase 5
+
+**Tasks:**
+1. Write `src/tests/sparql-negative.test.ts` covering:
+   - **Malformed IR input**: Missing required fields (e.g. `root` is undefined, empty `projection` array, `where` expression with unknown kind)
+   - **Unknown expression kinds**: Verify `convertExpression()` throws a clear error for unrecognized expression kinds
+   - **Unknown pattern kinds**: Fix the silent-failure in `convertExistsPattern()` (returns empty BGP for unknown patterns) — should throw instead. Then test it throws.
+   - **Empty queries**: Empty projection, empty graph patterns, zero-length mutation data
+   - **Type coercion edge cases in result mapping**: NaN numeric strings, empty string booleans, malformed date strings, missing datatype annotations
+   - **Serializer edge cases**: Algebra nodes with empty triple arrays, expressions with null operands, deeply nested (5+ levels) algebra trees
+2. Fix the silent-failure default case in `convertExistsPattern()` at `irToAlgebra.ts:598` — change from returning empty BGP to throwing an error.
+3. Update outdated comments:
+   - `src/sparql/index.ts:21` — remove "stubs until Phase 3"
+   - `src/sparql/irToAlgebra.ts:901` — remove "stubs — wired in Phase 3"
+4. Add test file to `jest.config.js`.
+
+**Validation:**
+- All negative tests pass.
+- `convertExistsPattern()` throws on unknown pattern kind (verified by test).
+- Outdated comments are removed.
+- `npx tsc -p tsconfig-cjs.json --noEmit` passes.
+- `npx jest --config jest.config.js` — all tests pass, no regressions.
+
+**Commit:** `test(sparql): add negative and error-path tests, fix silent failures`
+
+---
+
 ### Phase summary
 
 | Phase | Description | Depends on | Parallel group |
@@ -1262,3 +1321,5 @@ Test data loaded in `beforeAll` (matching OLD test setup):
 | 2d | Layer 1: mutation IR→algebra | 1 | **parallel** |
 | 3 | Golden tests + wiring | 2a, 2b, 2d | — |
 | 4 | Fuseki integration | 2c, 3 | — |
+| 5 | Fuseki Docker + live verification | 4 | **parallel** |
+| 6 | Negative + error-path tests | 3 | **parallel** |

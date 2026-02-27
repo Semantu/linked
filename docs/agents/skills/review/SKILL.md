@@ -35,8 +35,20 @@ After decisions are clear:
   - create separate ideation docs only for very different, large deferred tasks
   - assign the next available 3-digit prefix in `docs/ideas` for each new ideation doc
 
-Then report in chat what was updated and ask the user to review those updates.
+Then report in chat what was updated.
 Do not create a separate review report file in this mode.
+
+## Follow-up questions before switching modes
+
+**After updating the plan with new phases, always ask the user implementation-specific follow-up questions before offering to switch modes.** New phases added during review are often under-specified because they came from gap analysis rather than upfront design. Proactively ask about:
+
+- **Placement decisions**: Where should new files/configs live? (e.g. project root vs subfolder)
+- **Tool/dependency choices**: Which specific library, image, or tool version to use?
+- **Configuration details**: Ports, environment variables, naming conventions
+- **Scope boundaries**: How thorough should tests/error messages be? What's worth the maintenance cost vs what's overkill?
+- **Anything the agent is unsure about** that would affect the implementation
+
+Only offer to switch to tasks mode after these questions are answered. This prevents wasted implementation effort from under-specified phases.
 
 
 ## Guardrails
@@ -45,17 +57,17 @@ Do not create a separate review report file in this mode.
 - Do not remove `docs/plans/<nnn>-<topic>.md` in review mode; plan removal happens in wrapup after report approval.
 - If big remaining work is identified, discuss tradeoffs/solutions in chat first.
 - Only convert review findings into new not-yet-completed phases/tasks after the user confirms scope and approach.
-- After adding new tasks, ask the user to review the updated plan and explicitly ask whether to start implementation with the first new phase.
-- For newly uncovered work, do not switch directly from review to implementation; switch to tasks mode first.
+- After adding new phases/tasks, ask the user to review the updated plan and ask whether to switch to tasks mode to refine them.
+- For newly uncovered work, **always switch to tasks mode first** — never directly to implementation. Tasks mode validates that phases have proper validation criteria, dependency graphs, and parallel opportunities before implementation begins.
+- If the user's response to review findings involves clarifying approach or scope (e.g. "do X but not Y", "let's use approach A"), treat this as still in the clarification loop — ask follow-up questions for any remaining ambiguity before switching modes.
 
 ## Exit criteria
 
 - Gaps are clarified with explicit user decisions (now vs future, and chosen approach where needed).
-- If now-work exists, plan was updated with new phases/tasks and user was asked whether to start implementation of the first new phase.
+- If now-work exists, plan was updated with new phases/tasks and user was asked whether to switch to tasks mode.
 - If future-work exists, ideation docs were created according to grouping rules and user was informed.
 - User has explicitly confirmed whether to:
   - stay in review mode,
-  - switch to tasks mode,
-  - switch to implementation mode for approved next phase,
+  - switch to tasks mode (required path for any new implementation work),
   - switch to ideation mode for future work,
-  - or move to wrapup mode.
+  - or move to wrapup mode (only when no new implementation work remains).

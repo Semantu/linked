@@ -26,7 +26,7 @@ Phases should be designed for maximum parallelism — different agents may imple
 - **Contracts first**: If the plan defines inter-component contracts (types, interfaces, shared data structures), schedule the contract/types phase first. Once contracts are established, phases that only depend on those contracts can run in parallel.
 - **Stub boundaries**: When a phase depends on another phase's output, note what stubs or mocks are needed so it can proceed independently. For example: "Agent B can stub `irToAlgebra()` with hand-crafted algebra objects to test `algebraToString()` independently."
 - **Mark parallel groups**: Use explicit notation in the task breakdown to indicate which phases can run simultaneously. For example: "Phase 2a, 2b, 2c can run in parallel after Phase 1."
-- **Integration phase last**: Wire-up, end-to-end tests, and integration tests should be the final phase since they depend on all components being complete.
+- **Integration phase last**: After all parallel phases complete, include an explicit integration phase that: (1) replaces stubs with real wiring between components, (2) verifies all parts compile and work together, (3) runs end-to-end / golden tests that exercise the full pipeline. This phase must be planned even when stubs seem trivial — it catches type mismatches, import issues, and cross-component edge cases that unit tests miss.
 
 ## Validation specification
 
