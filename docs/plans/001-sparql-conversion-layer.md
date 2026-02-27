@@ -1115,9 +1115,11 @@ These are full end-to-end string-equality tests. Each test calls the IR factory,
 
 ---
 
-### Phase 4: Fuseki integration tests
+### Phase 4: Fuseki integration tests ✅
 
 **Depends on:** Phases 2c + 3 (need result mapping + working SPARQL generation)
+
+**Status: COMPLETE** — 19 Fuseki integration tests written (16 select + 3 mutation). Tests skip gracefully when Fuseki is unavailable. `npm run compile` clean, no regressions (384/384 tests pass).
 
 **Tasks:**
 1. Create test Fuseki helper (`src/test-helpers/fuseki-test-store.ts`):
