@@ -27,6 +27,12 @@ import {
   SparqlFilter,
 } from './SparqlAlgebra.js';
 import {SparqlOptions, generateEntityUri} from './sparqlUtils.js';
+import {
+  selectPlanToSparql,
+  insertDataPlanToSparql,
+  deleteInsertPlanToSparql,
+  deleteWherePlanToSparql,
+} from './algebraToString.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -903,9 +909,8 @@ export function selectToSparql(
   query: IRSelectQuery,
   options?: SparqlOptions,
 ): string {
-  const _plan = selectToAlgebra(query, options);
-  // Phase 3: return selectPlanToSparql(plan, options);
-  throw new Error('selectToSparql not yet implemented — depends on algebraToString (Phase 3)');
+  const plan = selectToAlgebra(query, options);
+  return selectPlanToSparql(plan, options);
 }
 
 /**
@@ -916,9 +921,8 @@ export function createToSparql(
   query: IRCreateMutation,
   options?: SparqlOptions,
 ): string {
-  const _plan = createToAlgebra(query, options);
-  // Phase 3: return insertDataPlanToSparql(plan, options);
-  throw new Error('createToSparql not yet implemented — depends on algebraToString (Phase 3)');
+  const plan = createToAlgebra(query, options);
+  return insertDataPlanToSparql(plan, options);
 }
 
 /**
@@ -929,9 +933,8 @@ export function updateToSparql(
   query: IRUpdateMutation,
   options?: SparqlOptions,
 ): string {
-  const _plan = updateToAlgebra(query, options);
-  // Phase 3: return deleteInsertPlanToSparql(plan, options);
-  throw new Error('updateToSparql not yet implemented — depends on algebraToString (Phase 3)');
+  const plan = updateToAlgebra(query, options);
+  return deleteInsertPlanToSparql(plan, options);
 }
 
 /**
@@ -942,7 +945,6 @@ export function deleteToSparql(
   query: IRDeleteMutation,
   options?: SparqlOptions,
 ): string {
-  const _plan = deleteToAlgebra(query, options);
-  // Phase 3: return deleteWherePlanToSparql(plan, options);
-  throw new Error('deleteToSparql not yet implemented — depends on algebraToString (Phase 3)');
+  const plan = deleteToAlgebra(query, options);
+  return deleteWherePlanToSparql(plan, options);
 }

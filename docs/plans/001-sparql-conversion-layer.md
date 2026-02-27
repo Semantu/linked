@@ -1016,9 +1016,11 @@ All tests use hand-crafted `SparqlJsonResults` objects paired with IR queries fr
 
 ---
 
-### Phase 3: Golden tests + wiring
+### Phase 3: Golden tests + wiring ✅
 
 **Depends on:** Phases 2a + 2b (need both layers to produce end-to-end SPARQL strings)
+
+**Status: COMPLETE** — 55 select golden tests + 19 mutation golden tests pass. Convenience wrappers wired. `npm run compile` clean, no regressions (365/365 tests pass).
 
 **Tasks:**
 1. Wire convenience wrappers in `irToAlgebra.ts`: `selectToSparql`, `createToSparql`, `updateToSparql`, `deleteToSparql`

@@ -22,6 +22,8 @@ module.exports = {
     '**/sparql-result-mapping.test.ts',
     '**/sparql-algebra.test.ts',
     '**/sparql-mutation-algebra.test.ts',
+    '**/sparql-select-golden.test.ts',
+    '**/sparql-mutation-golden.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {
