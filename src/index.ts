@@ -36,6 +36,7 @@ import * as shacl from './ontologies/shacl.js';
 import * as lincd from './ontologies/lincd.js';
 import * as owl from './ontologies/owl.js';
 import * as npm from './ontologies/npm.js';
+import * as Sparql from './sparql/index.js';
 import nextTick from 'next-tick';
 export {nextTick};
 
@@ -74,6 +75,7 @@ export function initModularApp() {
     lincd,
     owl,
     npm,
+    Sparql,
   };
   var lincdExport = {};
   for (let fileKey in publicFiles) {

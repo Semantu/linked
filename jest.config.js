@@ -17,6 +17,7 @@ module.exports = {
     '**/ir-pipeline-parity.test.ts',
     '**/ir-select-golden.test.ts',
     '**/ir-mutation-parity.test.ts',
+    '**/sparql-utils.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {

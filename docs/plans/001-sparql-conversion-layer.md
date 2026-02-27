@@ -525,9 +525,11 @@ Phase 4: Fuseki integration tests
 
 ---
 
-### Phase 1: Types, utilities, and exports (foundation)
+### Phase 1: Types, utilities, and exports (foundation) ✅
 
 **Must complete before anything else. All parallel phases depend on this.**
+
+**Status: COMPLETE** — All 15 tests pass, `npm run compile` clean, no regressions (162/162 existing tests pass).
 
 **Tasks:**
 1. Create `src/sparql/` directory
