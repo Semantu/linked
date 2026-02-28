@@ -2199,7 +2199,7 @@ The FILTER inside OPTIONAL means: the OPTIONAL succeeds only when the friend's n
 
 ### Phase 13: Fix invalid SPARQL generation (3 fixtures)
 
-**Status:** Not started
+**Status:** Complete
 
 **Depends on:** Phase 9
 **Can run in parallel with:** Phase 10, Phase 12, Phase 14

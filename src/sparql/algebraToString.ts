@@ -109,7 +109,7 @@ export function serializeExpression(
     }
 
     case 'not_expr':
-      return `!${serializeExpression(expr.inner, collector)}`;
+      return `!(${serializeExpression(expr.inner, collector)})`;
 
     case 'function_expr': {
       const args = expr.args

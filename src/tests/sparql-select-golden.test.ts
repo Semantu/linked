@@ -560,10 +560,10 @@ WHERE {
   OPTIONAL {
     ?a1 <${P}/name> ?a1_name .
   }
-  FILTER(!EXISTS {
+  FILTER(!(EXISTS {
     ?a0 <${P}/friends> ?a1 .
-    FILTER(!?a1_name = "Moa" || ?a1_name = "Jinx")
-  })
+    FILTER(!(?a1_name = "Moa" || ?a1_name = "Jinx"))
+  }))
 }`);
   });
 
@@ -575,12 +575,15 @@ SELECT DISTINCT ?a0
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
-    ?a0 <${P}/friends> ?a0_friends .
+    ?a1 <${P}/name> ?a1_name .
   }
   OPTIONAL {
     ?a0 <${P}/name> ?a0_name .
   }
-  FILTER(?a0_friends some "" && ?a0_name = "Semmy")
+  FILTER(EXISTS {
+    ?a0 <${P}/friends> ?a1 .
+    FILTER(?a1_name = "Jinx")
+  } && ?a0_name = "Semmy")
 }`);
   });
 
@@ -690,14 +693,15 @@ GROUP BY ?a0`);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-SELECT DISTINCT ?a0
+SELECT ?a0
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
     ?a0 <${P}/friends> ?a0_friends .
   }
-  FILTER(count(?a0_friends) = "2"^^xsd:integer)
-}`);
+}
+GROUP BY ?a0
+HAVING(count(?a0_friends) = "2"^^xsd:integer)`);
   });
 
   test('customResultEqualsBoolean', async () => {

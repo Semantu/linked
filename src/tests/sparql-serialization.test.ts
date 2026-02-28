@@ -402,7 +402,7 @@ describe('serializeExpression', () => {
       kind: 'not_expr',
       inner: {kind: 'variable_expr', name: 'x'},
     };
-    expect(serializeExpression(expr)).toBe('!?x');
+    expect(serializeExpression(expr)).toBe('!(?x)');
   });
 
   test('function_expr → NAME(args)', () => {

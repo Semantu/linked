@@ -163,6 +163,31 @@ class VariableRegistry {
 }
 
 // ---------------------------------------------------------------------------
+// Aggregate detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks whether a SparqlExpression tree contains an aggregate sub-expression.
+ * Used to route aggregate-containing filters to HAVING instead of FILTER.
+ */
+function containsAggregate(expr: SparqlExpression): boolean {
+  switch (expr.kind) {
+    case 'aggregate_expr':
+      return true;
+    case 'binary_expr':
+      return containsAggregate(expr.left) || containsAggregate(expr.right);
+    case 'logical_expr':
+      return expr.exprs.some(containsAggregate);
+    case 'not_expr':
+      return containsAggregate(expr.inner);
+    case 'function_expr':
+      return expr.args.some(containsAggregate);
+    default:
+      return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Select conversion
 // ---------------------------------------------------------------------------
 
@@ -242,14 +267,19 @@ export function selectToAlgebra(
     });
   }
 
-  // 5. Where clause → Filter wrapping
+  // 5. Where clause → Filter wrapping (or HAVING if aggregate-containing)
+  let havingExpr: SparqlExpression | undefined;
   if (query.where) {
     const filterExpr = convertExpression(query.where, registry, optionalPropertyTriples);
-    algebra = {
-      type: 'filter',
-      expression: filterExpr,
-      inner: algebra,
-    };
+    if (containsAggregate(filterExpr)) {
+      havingExpr = filterExpr;
+    } else {
+      algebra = {
+        type: 'filter',
+        expression: filterExpr,
+        inner: algebra,
+      };
+    }
   }
 
   // 6. SubjectId → Filter
@@ -320,6 +350,9 @@ export function selectToAlgebra(
 
   // 8. GROUP BY inference
   let groupBy: string[] | undefined;
+  if (havingExpr) {
+    hasAggregates = true;
+  }
   if (hasAggregates) {
     // All non-aggregate projected variables become GROUP BY targets
     groupBy = projection
@@ -345,6 +378,7 @@ export function selectToAlgebra(
     limit: query.limit,
     offset: query.offset,
     groupBy,
+    having: havingExpr,
     aggregates: aggregates.length > 0 ? aggregates : undefined,
   };
 }
