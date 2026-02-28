@@ -617,9 +617,12 @@ WHERE {
   OPTIONAL {
     ?a1 <${P}/name> ?a1_name .
   }
+  OPTIONAL {
+    <user-1> <${P}/name> ?__ctx__user-1_name .
+  }
   FILTER(EXISTS {
     ?a0 <${P}/friends> ?a1 .
-    FILTER(?a1_name = ?a1_name)
+    FILTER(?a1_name = ?__ctx__user-1_name)
   })
 }`);
   });
@@ -708,7 +711,7 @@ HAVING(count(?a0_friends) = "2"^^xsd:integer)`);
     const sparql = await goldenSelect(queryFactories.customResultEqualsBoolean);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1
+SELECT DISTINCT ?a0 (?a0_bestFriend = <linked://tmp/entities/p3> AS ?a1)
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {

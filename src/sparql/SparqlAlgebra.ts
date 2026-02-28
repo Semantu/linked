@@ -148,7 +148,8 @@ export type SparqlBoundExpr = {
 
 export type SparqlProjectionItem =
   | {kind: 'variable'; name: string}
-  | {kind: 'aggregate'; expression: SparqlAggregateExpr; alias: string};
+  | {kind: 'aggregate'; expression: SparqlAggregateExpr; alias: string}
+  | {kind: 'expression'; expression: SparqlExpression; alias: string};
 
 export type SparqlOrderCondition = {
   expression: SparqlExpression;

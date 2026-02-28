@@ -2410,7 +2410,7 @@ Note: DISTINCT is removed when GROUP BY is present (already handled by `distinct
 
 ### Phase 14: Fix remaining edge cases (evaluation_select, context path)
 
-**Status:** Not started
+**Status:** Complete
 
 **Depends on:** Phase 9
 **Can run in parallel with:** Phase 10, Phase 12, Phase 13

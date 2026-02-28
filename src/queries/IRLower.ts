@@ -95,7 +95,18 @@ const lowerWhereArg = (
   }
   if (arg && typeof arg === 'object') {
     if ('kind' in arg && arg.kind === 'arg_path') {
-      const argPath = arg as {kind: 'arg_path'; path: DesugaredSelectionPath};
+      const argPath = arg as {kind: 'arg_path'; subject?: ShapeReferenceValue; path: DesugaredSelectionPath};
+      if (argPath.subject && argPath.subject.id) {
+        // Context entity path — resolve property relative to the context IRI
+        const lastStep = argPath.path.steps[argPath.path.steps.length - 1];
+        if (lastStep && lastStep.kind === 'property_step') {
+          return {
+            kind: 'context_property_expr',
+            contextIri: argPath.subject.id,
+            property: lastStep.propertyShapeId,
+          };
+        }
+      }
       return lowerPath(argPath.path, options);
     }
     if (isShapeRef(arg)) {

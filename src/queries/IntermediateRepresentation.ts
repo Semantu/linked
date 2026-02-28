@@ -82,6 +82,7 @@ export type IRExpression =
   | IRReferenceExpression
   | IRAliasExpression
   | IRPropertyExpression
+  | IRContextPropertyExpression
   | IRBinaryExpression
   | IRLogicalExpression
   | IRNotExpression
@@ -107,6 +108,12 @@ export type IRAliasExpression = {
 export type IRPropertyExpression = {
   kind: 'property_expr';
   sourceAlias: IRAlias;
+  property: string;
+};
+
+export type IRContextPropertyExpression = {
+  kind: 'context_property_expr';
+  contextIri: string;
   property: string;
 };
 

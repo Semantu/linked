@@ -325,8 +325,9 @@ export function selectToAlgebra(
       if (varName && varName !== rootAlias) {
         projection.push({kind: 'variable', name: varName});
       } else if (!varName) {
-        // alias_expr or other — use alias directly
-        projection.push({kind: 'variable', name: item.alias});
+        // Non-variable expression (binary_expr, function_expr, etc.)
+        // → project as (expr AS ?alias)
+        projection.push({kind: 'expression', expression: sparqlExpr, alias: item.alias});
       }
     }
   }
@@ -339,7 +340,7 @@ export function selectToAlgebra(
   const projectedNames = new Set<string>();
   for (const p of projection) {
     if (p.kind === 'variable') projectedNames.add(p.name);
-    else if (p.kind === 'aggregate') projectedNames.add(p.alias);
+    else if (p.kind === 'aggregate' || p.kind === 'expression') projectedNames.add(p.alias);
   }
   for (const alias of collectTraversalAliases(query.patterns)) {
     if (!projectedNames.has(alias)) {
@@ -492,6 +493,21 @@ function processExpressionForProperties(
         processExpressionForProperties(expr.filter, registry, optionalPropertyTriples);
       }
       break;
+    case 'context_property_expr': {
+      // Context entity property — emit a triple with fixed IRI as subject
+      const ctxKey = `__ctx__${expr.contextIri}`;
+      if (!registry.has(ctxKey, expr.property)) {
+        const varName = registry.getOrCreate(ctxKey, expr.property);
+        optionalPropertyTriples.push(
+          tripleOf(
+            iriTerm(expr.contextIri),
+            iriTerm(expr.property),
+            varTerm(varName),
+          ),
+        );
+      }
+      break;
+    }
     case 'literal_expr':
     case 'reference_expr':
     case 'alias_expr':
@@ -544,6 +560,12 @@ function convertExpression(
 
     case 'alias_expr':
       return {kind: 'variable_expr', name: expr.alias};
+
+    case 'context_property_expr': {
+      const ctxKey = `__ctx__${expr.contextIri}`;
+      const ctxVarName = registry.getOrCreate(ctxKey, expr.property);
+      return {kind: 'variable_expr', name: ctxVarName};
+    }
 
     case 'property_expr': {
       const varName = registry.getOrCreate(expr.sourceAlias, expr.property);

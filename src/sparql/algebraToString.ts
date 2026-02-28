@@ -238,9 +238,9 @@ export function selectPlanToSparql(
     if (item.kind === 'variable') {
       return `?${item.name}`;
     } else {
-      // aggregate projection: (AGG(...) AS ?alias)
-      const aggExpr = serializeExpression(item.expression, collector);
-      return `(${aggExpr} AS ?${item.alias})`;
+      // aggregate or expression projection: (expr AS ?alias)
+      const expr = serializeExpression(item.expression, collector);
+      return `(${expr} AS ?${item.alias})`;
     }
   });
 
