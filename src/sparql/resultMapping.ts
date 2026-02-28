@@ -190,6 +190,15 @@ function insertIntoTree(
   field: FieldDescriptor,
 ): void {
   if (chain.length === 0) {
+    // Skip alias_expr fields that match the group's traverseAlias — the entity's
+    // id is already captured by collectNestedGroup via binding[traverseAlias].
+    if (
+      field.expression.kind === 'alias_expr' &&
+      'traverseAlias' in root &&
+      field.expression.alias === (root as NestedGroup).traverseAlias
+    ) {
+      return;
+    }
     root.flatFields.push(field);
     return;
   }

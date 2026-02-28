@@ -2013,7 +2013,7 @@ expect(semmy.name).toBe('Semmy');
 
 ### Phase 12: Inline where filter lowering (IR pipeline)
 
-**Status:** Not started
+**Status:** Complete
 
 **Depends on:** Phase 9
 **Can run in parallel with:** Phase 10, Phase 13, Phase 14

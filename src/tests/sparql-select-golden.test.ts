@@ -378,11 +378,13 @@ describe('SPARQL golden — inline where (lowered to projection)', () => {
     const sparql = await goldenSelect(queryFactories.whereFriendsNameEquals);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a0_friends
+SELECT DISTINCT ?a0 ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
-    ?a0 <${P}/friends> ?a0_friends .
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
+    FILTER(?a1_name = "Moa")
   }
 }`);
   });
@@ -391,11 +393,12 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.whereHobbyEquals);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a0_hobby
+SELECT DISTINCT ?a0 ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
-    ?a0 <${P}/hobby> ?a0_hobby .
+    ?a0 <${P}/hobby> ?a1 .
+    FILTER(?a1 = "Jogging")
   }
 }`);
   });
@@ -404,11 +407,14 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.whereAnd);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a0_friends
+SELECT DISTINCT ?a0 ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
-    ?a0 <${P}/friends> ?a0_friends .
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
+    ?a1 <${P}/hobby> ?a1_hobby .
+    FILTER(?a1_name = "Moa" && ?a1_hobby = "Jogging")
   }
 }`);
   });
@@ -417,11 +423,14 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.whereOr);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a0_friends
+SELECT DISTINCT ?a0 ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
-    ?a0 <${P}/friends> ?a0_friends .
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
+    ?a1 <${P}/hobby> ?a1_hobby .
+    FILTER(?a1_name = "Jinx" || ?a1_hobby = "Jogging")
   }
 }`);
   });
@@ -430,11 +439,14 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.whereAndOrAnd);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a0_friends
+SELECT DISTINCT ?a0 ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
-    ?a0 <${P}/friends> ?a0_friends .
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
+    ?a1 <${P}/hobby> ?a1_hobby .
+    FILTER(?a1_name = "Jinx" || ?a1_hobby = "Jogging" && ?a1_name = "Moa")
   }
 }`);
   });
@@ -443,11 +455,14 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.whereAndOrAndNested);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a0_friends
+SELECT DISTINCT ?a0 ?a1
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
-    ?a0 <${P}/friends> ?a0_friends .
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
+    ?a1 <${P}/hobby> ?a1_hobby .
+    FILTER(?a1_name = "Jinx" || ?a1_hobby = "Jogging" && ?a1_name = "Moa")
   }
 }`);
   });

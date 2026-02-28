@@ -55,6 +55,7 @@ export type IRTraversePattern = {
   from: IRAlias;
   to: IRAlias;
   property: string;
+  filter?: IRExpression;
 };
 
 export type IRJoinPattern = {

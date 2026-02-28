@@ -203,6 +203,13 @@ export function selectToAlgebra(
   // Track property triples that need to be added as OPTIONAL
   const optionalPropertyTriples: SparqlTriple[] = [];
 
+  // Track filtered traversals (inline where) — these get their own OPTIONAL blocks
+  const filteredTraverseBlocks: Array<{
+    traverseTriple: SparqlTriple;
+    filter: IRExpression;
+    toAlias: string;
+  }> = [];
+
   // 1. Root shape scan → BGP with type triple
   const rootAlias = query.root.alias;
   const shapeUri = query.root.shape;
@@ -218,7 +225,7 @@ export function selectToAlgebra(
 
   // 2. Process patterns → traverse triples, populate variable registry
   for (const pattern of query.patterns) {
-    processPattern(pattern, registry, traverseTriples, optionalPropertyTriples);
+    processPattern(pattern, registry, traverseTriples, optionalPropertyTriples, filteredTraverseBlocks);
   }
 
   // 3. Process projection expressions, where clause, orderBy expressions
@@ -258,6 +265,20 @@ export function selectToAlgebra(
   };
 
   let algebra: SparqlAlgebraNode = requiredBgp;
+
+  // 4b. Build filtered OPTIONAL blocks for inline where traversals.
+  //     Each block contains: traverse triple + filter property triples + FILTER.
+  //     Property triples referenced by the filter are co-located inside the OPTIONAL
+  //     so that the filter can reference them.
+  for (const block of filteredTraverseBlocks) {
+    const filterPropertyTriples: SparqlTriple[] = [];
+    processExpressionForProperties(block.filter, registry, filterPropertyTriples);
+    const filterExpr = convertExpression(block.filter, registry, filterPropertyTriples);
+    const blockTriples: SparqlTriple[] = [block.traverseTriple, ...filterPropertyTriples];
+    const blockBgp: SparqlBGP = {type: 'bgp', triples: blockTriples};
+    const filteredBlock: SparqlFilter = {type: 'filter', expression: filterExpr, inner: blockBgp};
+    algebra = wrapOptional(algebra, filteredBlock);
+  }
 
   // Wrap each optional property triple in its own OPTIONAL (LeftJoin)
   for (const propTriple of optionalPropertyTriples) {
@@ -393,6 +414,7 @@ function processPattern(
   registry: VariableRegistry,
   traverseTriples: SparqlTriple[],
   optionalPropertyTriples: SparqlTriple[],
+  filteredTraverseBlocks?: Array<{traverseTriple: SparqlTriple; filter: IRExpression; toAlias: string}>,
 ): void {
   switch (pattern.kind) {
     case 'shape_scan':
@@ -403,38 +425,46 @@ function processPattern(
     case 'traverse': {
       // Register the traverse variable: (from, property) → to
       registry.set(pattern.from, pattern.property, pattern.to);
-      // Add traverse triple to required pattern
+      // Add traverse triple to required pattern (or filtered block if inline where)
       const triple = tripleOf(
         varTerm(pattern.from),
         iriTerm(pattern.property),
         varTerm(pattern.to),
       );
-      traverseTriples.push(triple);
+      if (pattern.filter && filteredTraverseBlocks) {
+        filteredTraverseBlocks.push({
+          traverseTriple: triple,
+          filter: pattern.filter,
+          toAlias: pattern.to,
+        });
+      } else {
+        traverseTriples.push(triple);
+      }
       break;
     }
 
     case 'join': {
       for (const sub of pattern.patterns) {
-        processPattern(sub, registry, traverseTriples, optionalPropertyTriples);
+        processPattern(sub, registry, traverseTriples, optionalPropertyTriples, filteredTraverseBlocks);
       }
       break;
     }
 
     case 'optional': {
       // Optional patterns — process inner patterns but keep them optional
-      processPattern(pattern.pattern, registry, traverseTriples, optionalPropertyTriples);
+      processPattern(pattern.pattern, registry, traverseTriples, optionalPropertyTriples, filteredTraverseBlocks);
       break;
     }
 
     case 'union': {
       for (const branch of pattern.branches) {
-        processPattern(branch, registry, traverseTriples, optionalPropertyTriples);
+        processPattern(branch, registry, traverseTriples, optionalPropertyTriples, filteredTraverseBlocks);
       }
       break;
     }
 
     case 'exists': {
-      processPattern(pattern.pattern, registry, traverseTriples, optionalPropertyTriples);
+      processPattern(pattern.pattern, registry, traverseTriples, optionalPropertyTriples, filteredTraverseBlocks);
       break;
     }
   }
