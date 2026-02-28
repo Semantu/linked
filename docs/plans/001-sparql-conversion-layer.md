@@ -2673,3 +2673,276 @@ Phases 10, 12, 13, 14 can all run in parallel (different files, different layers
 | 12 | Inline where filter lowering (IR pipeline) | 9 | **parallel** (10,12,13,14) |
 | 13 | Fix invalid SPARQL (3 fixtures) | 9 | **parallel** (10,12,13,14) |
 | 14 | Fix edge cases (eval projection, context path) | 9 | **parallel** (10,12,13,14) |
+
+---
+
+## Task breakdown
+
+### Dependency graph
+
+```
+Phase 9 (complete)
+  ├─→ Phase 10 (resultMapping.ts only)  ──────────────┐
+  ├─→ Phase 12 (IR pipeline + irToAlgebra)  ──────────┤
+  ├─→ Phase 13 (algebraToString + IRCanonicalize +     ├─→ Phase 11 (Fuseki test assertions)
+  │              irToAlgebra)                           │
+  └─→ Phase 14 (SparqlAlgebra + algebraToString +      │
+                 irToAlgebra + IRLower)  ──────────────┘
+```
+
+**Parallel group A** (10, 12, 13, 14): All four phases can run concurrently. File conflicts are minimal:
+- Phase 10 owns `resultMapping.ts` exclusively.
+- Phase 12 owns `IRProjection.ts`, `IntermediateRepresentation.ts` (adding `filter` to `IRTraversePattern`), and touches `irToAlgebra.ts` (OPTIONAL wrapping).
+- Phase 13 owns `algebraToString.ts` (NOT parens), `IRCanonicalize.ts` (some fix), and touches `irToAlgebra.ts` (HAVING extraction).
+- Phase 14 owns `SparqlAlgebra.ts` (projection type), touches `algebraToString.ts` (expression projection serialization), `irToAlgebra.ts` (projection building), and `IRLower.ts` (context path).
+
+**Shared file risk**: `irToAlgebra.ts` is touched by Phases 12, 13, and 14 in different sections:
+- Phase 12: step 4 (OPTIONAL wrapping for filtered traversals) — around lines 238-243
+- Phase 13: step 5 (WHERE → HAVING extraction) — around lines 246-253 + step 8 (GROUP BY) — around lines 322-328
+- Phase 14: step 7 (projection building) — around lines 292-301
+
+These are non-overlapping sections, but the integration phase (11) must verify they compose correctly.
+
+**Stubs for parallel execution:**
+- Phase 12 agents can stub `irToAlgebra.ts` changes by manually constructing `SparqlSelectPlan` objects with FILTER-inside-OPTIONAL for golden test verification.
+- Phase 13 agents can stub HAVING by manually constructing plans with `having` field set.
+- Phase 14 agents can stub expression projection by constructing plans with the new projection item kind.
+
+---
+
+### Phase 10: Tasks
+
+**T10.1** Replace flat `NestingDescriptor` type with recursive `NestedGroup` type in `src/sparql/resultMapping.ts` (lines 141-160).
+
+**T10.2** Rewrite `buildNestingDescriptor()` (lines 166-239) to build a tree:
+- Add `buildAliasChain()` helper to walk traverseMap from sourceAlias back to root.
+- Add `insertIntoTree()` helper to walk the chain and create intermediate groups.
+- Replace the flat `nestedGroupMap` logic with tree construction.
+
+**T10.3** Rewrite `mapNestedRows()` (lines 339-415) to recursively descend the nesting tree:
+- Extract `groupBindings()` recursive helper.
+- Preserve `isUriExpression()` check for URI vs literal coercion.
+- Preserve deduplication by entity id at each nesting level.
+
+**T10.4** Update golden tests in `src/tests/sparql-select-golden.test.ts` if any SPARQL output changes (unlikely — this phase only changes result mapping, not SPARQL generation).
+
+**T10.5** Verify all 4 affected Fuseki tests pass with correct nested structure:
+- `selectNestedFriendsName`
+- `doubleNestedSubSelect`
+- `selectDeepNested`
+- `nestedQueries2`
+
+#### Phase 10: Validation
+
+**Compilation:** `npx tsc --noEmit` exits 0.
+
+**Existing tests pass:** `npx vitest run src/tests/sparql-select-golden.test.ts` — all existing golden tests pass unchanged (SPARQL generation is not affected).
+
+**Fuseki integration (4 fixtures):** `npx vitest run src/tests/sparql-fuseki.test.ts` — all 75 existing tests still pass. Additionally verify structurally:
+
+- **`selectNestedFriendsName`** (`friends.friends.name`, a0→a1→a2):
+  Test data: p1→friends→[p2,p3]. p2→friends→[p3,p4]. p3→friends→[]. p4→friends→[].
+  Assert: result contains p1 with `friends` array. Each friend entry (p2) should itself have a `friends` array containing `name` strings. p1.friends should include an entry for p2 whose nested friends include entries with names "Jinx" and "Quinn".
+
+- **`doubleNestedSubSelect`** (`friends.select(f => f.bestFriend.select(p3 => ({name: p3.name})))`, a0→a1→a2):
+  Test data: p1→friends→[p2,p3]. p2→bestFriend→p3. p3→bestFriend→none.
+  Assert: result contains p1 with `friends` array. The p2 entry should have a nested `bestFriend` object with `{name: "Jinx"}`. The p3 entry should have `bestFriend: null` (no bestFriend).
+
+- **`selectDeepNested`** (`friends.bestFriend.bestFriend.name`, a0→a1→a2→a3):
+  Test data: p1→friends→[p2,p3]. p2→bestFriend→p3. p3→bestFriend→none. Chain breaks at p3.
+  Assert: result may be empty array (no entity satisfies the full 3-hop chain where the final bestFriend exists). Assert `Array.isArray(result)`.
+
+- **`nestedQueries2`** (`friends.select(f => [f.firstPet, f.bestFriend.select(p3 => ({name: p3.name}))])`, mixed nesting):
+  Test data: p1→friends→[p2,p3]. p2→firstPet→dog2, p2→bestFriend→p3. p3→firstPet→none, p3→bestFriend→none.
+  Assert: result contains p1 with `friends` array. p2 entry has both `firstPet` (entity ref to dog2) and `bestFriend` (nested object with `{name: "Jinx"}`).
+
+**Regression:** All other Fuseki tests (non-nested) continue to pass unchanged — flat result mapping path (`mapFlatRows`) is untouched.
+
+---
+
+### Phase 12: Tasks
+
+**T12.1** Add `filter?: IRExpression` field to `IRTraversePattern` in `src/queries/IntermediateRepresentation.ts`.
+
+**T12.2** In `src/queries/IRProjection.ts` `lowerSelectionPathExpression()` (lines 36-77), process `step.where` on property steps:
+- When a non-last property step has `.where`, canonicalize the where and lower it to an IR expression.
+- Attach the filter to the traversal pattern via `LoweringContext`.
+- This requires either passing `LoweringContext` to `lowerSelectionPathExpression` or collecting filters in a side channel.
+
+**T12.3** In `src/sparql/irToAlgebra.ts` `processPattern()` (lines 356-406), when a traverse pattern has `.filter`:
+- Discover property triples needed by the filter expression (call `processExpressionForProperties` scoped to the traversal).
+- Emit these triples INSIDE the OPTIONAL block, not in the outer `optionalPropertyTriples`.
+- Wrap the traverse triple + filter property triples + FILTER into a single `left_join` (OPTIONAL block).
+
+**T12.4** Update 5 golden tests in `src/tests/sparql-select-golden.test.ts`:
+- `whereFriendsNameEquals` — add `FILTER(?a1_name = "Moa")` inside the OPTIONAL
+- `whereAnd` — add `FILTER(?a1_name = "Moa" && ?a1_hobby = "Jogging")` inside the OPTIONAL
+- `whereOr` — add `FILTER(?a1_name = "Jinx" || ?a1_hobby = "Jogging")` inside the OPTIONAL
+- `whereAndOrAnd` — compound boolean FILTER inside the OPTIONAL
+- `whereAndOrAndNested` — nested compound boolean FILTER inside the OPTIONAL
+
+**T12.5** Update 5 Fuseki tests with result assertions.
+
+#### Phase 12: Validation
+
+**Compilation:** `npx tsc --noEmit` exits 0.
+
+**Golden tests (5 updated):** `npx vitest run src/tests/sparql-select-golden.test.ts` — all pass with new expected SPARQL containing FILTER inside OPTIONAL.
+
+**Fuseki integration (5 fixtures):**
+
+- **`whereFriendsNameEquals`** (`p.friends.where(f => f.name.equals('Moa'))`):
+  Test data: p1→friends→[p2(Moa), p3(Jinx)]. p2→friends→[p3(Jinx), p4(Quinn)].
+  Assert: result contains p1 with `friends` array of length 1, containing only Moa (p2). p2's friends array has length 1, containing only Jinx (p3, because neither p3 nor p4 is named "Moa" — actually wait, the filter applies per-entity. p2's friends filtered by name="Moa" → none match → p2.friends is empty array).
+  Correction: Each root entity gets their friends filtered. p1.friends=[p2] (Moa matches). p2.friends=[] (neither p3 nor p4 is named Moa).
+
+- **`whereAnd`** (`p.friends.where(f => f.name.equals('Moa').and(f.hobby.equals('Jogging')))`):
+  Test data: p2 has name=Moa, hobby=Jogging. p3 has name=Jinx, no hobby.
+  Assert: p1.friends=[p2] (Moa+Jogging matches). p2.friends=[] (p3 is Jinx, p4 is Quinn — neither matches).
+
+- **`whereOr`** (`p.friends.where(f => f.name.equals('Jinx').or(f.hobby.equals('Jogging')))`):
+  Test data: p2 is Moa+Jogging (hobby matches). p3 is Jinx (name matches).
+  Assert: p1.friends=[p2,p3] (both match via OR). p2.friends=[p3] (Jinx matches name, p4 matches neither).
+
+- **`whereAndOrAnd`** and **`whereAndOrAndNested`**: Assert correct compound boolean filtering with specific friend counts per root entity.
+
+**Regression:** All other Fuseki and golden tests pass unchanged.
+
+---
+
+### Phase 13: Tasks
+
+**T13.1** Fix NOT parenthesization in `src/sparql/algebraToString.ts` line 111-112:
+- Change `` `!${serializeExpression(expr.inner, collector)}` `` to `` `!(${serializeExpression(expr.inner, collector)})` ``
+
+**T13.2** Fix `some` in chained boolean compounds in `src/queries/IRCanonicalize.ts` line 158:
+- Add `canonicalizeComparison()` helper that checks for SOME/EVERY before calling `toComparison()`.
+- Replace `toComparison(grouped.first)` with `canonicalizeComparison(grouped.first)` at line 158.
+
+**T13.3** Fix COUNT in FILTER → HAVING in `src/sparql/irToAlgebra.ts`:
+- Add `containsAggregate(expr: SparqlExpression): boolean` recursive helper.
+- In step 5 (lines 246-253), check `containsAggregate(filterExpr)`. If true, assign to `havingExpr` variable instead of wrapping in FILTER.
+- In step 8, if `havingExpr` is set, force `hasAggregates = true` and assign `groupBy` + `having` on the plan.
+
+**T13.4** Update 3 golden tests in `src/tests/sparql-select-golden.test.ts`:
+- `whereEvery` — inner `!` gets parenthesized: `FILTER(!(...))`
+- `whereSequences` — `some` becomes `EXISTS { ... FILTER(...) } && ...`
+- `countEquals` — `FILTER(count(...))` becomes `GROUP BY ?a0 HAVING(count(...))`
+
+**T13.5** Update 3 Fuseki tests to run against Fuseki (currently generation-only).
+
+#### Phase 13: Validation
+
+**Compilation:** `npx tsc --noEmit` exits 0.
+
+**Golden tests (3 updated):** `npx vitest run src/tests/sparql-select-golden.test.ts` — all pass.
+
+**Fuseki integration (3 fixtures — previously generation-only, now live):**
+
+- **`whereEvery`** (`p.friends.every(f => f.name.equals('Moa').or(f.name.equals('Jinx')))`):
+  Semantics: ∀ friends, name is "Moa" or "Jinx". Test data: p1→friends→[p2(Moa), p3(Jinx)] — all match. p2→friends→[p3(Jinx), p4(Quinn)] — p4 is Quinn, fails.
+  Assert: result is array. p1 should be present (all friends match). p2 should NOT be present (Quinn doesn't match). p3 and p4 have no friends, so vacuously true — they should be present.
+
+- **`whereSequences`** (`p.friends.some(f => f.name.equals('Jinx')).and(p.name.equals('Semmy'))`):
+  Semantics: has a friend named Jinx AND own name is Semmy. Test data: p1 is Semmy with friend Jinx(p3).
+  Assert: result is array of length 1, containing only p1 (Semmy, who has friend Jinx).
+
+- **`countEquals`** (`p.friends.size().equals(2)`):
+  Semantics: entities with exactly 2 friends. Test data: p1 has 2 friends [p2,p3]. p2 has 2 friends [p3,p4].
+  Assert: result is array of length 2, containing p1 and p2.
+
+**Regression:** All other tests pass unchanged. Specifically verify `whereSomeExplicit` and `whereSomeImplicit` still work (they use `some` in a non-chained context — should not be affected by the 13b fix).
+
+---
+
+### Phase 14: Tasks
+
+**T14.1** Add `'expression'` variant to `SparqlProjectionItem` in `src/sparql/SparqlAlgebra.ts` (line 149-151):
+```ts
+| {kind: 'expression'; expression: SparqlExpression; alias: string}
+```
+
+**T14.2** Handle `'expression'` projection in `src/sparql/algebraToString.ts` `selectPlanToSparql()` (lines 237-245):
+- Serialize as `(expr AS ?alias)`.
+
+**T14.3** Fix projection building in `src/sparql/irToAlgebra.ts` (lines 292-301):
+- When `resolveExpressionVariable()` returns null and expression is not aggregate, create `{kind: 'expression', expression: sparqlExpr, alias: item.alias}` projection item.
+
+**T14.4** Fix context path resolution in `src/queries/IRLower.ts` `lowerWhereArg()` (lines 85-109):
+- When `arg_path` has `subject` (context entity), resolve the property path from the context entity IRI instead of from the query root alias.
+- Emit a triple pattern `<context_iri> <P/name> ?ctx_varname .` that binds the context entity's property.
+- Return a reference to `?ctx_varname` instead of the same variable as the inner query.
+
+**T14.5** Update 2 golden tests in `src/tests/sparql-select-golden.test.ts`:
+- `customResultEqualsBoolean` — projection becomes `(?a0_bestFriend = <...p3> AS ?isBestFriend)`
+- `whereWithContextPath` — FILTER becomes `?a1_name = ?ctx_name` with separate triple for context
+
+**T14.6** Update 2 Fuseki tests with result assertions.
+
+#### Phase 14: Validation
+
+**Compilation:** `npx tsc --noEmit` exits 0.
+
+**Golden tests (2 updated):** `npx vitest run src/tests/sparql-select-golden.test.ts` — all pass.
+
+**Fuseki integration (2 fixtures):**
+
+- **`customResultEqualsBoolean`** (`Person.select(p => ({isBestFriend: p.bestFriend.equals(entity('p3'))}))`):
+  Test data: p2→bestFriend→p3. No other person has bestFriend=p3.
+  Assert: result is array of 4 persons. p2's `isBestFriend` field is `true`. All others have `isBestFriend` as `false` (or `null` if bestFriend is absent — p3, p4 have no bestFriend).
+
+- **`whereWithContextPath`** (`p.friends.some(f => f.name.equals(getQueryContext('user').name))`):
+  Test data: context user is set to entity with specific name. Query finds persons who have a friend with that name.
+  Assert: depends on how context is set in test — verify FILTER uses a distinct variable for the context name, not a tautology. The SPARQL should be syntactically valid and produce correct filtering.
+
+**Regression:** All other tests pass. Specifically verify `whereWithContext` (non-path) still works — it uses `getQueryContext('user')` directly as an entity reference, which should be unaffected.
+
+---
+
+### Phase 11: Tasks
+
+**T11.1** Create `src/tests/sparql-result-mapping.test.ts` with hand-crafted SPARQL JSON binding tests:
+- Test `mapSparqlSelectResult()` with flat bindings (no nesting).
+- Test `mapSparqlSelectResult()` with 1-level nesting.
+- Test `mapSparqlSelectResult()` with 2-level nesting (after Phase 10).
+- Test `mapSparqlSelectResult()` with mixed nesting (flat + nested on same group).
+- Test type coercion: xsd:dateTime → Date, xsd:boolean → boolean, xsd:integer → number.
+- Test null handling: missing bindings → null fields.
+- Test URI coercion: uri type → entity reference `{id: ...}`.
+- Test deduplication: duplicate root ids produce single result row.
+
+**T11.2** Tighten all correct Fuseki SELECT test assertions (~60 fixtures) in `src/tests/sparql-fuseki.test.ts`:
+- Replace `toBeGreaterThanOrEqual` with exact `toHaveLength`.
+- Replace `toBeDefined()` with specific value assertions.
+- Use `findRowById()` for unordered results, index access for ordered (`sortByAsc`, `sortByDesc`).
+- Sort nested arrays by id or name before asserting order.
+- Add `// TODO: tighten after Phase 12/13` comments on the 8 fixtures that remain known-incorrect if those phases are not yet merged.
+
+**T11.3** Tighten the 5 inline-where fixtures (fixed by Phase 12) with precise assertions per the Phase 12 validation spec.
+
+**T11.4** Tighten the 3 invalid-SPARQL fixtures (fixed by Phase 13) with precise assertions per the Phase 13 validation spec.
+
+**T11.5** Tighten the 2 edge-case fixtures (fixed by Phase 14) with precise assertions per the Phase 14 validation spec.
+
+#### Phase 11: Validation
+
+**Compilation:** `npx tsc --noEmit` exits 0.
+
+**Unit tests (new file):** `npx vitest run src/tests/sparql-result-mapping.test.ts` — all pass. Minimum test count: 8 test cases covering flat, nested, mixed, type coercion, null, URI, dedup.
+
+**Fuseki integration:** `npx vitest run src/tests/sparql-fuseki.test.ts` — all 75 tests pass with tightened assertions. No `toBeGreaterThanOrEqual` or bare `toBeDefined()` assertions remain except on the fixtures marked TODO (if any phases are not yet merged).
+
+**Full suite:** `npx vitest run` — all tests in the repository pass.
+
+---
+
+### Integration verification (after all parallel phases merge)
+
+After Phases 10, 12, 13, 14 are all merged into the same branch:
+
+1. `npx tsc --noEmit` — full compilation passes.
+2. `npx vitest run src/tests/sparql-select-golden.test.ts` — all golden tests pass (10 updated golden strings from phases 12+13+14).
+3. `npx vitest run src/tests/sparql-fuseki.test.ts` — all 75 Fuseki tests pass.
+4. `npx vitest run` — full suite passes.
+5. Verify no duplicate variable names in SELECT projections (scan golden test outputs).
+6. Verify `irToAlgebra.ts` has no conflicting edits from Phases 12, 13, 14 (review merged diff).
