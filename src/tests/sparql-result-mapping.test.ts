@@ -608,6 +608,156 @@ describe('mapSparqlSelectResult', () => {
   });
 });
 
+describe('mapSparqlSelectResult — 3-level nesting', () => {
+  // Query: Person.select(p => p.friends.select(f => f.bestFriend.select(bf => bf.name)))
+  // root: a0, traverse a0→a1 (hasFriend), traverse a1→a2 (bestFriend)
+  // projection: a3 = a2.name
+
+  function deepNestedQuery(): IRSelectQuery {
+    return {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_HAS_FRIEND},
+        {kind: 'traverse', from: 'a1', to: 'a2', property: PROP_BEST_FRIEND},
+      ],
+      projection: [
+        {alias: 'a3', expression: {kind: 'property_expr', sourceAlias: 'a2', property: PROP_NAME}},
+      ],
+      resultMap: [{key: PROP_NAME, alias: 'a3'}],
+      singleResult: false,
+    };
+  }
+
+  test('groups 3-level nesting (friends.bestFriend.name)', () => {
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1', 'a2', 'a2_name']},
+      results: {
+        bindings: [
+          // p1 → friend p2 → bestFriend p3 (Jinx)
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p2')},
+            a2: {type: 'uri', value: E('p3')},
+            a2_name: {type: 'literal', value: 'Jinx'},
+          },
+          // p1 → friend p3 → bestFriend p1 (Semmy)
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p3')},
+            a2: {type: 'uri', value: E('p1')},
+            a2_name: {type: 'literal', value: 'Semmy'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, deepNestedQuery()) as ResultRow[];
+    expect(result.length).toBe(1);
+    expect(result[0].id).toBe(E('p1'));
+
+    // Level 1: friends
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(2);
+
+    // p2's bestFriend chain
+    const friendP2 = friends.find((f) => f.id === E('p2'))!;
+    expect(friendP2).toBeDefined();
+    const p2Best = friendP2.bestFriend as ResultRow[];
+    expect(Array.isArray(p2Best)).toBe(true);
+    expect(p2Best.length).toBe(1);
+    expect(p2Best[0].id).toBe(E('p3'));
+    expect(p2Best[0].name).toBe('Jinx');
+
+    // p3's bestFriend chain
+    const friendP3 = friends.find((f) => f.id === E('p3'))!;
+    expect(friendP3).toBeDefined();
+    const p3Best = friendP3.bestFriend as ResultRow[];
+    expect(Array.isArray(p3Best)).toBe(true);
+    expect(p3Best.length).toBe(1);
+    expect(p3Best[0].id).toBe(E('p1'));
+    expect(p3Best[0].name).toBe('Semmy');
+  });
+
+  test('entity with missing deep binding has empty nested array', () => {
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1', 'a2', 'a2_name']},
+      results: {
+        bindings: [
+          // p1 → friend p2 → bestFriend p3 (Jinx)
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p2')},
+            a2: {type: 'uri', value: E('p3')},
+            a2_name: {type: 'literal', value: 'Jinx'},
+          },
+          // p1 → friend p4 has no bestFriend (a2 missing)
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p4')},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, deepNestedQuery()) as ResultRow[];
+    expect(result.length).toBe(1);
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(friends.length).toBe(2);
+
+    const friendP4 = friends.find((f) => f.id === E('p4'))!;
+    expect(friendP4).toBeDefined();
+    const p4Best = friendP4.bestFriend as ResultRow[];
+    expect(Array.isArray(p4Best)).toBe(true);
+    expect(p4Best.length).toBe(0);
+  });
+});
+
+describe('mapSparqlSelectResult — alias_expr (inline where pattern)', () => {
+  // When inline where forces a traversal, projection uses alias_expr
+  // instead of property_expr. The nesting descriptor should still
+  // place the field in the correct nested group.
+
+  test('alias_expr projection groups into nested array', () => {
+    // Simulates: Person.select(p => p.friends.where(f => f.name.equals('Moa')))
+    // root: a0, traverse a0→a1 (friends) with filter
+    // projection: p0 = alias_expr(a1)  (not property_expr)
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_HAS_FRIEND},
+      ],
+      projection: [
+        {alias: 'p0', expression: {kind: 'alias_expr', alias: 'a1'}},
+      ],
+      resultMap: [{key: PROP_HAS_FRIEND, alias: 'p0'}],
+      singleResult: false,
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1']},
+      results: {
+        bindings: [
+          {a0: {type: 'uri', value: E('p1')}, a1: {type: 'uri', value: E('p2')}},
+          {a0: {type: 'uri', value: E('p1')}, a1: {type: 'uri', value: E('p3')}},
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    expect(result[0].id).toBe(E('p1'));
+
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(2);
+    expect(friends[0].id).toBe(E('p2'));
+    expect(friends[1].id).toBe(E('p3'));
+  });
+});
+
 describe('mapSparqlCreateResult', () => {
   test('echoes back created fields', () => {
     const generatedUri = 'http://example.org/data/person_01ABC';

@@ -165,14 +165,6 @@ function extractNames(rows: ResultRow[]): string[] {
     .filter((n) => n != null);
 }
 
-/** Generate SPARQL string only (no Fuseki execution). */
-async function generateSparql(
-  factoryName: keyof typeof queryFactories,
-): Promise<string> {
-  const raw = await captureQuery(queryFactories[factoryName]);
-  const ir = buildSelectQuery(raw);
-  return selectToSparql(ir);
-}
 
 // =========================================================================
 // SELECT — basic property projections
@@ -205,9 +197,18 @@ describe('Fuseki SELECT — basic', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
+    // p1 has friends [p2, p3], p2 has friends [p3, p4]
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
-    expect(p1!.friends).toBeDefined();
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(2);
+
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2Friends = p2!.friends as ResultRow[];
+    expect(Array.isArray(p2Friends)).toBe(true);
+    expect(p2Friends.length).toBe(2);
   });
 
   test('selectBirthDate — date coercion', async () => {
@@ -356,18 +357,26 @@ describe('Fuseki SELECT — nested traversals', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // Only p1 and p2 have friends (INNER JOIN on friends traverse)
-    expect(rows.length).toBeGreaterThanOrEqual(2);
+    // INNER JOIN on friends traverse — only p1 and p2 have friends
+    expect(rows.length).toBe(2);
 
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
-    // p1's friends array should contain entries for p2 (Moa) and p3 (Jinx)
-    const friends = p1!.friends as ResultRow[];
-    expect(Array.isArray(friends)).toBe(true);
-    expect(friends.length).toBe(2);
-    const friendNames = friends.map((f) => f.name).filter(Boolean);
-    expect(friendNames).toContain('Moa');
-    expect(friendNames).toContain('Jinx');
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(2);
+    const p1FriendNames = p1Friends.map((f) => f.name).filter(Boolean);
+    expect(p1FriendNames).toContain('Moa');
+    expect(p1FriendNames).toContain('Jinx');
+
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2Friends = p2!.friends as ResultRow[];
+    expect(Array.isArray(p2Friends)).toBe(true);
+    expect(p2Friends.length).toBe(2);
+    const p2FriendNames = p2Friends.map((f) => f.name).filter(Boolean);
+    expect(p2FriendNames).toContain('Jinx');
+    expect(p2FriendNames).toContain('Quinn');
   });
 
   test('selectNestedFriendsName — double nested (friends.friends.name)', async () => {
@@ -377,9 +386,15 @@ describe('Fuseki SELECT — nested traversals', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // p1's friends: [p2, p3]. p2's friends: [p3, p4]. p3 has no friends.
-    // INNER JOIN on both traversals → only p1 (via p1→p2→[p3, p4]) appears
+    // INNER JOIN on both friends traversals.
+    // p1→friends→[p2, p3]. p2→friends→[p3, p4]. p3 has no friends.
+    // So p1 appears (via p2→[p3(Jinx), p4(Quinn)]).
+    // p2 also appears (via p3→no friends, p4→no friends).
+    // Only p1 has a friend (p2) who itself has friends.
     expect(rows.length).toBeGreaterThanOrEqual(1);
+
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
   });
 
   test('selectMultiplePaths — name, friends, bestFriend.name', async () => {
@@ -388,8 +403,9 @@ describe('Fuseki SELECT — nested traversals', () => {
     const result = await runSelectMapped('selectMultiplePaths');
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
-    // INNER JOIN on bestFriend traverse — only p2 has bestFriend
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    // INNER JOIN on bestFriend traverse — only p2 has bestFriend (p3)
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toContain('p2');
   });
 
   test('selectBestFriendName — bestFriend.name', async () => {
@@ -400,8 +416,13 @@ describe('Fuseki SELECT — nested traversals', () => {
     const rows = result as ResultRow[];
 
     // INNER JOIN on bestFriend traverse — only p2 has bestFriend (p3)
+    expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
+    const bestFriend = p2!.bestFriend as ResultRow[];
+    expect(Array.isArray(bestFriend)).toBe(true);
+    expect(bestFriend.length).toBe(1);
+    expect(bestFriend[0].name).toBe('Jinx');
   });
 
   test('selectDeepNested — friends.bestFriend.bestFriend.name', async () => {
@@ -423,8 +444,14 @@ describe('Fuseki SELECT — nested traversals', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // p1 has friends [p2, p3]. p2 has bestFriend p3. p3 has no bestFriend.
+    // INNER JOIN on friends and bestFriend.
+    // p1→friends→[p2, p3]. p2→bestFriend→p3. p3→no bestFriend.
+    // p2→friends→[p3, p4]. p3→no bestFriend. p4→no bestFriend.
+    // Only p1 (via p2→p3) satisfies both JOINs.
     expect(rows.length).toBeGreaterThanOrEqual(1);
+
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
   });
 
   test('nestedObjectPropertySingle — same as nestedObjectProperty', async () => {
@@ -432,6 +459,8 @@ describe('Fuseki SELECT — nested traversals', () => {
 
     const result = await runSelectMapped('nestedObjectPropertySingle');
     expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+    expect(rows.length).toBeGreaterThanOrEqual(1);
   });
 
   test('selectDuplicatePaths — deduped bestFriend properties', async () => {
@@ -441,9 +470,11 @@ describe('Fuseki SELECT — nested traversals', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // INNER JOIN on bestFriend — only p2 appears
+    // INNER JOIN on bestFriend — only p2 has bestFriend (p3)
+    expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
+    expect(p2!.id).toContain('p2');
   });
 });
 
@@ -460,8 +491,13 @@ describe('Fuseki SELECT — sub-selects', () => {
     const rows = result as ResultRow[];
 
     // INNER JOIN on bestFriend — only p2 has bestFriend (p3)
+    expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
+    const bestFriend = p2!.bestFriend as ResultRow[];
+    expect(Array.isArray(bestFriend)).toBe(true);
+    expect(bestFriend.length).toBe(1);
+    expect(bestFriend[0].name).toBe('Jinx');
   });
 
   test('subSelectPluralCustom — friends.select(name, hobby)', async () => {
@@ -471,15 +507,21 @@ describe('Fuseki SELECT — sub-selects', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
+    // INNER JOIN on friends — p1 and p2 have friends
+    expect(rows.length).toBe(2);
+
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
-    // p1's friends should have name and hobby fields
     const friends = p1!.friends as ResultRow[];
     expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(2);
     const moa = friends.find((f) => f.name === 'Moa');
-    if (moa) {
-      expect(moa.hobby).toBe('Jogging');
-    }
+    expect(moa).toBeDefined();
+    expect(moa!.hobby).toBe('Jogging');
+    const jinx = friends.find((f) => f.name === 'Jinx');
+    expect(jinx).toBeDefined();
+    // Jinx has no hobby in test data
+    expect(jinx!.hobby).toBeNull();
   });
 
   test('subSelectAllProperties — friends.selectAll()', async () => {
@@ -502,9 +544,11 @@ describe('Fuseki SELECT — sub-selects', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // Only p2 has bestFriend (p3)
+    // INNER JOIN on bestFriend — only p2 has bestFriend (p3)
+    expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
+    expect(p2!.id).toContain('p2');
   });
 
   test('doubleNestedSubSelect — friends → bestFriend → name', async () => {
@@ -514,10 +558,12 @@ describe('Fuseki SELECT — sub-selects', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // INNER JOINs: friends then bestFriend
-    // p1→friends→[p2, p3]. p2→bestFriend→p3. p3→bestFriend→null.
-    // So only p1→p2→p3 chain works
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    // INNER JOINs: friends then bestFriend.
+    // p1→friends→[p2, p3]. p2→bestFriend→p3 (Jinx). p3→no bestFriend.
+    // p2→friends→[p3, p4]. Both have no bestFriend.
+    // Only p1 (via p2→p3) satisfies both joins.
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toContain('p1');
   });
 
   test('subSelectAllPrimitives — bestFriend.[name, birthDate, isRealPerson]', async () => {
@@ -527,9 +573,17 @@ describe('Fuseki SELECT — sub-selects', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // p2→bestFriend→p3 (Jinx, isRealPerson=true, birthDate=null)
+    // INNER JOIN on bestFriend — only p2 has bestFriend (p3)
+    expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
+    const bestFriend = p2!.bestFriend as ResultRow[];
+    expect(Array.isArray(bestFriend)).toBe(true);
+    expect(bestFriend.length).toBe(1);
+    expect(bestFriend[0].name).toBe('Jinx');
+    expect(bestFriend[0].isRealPerson).toBe(true);
+    // p3 has no birthDate
+    expect(bestFriend[0].birthDate).toBeNull();
   });
 
   test('subSelectArray — friends.select([name, hobby])', async () => {
@@ -551,7 +605,10 @@ describe('Fuseki SELECT — sub-selects', () => {
     const result = await runSelectMapped('nestedQueries2');
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
+    // INNER JOIN on friends AND bestFriend — only p1 (via p2→bestFriend→p3)
     expect(rows.length).toBeGreaterThanOrEqual(1);
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
   });
 
   test('preloadBestFriend — bestFriend.preloadFor(component)', async () => {
@@ -561,9 +618,11 @@ describe('Fuseki SELECT — sub-selects', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // INNER JOIN on bestFriend — only p2 appears
+    // INNER JOIN on bestFriend — only p2 has bestFriend (p3)
+    expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
+    expect(p2!.id).toContain('p2');
   });
 });
 
@@ -575,14 +634,13 @@ describe('Fuseki SELECT — outer where (FILTER)', () => {
   test('whereHobbyEquals — filter hobby = Jogging', async () => {
     if (!fusekiAvailable) return;
 
+    // This uses inline .where() on a literal property (hobby).
+    // The SPARQL has FILTER(?a1 = "Jogging") inside OPTIONAL.
     const result = await runSelectMapped('whereHobbyEquals');
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
-
-    const hobbies = rows.map((r) => r.hobby).filter(Boolean);
-    if (hobbies.length > 0) {
-      expect(hobbies).toContain('Jogging');
-    }
+    // All persons returned (OPTIONAL), hobby filtered to Jogging
+    expect(rows.length).toBe(4);
   });
 
   test('whereBestFriendEquals — filter bestFriend = entity(p3)', async () => {
@@ -638,9 +696,9 @@ describe('Fuseki SELECT — outer where (FILTER)', () => {
     const rows = result as ResultRow[];
 
     // Context user is p3. p2 has bestFriend = p3.
-    // Note: the generated SPARQL uses the context value at query-build time.
-    // Whether the URI matches depends on how the context is resolved.
-    expect(rows.length).toBeGreaterThanOrEqual(0);
+    // FILTER(?a0_bestFriend = <p3>) → p2 matches.
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toContain('p2');
   });
 
   test('whereSomeImplicit — friends.name = Moa (FILTER)', async () => {
@@ -650,9 +708,11 @@ describe('Fuseki SELECT — outer where (FILTER)', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // FILTER(?a1_name = "Moa") with INNER JOIN on friends
-    // p1 has friend p2 (Moa) → p1 matches
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    // FILTER(?a1_name = "Moa") with INNER JOIN on friends traverse.
+    // p1 has friend p2 (Moa) → p1 matches.
+    // p2's friends are [p3(Jinx), p4(Quinn)] → neither is Moa → p2 fails.
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toContain('p1');
   });
 
   test('whereSomeExplicit — EXISTS friends.name = Moa', async () => {
@@ -679,77 +739,126 @@ describe('Fuseki SELECT — outer where (FILTER)', () => {
 });
 
 // =========================================================================
-// SELECT — inline where (filters not yet lowered to SPARQL)
+// SELECT — inline where (FILTER inside OPTIONAL)
 //
-// These queries build valid SPARQL but the inline where predicates from
-// sub-selections (e.g. p.friends.where(f => f.name.equals('Moa')))
-// are not lowered to SPARQL FILTERs. The generated SPARQL just projects
-// the base friends property. We test that the pipeline runs without error.
+// These queries use inline .where() predicates on sub-selections, e.g.
+// p.friends.where(f => f.name.equals('Moa')). The pipeline now lowers
+// these into SPARQL FILTER expressions inside OPTIONAL blocks.
 // =========================================================================
 
-describe('Fuseki SELECT — inline where (not lowered)', () => {
-  test('whereFriendsNameEquals — pipeline runs (filter not in SPARQL)', async () => {
+describe('Fuseki SELECT — inline where', () => {
+  test('whereFriendsNameEquals — friends filtered by name = Moa', async () => {
     if (!fusekiAvailable) return;
 
     const result = await runSelectMapped('whereFriendsNameEquals');
     expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+
+    // All persons are returned (OPTIONAL filtering, not WHERE filtering).
+    // Only friends matching name='Moa' should appear in the nested array.
+    expect(rows.length).toBe(4);
+
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+    // p1 has friends [p2(Moa), p3(Jinx)] — only Moa matches the filter
+    const p1Friends = p1!.friends as ResultRow[] | undefined;
+    if (p1Friends && p1Friends.length > 0) {
+      const friendIds = p1Friends.map((f) => f.id);
+      expect(friendIds.some((id) => id.includes('p2'))).toBe(true);
+    }
   });
 
-  test('whereAnd — pipeline runs (filter not in SPARQL)', async () => {
+  test('whereAnd — friends filtered by name=Moa AND hobby=Jogging', async () => {
     if (!fusekiAvailable) return;
 
     const result = await runSelectMapped('whereAnd');
     expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+    expect(rows.length).toBe(4);
   });
 
-  test('whereOr — pipeline runs (filter not in SPARQL)', async () => {
+  test('whereOr — friends filtered by name=Jinx OR hobby=Jogging', async () => {
     if (!fusekiAvailable) return;
 
     const result = await runSelectMapped('whereOr');
     expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+    expect(rows.length).toBe(4);
   });
 
-  test('whereAndOrAnd — pipeline runs (filter not in SPARQL)', async () => {
+  test('whereAndOrAnd — complex AND/OR filter on friends', async () => {
     if (!fusekiAvailable) return;
 
     const result = await runSelectMapped('whereAndOrAnd');
     expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+    expect(rows.length).toBe(4);
   });
 
-  test('whereAndOrAndNested — pipeline runs (filter not in SPARQL)', async () => {
+  test('whereAndOrAndNested — nested AND/OR filter on friends', async () => {
     if (!fusekiAvailable) return;
 
     const result = await runSelectMapped('whereAndOrAndNested');
     expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+    expect(rows.length).toBe(4);
   });
 });
 
 // =========================================================================
-// SELECT — known invalid SPARQL (generation test only)
+// SELECT — previously invalid SPARQL (now fixed)
 //
-// These fixtures produce SPARQL that is syntactically invalid for Fuseki:
-// - whereEvery: FILTER(!?var = ...) syntax
-// - whereSequences: 'some' keyword in FILTER
-// - countEquals: COUNT() in FILTER (should be HAVING)
-// We verify SPARQL generation succeeds, but skip Fuseki execution.
+// These fixtures previously produced invalid SPARQL. Phase 13 fixed them:
+// - whereEvery: now uses NOT EXISTS with proper parenthesization
+// - whereSequences: now uses EXISTS for .some() quantifier
+// - countEquals: now uses HAVING for aggregate comparisons
 // =========================================================================
 
-describe('Fuseki SELECT — invalid SPARQL (generation only)', () => {
-  test('whereEvery — SPARQL generation succeeds', async () => {
-    const sparql = await generateSparql('whereEvery');
+describe('Fuseki SELECT — quantifiers and aggregates', () => {
+  test('whereEvery — NOT EXISTS filter', async () => {
+    if (!fusekiAvailable) return;
+
+    const {sparql, ir, results} = await runSelect('whereEvery');
     expect(sparql).toContain('EXISTS');
-    expect(typeof sparql).toBe('string');
+    expect(sparql).toContain('!');
+
+    const mapped = mapSparqlSelectResult(results, ir);
+    expect(Array.isArray(mapped)).toBe(true);
+    const rows = mapped as ResultRow[];
+    // whereEvery: all friends must have name=Moa OR name=Jinx
+    // p1 friends: [p2(Moa), p3(Jinx)] → both match → p1 passes
+    // p2 friends: [p3(Jinx), p4(Quinn)] → Quinn doesn't match → p2 fails
+    // p3, p4 have no friends → vacuously true
+    expect(rows.length).toBeGreaterThanOrEqual(1);
   });
 
-  test('whereSequences — SPARQL generation succeeds', async () => {
-    const sparql = await generateSparql('whereSequences');
-    expect(typeof sparql).toBe('string');
+  test('whereSequences — EXISTS for some() quantifier', async () => {
+    if (!fusekiAvailable) return;
+
+    const {sparql, ir, results} = await runSelect('whereSequences');
+    expect(sparql).toContain('EXISTS');
+
+    const mapped = mapSparqlSelectResult(results, ir);
+    expect(Array.isArray(mapped)).toBe(true);
+    const rows = mapped as ResultRow[];
+    // whereSequences: friends.some(f => f.name='Jinx') AND name='Semmy'
+    // p1 has friend p3(Jinx) and name=Semmy → p1 matches
+    expect(rows.length).toBeGreaterThanOrEqual(1);
   });
 
-  test('countEquals — SPARQL generation succeeds', async () => {
-    const sparql = await generateSparql('countEquals');
+  test('countEquals — HAVING with aggregate', async () => {
+    if (!fusekiAvailable) return;
+
+    const {sparql, ir, results} = await runSelect('countEquals');
+    expect(sparql).toContain('HAVING');
     expect(sparql).toContain('count');
-    expect(typeof sparql).toBe('string');
+
+    const mapped = mapSparqlSelectResult(results, ir);
+    expect(Array.isArray(mapped)).toBe(true);
+    const rows = mapped as ResultRow[];
+    // countEquals: friends.size() = 2
+    // p1 has 2 friends → matches. p2 has 2 friends → matches.
+    expect(rows.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -761,22 +870,28 @@ describe('Fuseki SELECT — aggregation', () => {
   test('countFriends — count per person', async () => {
     if (!fusekiAvailable) return;
 
-    const {sparql, ir, results} = await runSelect('countFriends');
+    const {ir, results} = await runSelect('countFriends');
     const mapped = mapSparqlSelectResult(results, ir);
     expect(Array.isArray(mapped)).toBe(true);
     const rows = mapped as ResultRow[];
 
-    // Each person should have a count
+    // All 4 persons appear (GROUP BY)
+    expect(rows.length).toBe(4);
+
     for (const row of rows) {
-      const count = row[Object.keys(row).find((k) => k !== 'id')!];
-      expect(typeof count === 'number').toBe(true);
+      const countKey = Object.keys(row).find((k) => k !== 'id')!;
+      expect(typeof row[countKey] === 'number').toBe(true);
     }
 
     const p1 = findRowById(rows, 'p1');
-    if (p1) {
-      const countKey = Object.keys(p1).find((k) => k !== 'id')!;
-      expect(p1[countKey]).toBe(2);
-    }
+    expect(p1).toBeDefined();
+    const p1CountKey = Object.keys(p1!).find((k) => k !== 'id')!;
+    expect(p1![p1CountKey]).toBe(2);
+
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2CountKey = Object.keys(p2!).find((k) => k !== 'id')!;
+    expect(p2![p2CountKey]).toBe(2);
   });
 
   test('countNestedFriends — count(friends.friends)', async () => {
@@ -809,13 +924,17 @@ describe('Fuseki SELECT — aggregation', () => {
     const mapped = mapSparqlSelectResult(results, ir);
     expect(Array.isArray(mapped)).toBe(true);
     const rows = mapped as ResultRow[];
+    expect(rows.length).toBe(4);
 
     const p1 = findRowById(rows, 'p1');
-    if (p1) {
-      // numFriends for p1 should be 2
-      const numKey = Object.keys(p1).find((k) => k !== 'id')!;
-      expect(p1[numKey]).toBe(2);
-    }
+    expect(p1).toBeDefined();
+    const numKey = Object.keys(p1!).find((k) => k !== 'id')!;
+    expect(p1![numKey]).toBe(2);
+
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2NumKey = Object.keys(p2!).find((k) => k !== 'id')!;
+    expect(p2![p2NumKey]).toBe(2);
   });
 
   test('customResultEqualsBoolean — {isBestFriend: bestFriend.equals(p3)}', async () => {
@@ -873,9 +992,12 @@ describe('Fuseki SELECT — shape casting', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // p1.pets = [dog1]. dog1.guardDogLevel = 2. p2.pets = [dog2]. dog2 has no guardDogLevel.
+    // INNER JOIN on pets traverse — p1 has pets [dog1], p2 has pets [dog2]
+    expect(rows.length).toBe(2);
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
   });
 
   test('selectShapeAs — firstPet.as(Dog).guardDogLevel', async () => {
@@ -885,6 +1007,8 @@ describe('Fuseki SELECT — shape casting', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
+    // INNER JOIN on firstPet — p1 has firstPet dog1, p2 has firstPet dog2
+    expect(rows.length).toBe(2);
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
   });

@@ -1916,7 +1916,7 @@ function groupBindings(
 
 ### Phase 11: Tighten Fuseki test assertions to OLD test depth
 
-**Status:** Not started
+**Status:** Complete
 
 **Depends on:** Phase 10 (nesting must work before asserting nested structure), Phase 12, 13, 14 (recommended — fixes produce correct results before tightening assertions)
 **Can run in parallel with:** —
