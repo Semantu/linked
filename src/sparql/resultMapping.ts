@@ -138,29 +138,80 @@ function isUriExpression(expression: IRExpression): boolean {
 // Type: nesting descriptor for reconstructing nested objects from flat bindings
 // ---------------------------------------------------------------------------
 
+type FieldDescriptor = {
+  key: string;
+  sparqlVar: string;
+  expression: IRExpression;
+};
+
+type NestedGroup = {
+  key: string;
+  traverseAlias: string;
+  flatFields: FieldDescriptor[];
+  nestedGroups: NestedGroup[];
+};
+
 type NestingDescriptor = {
   /** The root alias variable name (e.g. "a0") */
   rootVar: string;
   /** Flat fields: fields directly on the root entity */
-  flatFields: Array<{
-    key: string;
-    sparqlVar: string;
-    expression: IRExpression;
-  }>;
-  /** Nested groups: fields that come from traversed entities */
-  nestedGroups: Array<{
-    key: string;
-    traverseAlias: string;
-    fields: Array<{
-      key: string;
-      sparqlVar: string;
-      expression: IRExpression;
-    }>;
-  }>;
+  flatFields: FieldDescriptor[];
+  /** Nested groups: fields that come from traversed entities (recursive) */
+  nestedGroups: NestedGroup[];
 };
 
 /**
- * Analyzes the query structure to build a nesting descriptor that guides
+ * Builds the alias chain from sourceAlias back to rootAlias by walking the traverseMap.
+ * Returns the chain from root outward, e.g. [{alias: "a1", property: "friends"}, {alias: "a2", property: "bestFriend"}].
+ */
+function buildAliasChain(
+  sourceAlias: string,
+  rootAlias: string,
+  traverseMap: Map<string, {from: string; property: string}>,
+): Array<{alias: string; property: string}> {
+  const chain: Array<{alias: string; property: string}> = [];
+  let current = sourceAlias;
+  while (current !== rootAlias) {
+    const info = traverseMap.get(current);
+    if (!info) break;
+    chain.unshift({alias: current, property: info.property});
+    current = info.from;
+  }
+  return chain;
+}
+
+/**
+ * Inserts a field into the nesting tree at the position described by the alias chain.
+ * Creates intermediate NestedGroup nodes as needed.
+ */
+function insertIntoTree(
+  root: {flatFields: FieldDescriptor[]; nestedGroups: NestedGroup[]},
+  chain: Array<{alias: string; property: string}>,
+  field: FieldDescriptor,
+): void {
+  if (chain.length === 0) {
+    root.flatFields.push(field);
+    return;
+  }
+
+  const target = chain[0];
+  let group = root.nestedGroups.find((g) => g.traverseAlias === target.alias);
+  if (!group) {
+    group = {
+      key: localName(target.property),
+      traverseAlias: target.alias,
+      flatFields: [],
+      nestedGroups: [],
+    };
+    root.nestedGroups.push(group);
+  }
+
+  // Recurse: remaining chain determines where the field sits within this group
+  insertIntoTree(group, chain.slice(1), field);
+}
+
+/**
+ * Analyzes the query structure to build a recursive nesting descriptor that guides
  * how flat SPARQL bindings should be grouped into nested result objects.
  */
 function buildNestingDescriptor(query: IRSelectQuery): NestingDescriptor {
@@ -174,8 +225,11 @@ function buildNestingDescriptor(query: IRSelectQuery): NestingDescriptor {
     }
   }
 
-  const flatFields: NestingDescriptor['flatFields'] = [];
-  const nestedGroupMap = new Map<string, NestingDescriptor['nestedGroups'][number]>();
+  const descriptor: NestingDescriptor = {
+    rootVar: rootAlias,
+    flatFields: [],
+    nestedGroups: [],
+  };
 
   const resultMap = query.resultMap ?? [];
   const projectionByAlias = new Map(
@@ -200,42 +254,18 @@ function buildNestingDescriptor(query: IRSelectQuery): NestingDescriptor {
       sourceAlias = rootAlias;
     }
 
-    // If the source alias is the root, it's a flat field
+    const field: FieldDescriptor = {key: resultKey, sparqlVar, expression};
+
     if (sourceAlias === rootAlias) {
-      flatFields.push({key: resultKey, sparqlVar, expression});
+      descriptor.flatFields.push(field);
     } else {
-      // It's a field on a traversed entity — group by traverse alias
-      // Walk up the traverse chain to find the immediate child of root
-      let groupAlias = sourceAlias;
-      let traverseInfo = traverseMap.get(groupAlias);
-      while (traverseInfo && traverseInfo.from !== rootAlias) {
-        groupAlias = traverseInfo.from;
-        traverseInfo = traverseMap.get(groupAlias);
-      }
-
-      // The grouping key is the traverse alias (e.g., "a1" for friends)
-      const traverseProperty = traverseInfo
-        ? localName(traverseInfo.property)
-        : sourceAlias;
-
-      let group = nestedGroupMap.get(sourceAlias);
-      if (!group) {
-        group = {
-          key: traverseProperty,
-          traverseAlias: sourceAlias,
-          fields: [],
-        };
-        nestedGroupMap.set(sourceAlias, group);
-      }
-      group.fields.push({key: resultKey, sparqlVar, expression});
+      // Build the full chain from root to sourceAlias and insert into tree
+      const chain = buildAliasChain(sourceAlias, rootAlias, traverseMap);
+      insertIntoTree(descriptor, chain, field);
     }
   }
 
-  return {
-    rootVar: rootAlias,
-    flatFields,
-    nestedGroups: Array.from(nestedGroupMap.values()),
-  };
+  return descriptor;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,8 +363,63 @@ function mapFlatRows(
 }
 
 /**
+ * Populates fields on a ResultRow from a single SPARQL binding.
+ * Handles URI expressions (entity references) and literal coercion.
+ */
+function populateFields(row: ResultRow, fields: FieldDescriptor[], binding: SparqlBinding): void {
+  for (const field of fields) {
+    const val = binding[field.sparqlVar];
+    if (!val) {
+      row[field.key] = null;
+    } else if (isUriExpression(field.expression)) {
+      row[field.key] = {id: val.value} as ResultRow;
+    } else if (val.type === 'uri') {
+      row[field.key] = {id: val.value} as ResultRow;
+    } else {
+      row[field.key] = coerceValue(val);
+    }
+  }
+}
+
+/**
+ * Recursively collects entities for a nested group from a set of bindings.
+ * Groups bindings by the nested entity's ID, populates fields, and recurses
+ * into any deeper nested groups.
+ */
+function collectNestedGroup(
+  nestedGroup: NestedGroup,
+  bindings: SparqlBinding[],
+): ResultRow[] {
+  const entityMap = new Map<string, {row: ResultRow; bindings: SparqlBinding[]}>();
+
+  for (const binding of bindings) {
+    const idBinding = binding[nestedGroup.traverseAlias];
+    if (!idBinding) continue;
+    const entityId = idBinding.value;
+
+    let entry = entityMap.get(entityId);
+    if (!entry) {
+      const nestedRow: ResultRow = {id: entityId};
+      populateFields(nestedRow, nestedGroup.flatFields, binding);
+      entry = {row: nestedRow, bindings: []};
+      entityMap.set(entityId, entry);
+    }
+    entry.bindings.push(binding);
+  }
+
+  // Recurse into deeper nested groups
+  for (const [, entry] of entityMap) {
+    for (const deeperGroup of nestedGroup.nestedGroups) {
+      entry.row[deeperGroup.key] = collectNestedGroup(deeperGroup, entry.bindings);
+    }
+  }
+
+  return Array.from(entityMap.values()).map((e) => e.row);
+}
+
+/**
  * Maps nested result rows — groups flat SPARQL bindings by root entity,
- * then collects traversed entities into arrays.
+ * then recursively collects traversed entities into nested arrays.
  */
 function mapNestedRows(
   bindings: SparqlBinding[],
@@ -342,10 +427,7 @@ function mapNestedRows(
   query: IRSelectQuery,
 ): SelectResult {
   // Group bindings by root entity id
-  const rootGroups = new Map<
-    string,
-    {rootBinding: SparqlBinding; children: SparqlBinding[]}
-  >();
+  const rootGroups = new Map<string, SparqlBinding[]>();
 
   for (const binding of bindings) {
     const rootBindingVal = binding[descriptor.rootVar];
@@ -354,55 +436,23 @@ function mapNestedRows(
 
     let group = rootGroups.get(rootId);
     if (!group) {
-      group = {rootBinding: binding, children: []};
+      group = [];
       rootGroups.set(rootId, group);
     }
-    group.children.push(binding);
+    group.push(binding);
   }
 
   const rows: ResultRow[] = [];
 
-  for (const [rootId, group] of rootGroups) {
+  for (const [rootId, groupBindings] of rootGroups) {
     const row: ResultRow = {id: rootId};
 
     // Flat fields from the first binding (they're the same across all grouped rows)
-    for (const field of descriptor.flatFields) {
-      const val = group.rootBinding[field.sparqlVar];
-      if (!val) {
-        row[field.key] = null;
-      } else if (val.type === 'uri') {
-        row[field.key] = {id: val.value} as ResultRow;
-      } else {
-        row[field.key] = coerceValue(val);
-      }
-    }
+    populateFields(row, descriptor.flatFields, groupBindings[0]);
 
-    // Nested groups — collect traversed entities
+    // Nested groups — recursively collect traversed entities
     for (const nestedGroup of descriptor.nestedGroups) {
-      const nestedRows = new Map<string, ResultRow>();
-
-      for (const binding of group.children) {
-        const nestedIdBinding = binding[nestedGroup.traverseAlias];
-        if (!nestedIdBinding) continue;
-        const nestedId = nestedIdBinding.value;
-
-        if (!nestedRows.has(nestedId)) {
-          const nestedRow: ResultRow = {id: nestedId};
-          for (const field of nestedGroup.fields) {
-            const val = binding[field.sparqlVar];
-            if (!val) {
-              nestedRow[field.key] = null;
-            } else if (val.type === 'uri') {
-              nestedRow[field.key] = {id: val.value} as ResultRow;
-            } else {
-              nestedRow[field.key] = coerceValue(val);
-            }
-          }
-          nestedRows.set(nestedId, nestedRow);
-        }
-      }
-
-      row[nestedGroup.key] = Array.from(nestedRows.values());
+      row[nestedGroup.key] = collectNestedGroup(nestedGroup, groupBindings);
     }
 
     rows.push(row);
