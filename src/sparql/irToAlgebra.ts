@@ -14,7 +14,6 @@ import {
   SparqlSelectPlan,
   SparqlInsertDataPlan,
   SparqlDeleteInsertPlan,
-  SparqlDeleteWherePlan,
   SparqlAlgebraNode,
   SparqlBGP,
   SparqlTriple,
@@ -31,7 +30,6 @@ import {
   selectPlanToSparql,
   insertDataPlanToSparql,
   deleteInsertPlanToSparql,
-  deleteWherePlanToSparql,
 } from './algebraToString.js';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +75,14 @@ function propertySuffix(propertyUri: string): string {
   if (hashIdx >= 0) return propertyUri.substring(hashIdx + 1);
   const slashIdx = propertyUri.lastIndexOf('/');
   return slashIdx >= 0 ? propertyUri.substring(slashIdx + 1) : propertyUri;
+}
+
+/**
+ * Sanitize a string so it's valid in a SPARQL variable name.
+ * Replaces any non-alphanumeric/underscore characters with underscores.
+ */
+function sanitizeVarName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_]/g, '_');
 }
 
 /**
@@ -326,18 +332,35 @@ export function selectToAlgebra(
   // Always include root alias as first projection variable
   projection.push({kind: 'variable', name: rootAlias});
 
+  // Collect traversal aliases upfront to detect aggregate alias collisions
+  const traversalAliasSet = new Set(collectTraversalAliases(query.patterns));
+  // Track traversal aliases consumed by aggregate renames (should not be
+  // re-projected as plain variables, which would alter GROUP BY semantics)
+  const aggregateRenamedAliases = new Set<string>();
+
   for (const item of query.projection) {
     const sparqlExpr = convertExpression(item.expression, registry, optionalPropertyTriples);
 
     if (sparqlExpr.kind === 'aggregate_expr') {
       hasAggregates = true;
+      // Avoid collision: if aggregate alias matches a traversal alias,
+      // rename it so SPARQL doesn't produce duplicate variable bindings
+      let aggAlias = item.alias;
+      if (traversalAliasSet.has(aggAlias)) {
+        aggregateRenamedAliases.add(aggAlias);
+        aggAlias = `${aggAlias}_agg`;
+        // Update resultMap so result mapping uses the renamed alias
+        for (const rm of query.resultMap) {
+          if (rm.alias === item.alias) rm.alias = aggAlias;
+        }
+      }
       projection.push({
         kind: 'aggregate',
         expression: sparqlExpr,
-        alias: item.alias,
+        alias: aggAlias,
       });
       aggregates.push({
-        variable: item.alias,
+        variable: aggAlias,
         aggregate: sparqlExpr,
       });
     } else {
@@ -364,7 +387,7 @@ export function selectToAlgebra(
     else if (p.kind === 'aggregate' || p.kind === 'expression') projectedNames.add(p.alias);
   }
   for (const alias of collectTraversalAliases(query.patterns)) {
-    if (!projectedNames.has(alias)) {
+    if (!projectedNames.has(alias) && !aggregateRenamedAliases.has(alias)) {
       projection.push({kind: 'variable', name: alias});
       projectedNames.add(alias);
     }
@@ -525,7 +548,7 @@ function processExpressionForProperties(
       break;
     case 'context_property_expr': {
       // Context entity property — emit a triple with fixed IRI as subject
-      const ctxKey = `__ctx__${expr.contextIri}`;
+      const ctxKey = `__ctx__${sanitizeVarName(expr.contextIri)}`;
       if (!registry.has(ctxKey, expr.property)) {
         const varName = registry.getOrCreate(ctxKey, expr.property);
         optionalPropertyTriples.push(
@@ -592,7 +615,7 @@ function convertExpression(
       return {kind: 'variable_expr', name: expr.alias};
 
     case 'context_property_expr': {
-      const ctxKey = `__ctx__${expr.contextIri}`;
+      const ctxKey = `__ctx__${sanitizeVarName(expr.contextIri)}`;
       const ctxVarName = registry.getOrCreate(ctxKey, expr.property);
       return {kind: 'variable_expr', name: ctxVarName};
     }
@@ -988,45 +1011,80 @@ export function updateToAlgebra(
     }
   }
 
+  // Wrap WHERE triples in OPTIONAL so UPDATE succeeds even when the old
+  // value doesn't exist (e.g. setting bestFriend when none was set before).
+  let whereAlgebra: SparqlAlgebraNode;
+  if (whereTriples.length === 0) {
+    whereAlgebra = {type: 'bgp', triples: []};
+  } else if (whereTriples.length === 1) {
+    whereAlgebra = {
+      type: 'left_join',
+      left: {type: 'bgp', triples: []},
+      right: {type: 'bgp', triples: whereTriples},
+    };
+  } else {
+    // Wrap each triple in its own OPTIONAL for independent matching
+    whereAlgebra = {type: 'bgp', triples: []};
+    for (const triple of whereTriples) {
+      whereAlgebra = {
+        type: 'left_join',
+        left: whereAlgebra,
+        right: {type: 'bgp', triples: [triple]},
+      };
+    }
+  }
+
   return {
     type: 'delete_insert',
     deletePatterns,
     insertPatterns,
-    whereAlgebra: {type: 'bgp', triples: whereTriples},
+    whereAlgebra,
   };
 }
 
 /**
- * Converts an IRDeleteMutation to a SparqlDeleteWherePlan.
+ * Converts an IRDeleteMutation to a SparqlDeleteInsertPlan (DELETE + WHERE).
  */
 export function deleteToAlgebra(
   query: IRDeleteMutation,
   _options?: SparqlOptions,
-): SparqlDeleteWherePlan {
-  const triples: SparqlTriple[] = [];
+): SparqlDeleteInsertPlan {
+  const deletePatterns: SparqlTriple[] = [];
+  const requiredTriples: SparqlTriple[] = [];
+  const optionalTriples: SparqlTriple[] = [];
 
-  for (const idRef of query.ids) {
-    const subjectTerm = iriTerm(idRef.id);
+  for (let i = 0; i < query.ids.length; i++) {
+    const subjectTerm = iriTerm(query.ids[i].id);
+    const idx = query.ids.length > 1 ? `_${i}` : '';
 
-    // Subject wildcard: <id> ?p ?o
-    triples.push(
-      tripleOf(subjectTerm, varTerm('p'), varTerm('o')),
-    );
+    const subjWild = tripleOf(subjectTerm, varTerm(`p${idx}`), varTerm(`o${idx}`));
+    const objWild = tripleOf(varTerm(`s${idx}`), varTerm(`p2${idx}`), subjectTerm);
+    const typeGuard = tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(query.shape));
 
-    // Object wildcard: ?s ?p2 <id>
-    triples.push(
-      tripleOf(varTerm('s'), varTerm('p2'), subjectTerm),
-    );
+    // DELETE block: all patterns (subject-wildcard, object-wildcard, type)
+    deletePatterns.push(subjWild, objWild, typeGuard);
 
-    // Type guard: <id> rdf:type <shape>
-    triples.push(
-      tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(query.shape)),
-    );
+    // WHERE block: subject-wildcard and type guard are required;
+    // object-wildcard is OPTIONAL (entity may have no incoming references)
+    requiredTriples.push(subjWild, typeGuard);
+    optionalTriples.push(objWild);
+  }
+
+  // Build WHERE algebra: required BGP + OPTIONAL for each object-wildcard
+  let whereAlgebra: SparqlAlgebraNode = {type: 'bgp', triples: requiredTriples};
+  for (const triple of optionalTriples) {
+    whereAlgebra = {
+      type: 'left_join',
+      left: whereAlgebra,
+      right: {type: 'bgp', triples: [triple]},
+    };
   }
 
   return {
-    type: 'delete_where',
-    patterns: {type: 'bgp', triples},
+    type: 'delete_insert',
+    deletePatterns,
+    insertPatterns: [],
+    whereAlgebra,
   };
 }
 
@@ -1079,5 +1137,5 @@ export function deleteToSparql(
   options?: SparqlOptions,
 ): string {
   const plan = deleteToAlgebra(query, options);
-  return deleteWherePlanToSparql(plan, options);
+  return deleteInsertPlanToSparql(plan, options);
 }

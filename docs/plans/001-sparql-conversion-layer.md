@@ -2946,3 +2946,110 @@ After Phases 10, 12, 13, 14 are all merged into the same branch:
 4. `npx vitest run` — full suite passes.
 5. Verify no duplicate variable names in SELECT projections (scan golden test outputs).
 6. Verify `irToAlgebra.ts` has no conflicting edits from Phases 12, 13, 14 (review merged diff).
+
+---
+
+## Phase 15: Operator parenthesization — Status: Complete
+
+**Problem**: `whereAndOrAnd` and `whereAndOrAndNested` produce identical SPARQL despite different DSL grouping. `A.or(B).and(C)` should produce `(A || B) && C` but produces `A || B && C` (wrong precedence).
+
+**Root cause**: `serializeExpression()` in `algebraToString.ts` serializes `logical_expr` children without parentheses. When an OR child appears inside an AND parent, the OR's lower precedence is lost.
+
+**Files to change**:
+- `src/sparql/algebraToString.ts` — add parenthesization logic to `logical_expr` case
+- `src/tests/sparql-select-golden.test.ts` — update `whereAndOrAnd` golden to have `(... || ...) && ...`
+- `src/tests/sparql-fuseki.test.ts` — tighten `whereAndOrAnd` and `whereAndOrAndNested` assertions
+
+**Fix** (in `serializeExpression`, `logical_expr` case):
+When parent operator is AND and a child expression is `logical_expr` with operator OR, wrap the child serialization in `()`. This is the only case that needs parenthesization since AND already binds tighter than OR.
+
+### Phase 15: Tasks
+
+**T15.1** In `algebraToString.ts`, update the `logical_expr` case in `serializeExpression` to wrap OR children of AND expressions in parentheses.
+
+**T15.2** Update golden test `whereAndOrAnd` in `sparql-select-golden.test.ts` to expect `FILTER((?a1_name = "Jinx" || ?a1_hobby = "Jogging") && ?a1_name = "Moa")`.
+
+**T15.3** Tighten Fuseki test assertions for `whereAndOrAnd` and `whereAndOrAndNested`:
+- `whereAndOrAnd`: `(name=Jinx || hobby=Jogging) && name=Moa` → only Moa who also has hobby Jogging matches (friend must have name Moa AND either be named Jinx or have hobby Jogging). With test data: p3(Jinx) doesn't have name Moa, p2(Moa) has hobby Jogging → p2 matches. So p1 should have 1 friend (p2/Moa), p2 should have 0 matching friends.
+- `whereAndOrAndNested`: `name=Jinx || (hobby=Jogging && name=Moa)` → friend named Jinx OR (hobby Jogging AND name Moa). p3=Jinx matches first clause, p2=Moa+Jogging matches second. p1 friends=[p2,p3] → 2 match. p2 friends=[p3,p4] → p3=Jinx matches → 1 match.
+
+#### Phase 15: Validation
+
+- `npx tsc --noEmit` exits 0
+- `npx jest --config jest.config.js src/tests/sparql-select-golden.test.ts` — all pass (updated whereAndOrAnd golden)
+- `npx jest --config jest.config.js src/tests/sparql-fuseki.test.ts` — all 75 pass
+- `npx jest --config jest.config.js` — all 455+ pass
+
+---
+
+## Phase 16: Literal property inline where result mapping — Status: Complete
+
+**Problem**: `whereHobbyEquals` applies `.where()` to a literal property (hobby is a string). The inline where lowering in `IRProjection.ts` forces a traversal and returns `alias_expr`. The result mapping treats all `alias_expr` bindings as entity references, wrapping literal values as `{id: "Jogging"}` instead of returning `"Jogging"` directly.
+
+**Root cause**: `isUriExpression()` in `resultMapping.ts` returns `true` for all `alias_expr`, and the mapping code wraps the binding as `{id: val.value}` without checking the actual SPARQL binding type. Additionally, the nested path (`mapNestedRows` → `collectNestedGroup`) creates `{id: literal}` entity refs for literal traversals.
+
+**Files changed**:
+- `src/sparql/resultMapping.ts` — three-part fix:
+  1. In `mapFlatRows` and `populateFields`: added `val.type === 'uri'` check before wrapping alias_expr bindings as `{id: ...}`
+  2. Added `detectLiteralTraversals()` to pre-scan ALL bindings and identify which nested groups resolve to literals vs URIs
+  3. Added `collectLiteralTraversalValue()` to coerce literal bindings instead of wrapping as entities
+  4. Updated `mapNestedRows` and `collectNestedGroup` recursion to use literal detection
+- `src/tests/sparql-result-mapping.test.ts` — added test for alias_expr with literal binding
+- `src/tests/sparql-fuseki.test.ts` — tightened `whereHobbyEquals` assertion to verify hobby is string "Jogging"
+
+**Deviation from plan**: The original plan only addressed `mapFlatRows`/`populateFields`. In practice, the inline `.where()` on a literal property creates a traverse pattern, which routes through the nested code path (`mapNestedRows` → `collectNestedGroup`), not the flat path. The fix required a deeper change: pre-scanning all bindings to detect literal traversals at the nesting level, then returning coerced values (or null for OPTIONAL misses) instead of entity reference arrays.
+
+### Phase 16: Tasks
+
+**T16.1** ✅ In `resultMapping.ts`, update both `mapFlatRows` and `populateFields` to check `val.type === 'uri'` before wrapping alias_expr bindings as `{id: ...}`.
+
+**T16.2** ✅ Add `detectLiteralTraversals()` and `collectLiteralTraversalValue()` helpers, update `mapNestedRows` and `collectNestedGroup` to handle literal property traversals.
+
+**T16.3** ✅ Add unit test in `sparql-result-mapping.test.ts`: alias_expr with literal binding should return the literal value, not `{id: ...}`.
+
+**T16.4** ✅ Tighten Fuseki test `whereHobbyEquals`: verify the hobby field is the string `"Jogging"` for matching persons, not `{id: "Jogging"}`.
+
+#### Phase 16: Validation — All passing
+
+- `npx tsc --noEmit` exits 0
+- `npx jest --config jest.config.js src/tests/sparql-result-mapping.test.ts` — 29 pass
+- `npx jest --config jest.config.js src/tests/sparql-fuseki.test.ts` — 75/75 pass
+- `npx jest --config jest.config.js` — 456 pass, 0 fail
+
+---
+
+## Phase 17: Nested create with predefined ID — Status: Complete
+
+**Problem**: `updateNestedWithPredefinedId` (`Person.update(entity('p1'), {bestFriend: {id: '...p3-best-friend', name: 'Bestie'}})`) only creates the link (`p1 bestFriend p3-best-friend`) but does NOT insert the nested entity's data (`p3-best-friend rdf:type Person`, `p3-best-friend name "Bestie"`).
+
+**Root cause**: `isNodeReference()` in `MutationQuery.ts` returns `true` for any object with an `id` property, even when it has additional data properties. The commented-out check `&& Object.keys(obj).length === 1` was the intended guard. When `isNodeReference()` returns true, `convertNodeReference()` strips all properties except `id`, producing a `NodeReferenceValue` instead of a `NodeDescriptionValue` with a predefined ID.
+
+**Files to change**:
+- `src/queries/MutationQuery.ts` — fix `isNodeReference()` and `convertNodeDescription()`
+- `src/tests/ir-mutation-parity.test.ts` — strengthen assertion to require `fields` and `shape`
+- `src/tests/sparql-mutation-algebra.test.ts` — update to expect nested create triples
+- `src/tests/sparql-mutation-golden.test.ts` — update expected SPARQL to include INSERT triples
+- `src/tests/sparql-fuseki.test.ts` — update to verify nested entity data is inserted
+
+### Phase 17: Tasks
+
+**T17.1** In `MutationQuery.ts`, fix `isNodeReference()` (line 248-253): add `Object.keys(obj).length === 1` to only treat objects with `id` as the sole property as references.
+
+**T17.2** In `MutationQuery.ts`, fix `convertNodeDescription()` (line 103-133): add handling for `obj.id` alongside existing `obj.__id`, extracting it as the predefined entity ID and removing it before field iteration.
+
+**T17.3** Update `ir-mutation-parity.test.ts`: change `updateNestedWithPredefinedId` assertion from optional `if (bestFriend.fields)` to strict assertion that `bestFriend.shape` exists and `bestFriend.fields` contains name = "Bestie".
+
+**T17.4** Update `sparql-mutation-algebra.test.ts`: change test to assert nested create triples (rdf:type, name) in `insertPatterns`, not just the link.
+
+**T17.5** Update `sparql-mutation-golden.test.ts`: change expected SPARQL to include `rdf:type` and `name` triples in the INSERT block.
+
+**T17.6** Update `sparql-fuseki.test.ts`: change `nameResult.results.bindings.length` from `toBe(0)` to `toBe(1)`, verify name = "Bestie", remove the "known limitation" comment.
+
+#### Phase 17: Validation
+
+- `npx tsc --noEmit` exits 0
+- `npx jest --config jest.config.js src/tests/ir-mutation-parity.test.ts` — all pass
+- `npx jest --config jest.config.js src/tests/sparql-mutation-algebra.test.ts` — all pass
+- `npx jest --config jest.config.js src/tests/sparql-mutation-golden.test.ts` — all pass
+- `npx jest --config jest.config.js src/tests/sparql-fuseki.test.ts` — all 75 pass
+- `npx jest --config jest.config.js` — all pass

@@ -112,6 +112,11 @@ export class MutationQueryFactory extends QueryFactory {
       id = obj.__id.toString();
       //but we should not include it in the fields
       delete obj.__id;
+    } else if (obj && 'id' in obj) {
+      //if the object has an id key alongside other data properties,
+      //treat it as a nested create with a predefined ID
+      id = (obj as any).id.toString();
+      delete (obj as any).id;
     }
     for (var key in obj) {
       let propShape = props.find((p) => p.label === key);
@@ -246,10 +251,9 @@ export class MutationQueryFactory extends QueryFactory {
   }
 
   protected isNodeReference(obj): obj is NodeReferenceValue {
-    //check if obj is an object with an id property
-    //if yes, all other properties are ignored
-    return typeof obj === 'object' && obj !== null && 'id' in obj; // && Object.keys(obj).length === 1);
-    //and id is the only property
+    //check if obj is an object with only an id property
+    //if additional data properties are present, it's a nested create with predefined ID
+    return typeof obj === 'object' && obj !== null && 'id' in obj && Object.keys(obj).length === 1;
   }
 
   protected convertNodeReferences(

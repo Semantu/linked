@@ -352,7 +352,7 @@ function mapFlatRows(
       const val = binding[field.sparqlVar];
       if (!val) {
         row[field.key] = null;
-      } else if (isUriExpression(field.expression)) {
+      } else if (isUriExpression(field.expression) && val.type === 'uri') {
         // An alias_expr that resolved to a URI → wrap as nested entity ref
         row[field.key] = {id: val.value} as ResultRow;
       } else if (val.type === 'uri') {
@@ -380,7 +380,7 @@ function populateFields(row: ResultRow, fields: FieldDescriptor[], binding: Spar
     const val = binding[field.sparqlVar];
     if (!val) {
       row[field.key] = null;
-    } else if (isUriExpression(field.expression)) {
+    } else if (isUriExpression(field.expression) && val.type === 'uri') {
       row[field.key] = {id: val.value} as ResultRow;
     } else if (val.type === 'uri') {
       row[field.key] = {id: val.value} as ResultRow;
@@ -388,6 +388,46 @@ function populateFields(row: ResultRow, fields: FieldDescriptor[], binding: Spar
       row[field.key] = coerceValue(val);
     }
   }
+}
+
+/**
+ * Scans bindings to identify which nested groups represent literal property
+ * traversals (e.g. `p.hobby.where(h => h.equals('Jogging'))`) vs entity
+ * traversals. Returns a set of traverse aliases that resolve to literals.
+ *
+ * Must scan ALL bindings (not just one root group's) because a particular
+ * root entity may have no binding for the alias at all (OPTIONAL miss).
+ */
+function detectLiteralTraversals(
+  groups: NestedGroup[],
+  bindings: SparqlBinding[],
+): Set<string> {
+  const literalAliases = new Set<string>();
+  for (const group of groups) {
+    for (const binding of bindings) {
+      const val = binding[group.traverseAlias];
+      if (!val) continue;
+      if (val.type !== 'uri') literalAliases.add(group.traverseAlias);
+      break;
+    }
+  }
+  return literalAliases;
+}
+
+/**
+ * Collects the coerced literal value from a nested group that traverses a
+ * datatype property. Returns the first non-null value, or null if absent.
+ */
+function collectLiteralTraversalValue(
+  nestedGroup: NestedGroup,
+  bindings: SparqlBinding[],
+): ResultFieldValue {
+  for (const binding of bindings) {
+    const val = binding[nestedGroup.traverseAlias];
+    if (!val) continue;
+    return coerceValue(val);
+  }
+  return null;
 }
 
 /**
@@ -417,9 +457,15 @@ function collectNestedGroup(
   }
 
   // Recurse into deeper nested groups
+  const allNestedBindings = Array.from(entityMap.values()).flatMap((e) => e.bindings);
+  const deepLiteralAliases = detectLiteralTraversals(nestedGroup.nestedGroups, allNestedBindings);
   for (const [, entry] of entityMap) {
     for (const deeperGroup of nestedGroup.nestedGroups) {
-      entry.row[deeperGroup.key] = collectNestedGroup(deeperGroup, entry.bindings);
+      if (deepLiteralAliases.has(deeperGroup.traverseAlias)) {
+        entry.row[deeperGroup.key] = collectLiteralTraversalValue(deeperGroup, entry.bindings);
+      } else {
+        entry.row[deeperGroup.key] = collectNestedGroup(deeperGroup, entry.bindings);
+      }
     }
   }
 
@@ -451,6 +497,12 @@ function mapNestedRows(
     group.push(binding);
   }
 
+  // Pre-scan ALL bindings to determine which nested groups are literal traversals.
+  // This must span all root groups because a specific root entity may have no
+  // binding for the alias (OPTIONAL miss) — we need at least one bound value
+  // to know the type.
+  const literalAliases = detectLiteralTraversals(descriptor.nestedGroups, bindings);
+
   const rows: ResultRow[] = [];
 
   for (const [rootId, groupBindings] of rootGroups) {
@@ -459,9 +511,13 @@ function mapNestedRows(
     // Flat fields from the first binding (they're the same across all grouped rows)
     populateFields(row, descriptor.flatFields, groupBindings[0]);
 
-    // Nested groups — recursively collect traversed entities
+    // Nested groups — recursively collect traversed entities (or literal values)
     for (const nestedGroup of descriptor.nestedGroups) {
-      row[nestedGroup.key] = collectNestedGroup(nestedGroup, groupBindings);
+      if (literalAliases.has(nestedGroup.traverseAlias)) {
+        row[nestedGroup.key] = collectLiteralTraversalValue(nestedGroup, groupBindings);
+      } else {
+        row[nestedGroup.key] = collectNestedGroup(nestedGroup, groupBindings);
+      }
     }
 
     rows.push(row);

@@ -719,6 +719,48 @@ describe('mapSparqlSelectResult — alias_expr (inline where pattern)', () => {
   // instead of property_expr. The nesting descriptor should still
   // place the field in the correct nested group.
 
+  test('alias_expr with literal binding returns coerced value, not {id}', () => {
+    // Simulates: Person.select(p => p.hobby.where(h => h.equals('Jogging')))
+    // The inline .where() on a literal property forces alias_expr in projection.
+    // When SPARQL returns a literal (not URI), it should NOT be wrapped as {id: ...}.
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_HOBBY},
+      ],
+      projection: [
+        {alias: 'p0', expression: {kind: 'alias_expr', alias: 'a1'}},
+      ],
+      resultMap: [{key: PROP_HOBBY, alias: 'p0'}],
+      singleResult: false,
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'literal', value: 'Jogging'},
+          },
+          {
+            a0: {type: 'uri', value: E('p2')},
+            a1: {type: 'literal', value: 'Jogging'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(2);
+    // Should be a string, not {id: 'Jogging'}
+    expect(result[0].hobby).toBe('Jogging');
+    expect(typeof result[0].hobby).toBe('string');
+    expect(result[1].hobby).toBe('Jogging');
+    expect(typeof result[1].hobby).toBe('string');
+  });
+
   test('alias_expr projection groups into nested array', () => {
     // Simulates: Person.select(p => p.friends.where(f => f.name.equals('Moa')))
     // root: a0, traverse a0→a1 (friends) with filter

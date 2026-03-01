@@ -219,9 +219,9 @@ describe('mutation IR parity (Phase 4)', () => {
         'bestFriend',
       )?.value as any;
       expect(bestFriend.id).toBe(`${tmpEntityBase}p3-best-friend`);
-      if (bestFriend.fields) {
-        expect(fieldBySuffix(bestFriend.fields, 'name')?.value).toBe('Bestie');
-      }
+      expect(bestFriend.shape).toBe(Person.shape.id);
+      expect(bestFriend.fields).toBeDefined();
+      expect(fieldBySuffix(bestFriend.fields, 'name')?.value).toBe('Bestie');
     }
 
     const updateBirthDate = await captureMutationIR(() => queryFactories.updateBirthDate());

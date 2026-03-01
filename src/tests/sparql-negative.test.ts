@@ -103,7 +103,7 @@ describe('irToAlgebra — error paths', () => {
 
     expect(() => deleteToAlgebra(ir)).not.toThrow();
     const plan = deleteToAlgebra(ir);
-    expect(plan.type).toBe('delete_where');
+    expect(plan.type).toBe('delete_insert');
   });
 });
 

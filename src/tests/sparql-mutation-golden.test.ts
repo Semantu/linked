@@ -105,7 +105,9 @@ INSERT {
   <${ENT}p1> <${P}/hobby> "Chess" .
 }
 WHERE {
-  <${ENT}p1> <${P}/hobby> ?old_hobby .
+  OPTIONAL {
+    <${ENT}p1> <${P}/hobby> ?old_hobby .
+  }
 }`);
   });
 
@@ -120,7 +122,9 @@ INSERT {
   <${ENT}p1> <${P}/friends> <${ENT}p2> .
 }
 WHERE {
-  <${ENT}p1> <${P}/friends> ?old_friends .
+  OPTIONAL {
+    <${ENT}p1> <${P}/friends> ?old_friends .
+  }
 }`);
   });
 
@@ -132,7 +136,9 @@ WHERE {
   <${ENT}p1> <${P}/hobby> ?old_hobby .
 }
 WHERE {
-  <${ENT}p1> <${P}/hobby> ?old_hobby .
+  OPTIONAL {
+    <${ENT}p1> <${P}/hobby> ?old_hobby .
+  }
 }`);
   });
 
@@ -144,7 +150,9 @@ WHERE {
   <${ENT}p1> <${P}/hobby> ?old_hobby .
 }
 WHERE {
-  <${ENT}p1> <${P}/hobby> ?old_hobby .
+  OPTIONAL {
+    <${ENT}p1> <${P}/hobby> ?old_hobby .
+  }
 }`);
   });
 
@@ -175,7 +183,9 @@ INSERT {
   <${ENT}p1> <${P}/bestFriend> <${ENT}p2> .
 }
 WHERE {
-  <${ENT}p1> <${P}/bestFriend> ?old_bestFriend .
+  OPTIONAL {
+    <${ENT}p1> <${P}/bestFriend> ?old_bestFriend .
+  }
 }`);
   });
 
@@ -190,7 +200,9 @@ INSERT {
   <${ENT}p1> <${P}/friends> <${ENT}p2> .
 }
 WHERE {
-  <${ENT}p1> <${P}/friends> <${ENT}p3> .
+  OPTIONAL {
+    <${ENT}p1> <${P}/friends> <${ENT}p3> .
+  }
 }`);
   });
 
@@ -202,7 +214,9 @@ WHERE {
   <${ENT}p1> <${P}/friends> <${ENT}p2> .
 }
 WHERE {
-  <${ENT}p1> <${P}/friends> <${ENT}p2> .
+  OPTIONAL {
+    <${ENT}p1> <${P}/friends> <${ENT}p2> .
+  }
 }`);
   });
 
@@ -217,7 +231,9 @@ INSERT {
   <${ENT}p1> <${P}/friends> <${ENT}p2> .
 }
 WHERE {
-  <${ENT}p1> <${P}/friends> <${ENT}p3> .
+  OPTIONAL {
+    <${ENT}p1> <${P}/friends> <${ENT}p3> .
+  }
 }`);
   });
 
@@ -229,7 +245,9 @@ WHERE {
   <${ENT}p1> <${P}/friends> ?old_friends .
 }
 WHERE {
-  <${ENT}p1> <${P}/friends> ?old_friends .
+  OPTIONAL {
+    <${ENT}p1> <${P}/friends> ?old_friends .
+  }
 }`);
   });
 
@@ -237,14 +255,19 @@ WHERE {
     const ir = (await captureQuery(queryFactories.updateNestedWithPredefinedId)) as IRUpdateMutation;
     const sparql = updateToSparql(ir);
     expect(sparql).toBe(
-`DELETE {
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+DELETE {
   <${ENT}p1> <${P}/bestFriend> ?old_bestFriend .
 }
 INSERT {
   <${ENT}p1> <${P}/bestFriend> <${ENT}p3-best-friend> .
+  <${ENT}p3-best-friend> rdf:type <${P}> .
+  <${ENT}p3-best-friend> <${P}/name> "Bestie" .
 }
 WHERE {
-  <${ENT}p1> <${P}/bestFriend> ?old_bestFriend .
+  OPTIONAL {
+    <${ENT}p1> <${P}/bestFriend> ?old_bestFriend .
+  }
 }`);
   });
 
@@ -260,7 +283,9 @@ INSERT {
   <${ENT}p1> <${P}/birthDate> "2020-01-01T00:00:00.000Z"^^xsd:dateTime .
 }
 WHERE {
-  <${ENT}p1> <${P}/birthDate> ?old_birthDate .
+  OPTIONAL {
+    <${ENT}p1> <${P}/birthDate> ?old_birthDate .
+  }
 }`);
   });
 });
@@ -275,10 +300,17 @@ describe('SPARQL golden — delete mutations', () => {
     const sparql = deleteToSparql(ir);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-DELETE WHERE {
+DELETE {
   <${ENT}to-delete> ?p ?o .
   ?s ?p2 <${ENT}to-delete> .
   <${ENT}to-delete> rdf:type <${P}> .
+}
+WHERE {
+  <${ENT}to-delete> ?p ?o .
+  <${ENT}to-delete> rdf:type <${P}> .
+  OPTIONAL {
+    ?s ?p2 <${ENT}to-delete> .
+  }
 }`);
   });
 
@@ -287,10 +319,17 @@ DELETE WHERE {
     const sparql = deleteToSparql(ir);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-DELETE WHERE {
+DELETE {
   <${ENT}to-delete> ?p ?o .
   ?s ?p2 <${ENT}to-delete> .
   <${ENT}to-delete> rdf:type <${P}> .
+}
+WHERE {
+  <${ENT}to-delete> ?p ?o .
+  <${ENT}to-delete> rdf:type <${P}> .
+  OPTIONAL {
+    ?s ?p2 <${ENT}to-delete> .
+  }
 }`);
   });
 
@@ -299,13 +338,25 @@ DELETE WHERE {
     const sparql = deleteToSparql(ir);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-DELETE WHERE {
-  <${ENT}to-delete-1> ?p ?o .
-  ?s ?p2 <${ENT}to-delete-1> .
+DELETE {
+  <${ENT}to-delete-1> ?p_0 ?o_0 .
+  ?s_0 ?p2_0 <${ENT}to-delete-1> .
   <${ENT}to-delete-1> rdf:type <${P}> .
-  <${ENT}to-delete-2> ?p ?o .
-  ?s ?p2 <${ENT}to-delete-2> .
+  <${ENT}to-delete-2> ?p_1 ?o_1 .
+  ?s_1 ?p2_1 <${ENT}to-delete-2> .
   <${ENT}to-delete-2> rdf:type <${P}> .
+}
+WHERE {
+  <${ENT}to-delete-1> ?p_0 ?o_0 .
+  <${ENT}to-delete-1> rdf:type <${P}> .
+  <${ENT}to-delete-2> ?p_1 ?o_1 .
+  <${ENT}to-delete-2> rdf:type <${P}> .
+  OPTIONAL {
+    ?s_0 ?p2_0 <${ENT}to-delete-1> .
+  }
+  OPTIONAL {
+    ?s_1 ?p2_1 <${ENT}to-delete-2> .
+  }
 }`);
   });
 
@@ -314,13 +365,25 @@ DELETE WHERE {
     const sparql = deleteToSparql(ir);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-DELETE WHERE {
-  <${ENT}to-delete-1> ?p ?o .
-  ?s ?p2 <${ENT}to-delete-1> .
+DELETE {
+  <${ENT}to-delete-1> ?p_0 ?o_0 .
+  ?s_0 ?p2_0 <${ENT}to-delete-1> .
   <${ENT}to-delete-1> rdf:type <${P}> .
-  <${ENT}to-delete-2> ?p ?o .
-  ?s ?p2 <${ENT}to-delete-2> .
+  <${ENT}to-delete-2> ?p_1 ?o_1 .
+  ?s_1 ?p2_1 <${ENT}to-delete-2> .
   <${ENT}to-delete-2> rdf:type <${P}> .
+}
+WHERE {
+  <${ENT}to-delete-1> ?p_0 ?o_0 .
+  <${ENT}to-delete-1> rdf:type <${P}> .
+  <${ENT}to-delete-2> ?p_1 ?o_1 .
+  <${ENT}to-delete-2> rdf:type <${P}> .
+  OPTIONAL {
+    ?s_0 ?p2_0 <${ENT}to-delete-1> .
+  }
+  OPTIONAL {
+    ?s_1 ?p2_1 <${ENT}to-delete-2> .
+  }
 }`);
   });
 });

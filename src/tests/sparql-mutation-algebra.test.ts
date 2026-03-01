@@ -233,10 +233,8 @@ describe('updateToAlgebra', () => {
     expect(insertHobby).toBeDefined();
     expect(insertHobby!.object).toEqual({kind: 'literal', value: 'Chess'});
 
-    // WHERE should match the old triples
-    expect(plan.whereAlgebra.type).toBe('bgp');
-    const whereBgp = plan.whereAlgebra as SparqlBGP;
-    expect(whereBgp.triples.length).toBeGreaterThanOrEqual(1);
+    // WHERE wraps old triples in OPTIONAL (left_join)
+    expect(plan.whereAlgebra.type).toBe('left_join');
   });
 
   test('updateOverwriteSet produces wildcard delete + specific insert', async () => {
@@ -443,17 +441,16 @@ describe('updateToAlgebra', () => {
     });
   });
 
-  test('updateNestedWithPredefinedId uses the predefined ID as reference', async () => {
-    // The update partial {id: '...', name: 'Bestie'} is treated as a node reference
-    // by the IR pipeline (because 'id' is present, it becomes a NodeReferenceValue).
-    // The 'name' field is stripped. So this becomes a simple reference update.
+  test('updateNestedWithPredefinedId creates nested entity with predefined ID', async () => {
+    // The update partial {id: '...', name: 'Bestie'} is now correctly treated
+    // as a nested create with a predefined ID, inserting the entity's data.
     const ir = (await captureMutationIR(() =>
       queryFactories.updateNestedWithPredefinedId(),
     )) as IRUpdateMutation;
 
     const plan = updateToAlgebra(ir);
 
-    // The bestFriend insert should point to the predefined ID as an IRI reference
+    // The bestFriend insert should point to the predefined ID
     const insertBf = plan.insertPatterns.find(
       (t) =>
         t.predicate.kind === 'iri' &&
@@ -464,6 +461,27 @@ describe('updateToAlgebra', () => {
       kind: 'iri',
       value: `${tmpEntityBase}p3-best-friend`,
     });
+
+    // Should also insert rdf:type for the nested entity
+    const insertType = plan.insertPatterns.find(
+      (t) =>
+        t.subject.kind === 'iri' &&
+        t.subject.value === `${tmpEntityBase}p3-best-friend` &&
+        t.predicate.kind === 'iri' &&
+        t.predicate.value.includes('rdf-syntax-ns#type'),
+    );
+    expect(insertType).toBeDefined();
+
+    // Should also insert name for the nested entity
+    const insertName = plan.insertPatterns.find(
+      (t) =>
+        t.subject.kind === 'iri' &&
+        t.subject.value === `${tmpEntityBase}p3-best-friend` &&
+        t.predicate.kind === 'iri' &&
+        t.predicate.value.endsWith('/name'),
+    );
+    expect(insertName).toBeDefined();
+    expect(insertName!.object).toEqual({kind: 'literal', value: 'Bestie'});
 
     // Delete should have wildcard for old bestFriend
     const deleteBf = plan.deletePatterns.find(
@@ -522,20 +540,20 @@ describe('updateToAlgebra', () => {
 // ---------------------------------------------------------------------------
 
 describe('deleteToAlgebra', () => {
-  test('deleteSingle produces bidirectional delete', async () => {
+  test('deleteSingle produces delete_insert with OPTIONAL object wildcard', async () => {
     const ir = (await captureMutationIR(() =>
       queryFactories.deleteSingle(),
     )) as IRDeleteMutation;
 
     const plan = deleteToAlgebra(ir);
 
-    expect(plan.type).toBe('delete_where');
-    expect(plan.patterns.type).toBe('bgp');
+    expect(plan.type).toBe('delete_insert');
+    expect(plan.insertPatterns.length).toBe(0);
 
-    const bgp = plan.patterns as SparqlBGP;
+    // DELETE block has all 3 patterns: subject wildcard, object wildcard, type guard
+    expect(plan.deletePatterns.length).toBe(3);
 
-    // Should have subject wildcard: <id> ?p ?o
-    const subjectWildcard = bgp.triples.find(
+    const subjectWildcard = plan.deletePatterns.find(
       (t) =>
         t.subject.kind === 'iri' &&
         t.subject.value === `${tmpEntityBase}to-delete` &&
@@ -546,8 +564,7 @@ describe('deleteToAlgebra', () => {
     );
     expect(subjectWildcard).toBeDefined();
 
-    // Should have object wildcard: ?s ?p2 <id>
-    const objectWildcard = bgp.triples.find(
+    const objectWildcard = plan.deletePatterns.find(
       (t) =>
         t.subject.kind === 'variable' &&
         t.subject.name === 's' &&
@@ -558,35 +575,25 @@ describe('deleteToAlgebra', () => {
     );
     expect(objectWildcard).toBeDefined();
 
-    // Should have type guard triple: <id> rdf:type <shape>
-    const typeGuard = bgp.triples.find(
-      (t) =>
-        t.subject.kind === 'iri' &&
-        t.subject.value === `${tmpEntityBase}to-delete` &&
-        t.predicate.kind === 'iri' &&
-        t.predicate.value === RDF_TYPE,
-    );
-    expect(typeGuard).toBeDefined();
+    // WHERE wraps object wildcard in OPTIONAL (left_join)
+    expect(plan.whereAlgebra.type).toBe('left_join');
   });
 
-  test('deleteMultiple handles multiple IDs', async () => {
+  test('deleteMultiple handles multiple IDs with indexed variables', async () => {
     const ir = (await captureMutationIR(() =>
       queryFactories.deleteMultiple(),
     )) as IRDeleteMutation;
 
     const plan = deleteToAlgebra(ir);
 
-    expect(plan.type).toBe('delete_where');
-    expect(plan.patterns.type).toBe('bgp');
+    expect(plan.type).toBe('delete_insert');
+    expect(plan.insertPatterns.length).toBe(0);
 
-    const bgp = plan.patterns as SparqlBGP;
+    // DELETE block: 3 triples per entity × 2 entities = 6
+    expect(plan.deletePatterns.length).toBe(6);
 
-    // Should have triples for both IDs
-    // Each ID gets 3 triples: subject wildcard, object wildcard, type guard
-    expect(bgp.triples.length).toBe(6); // 2 IDs * 3 triples
-
-    // Verify both entity URIs appear
-    const entity1Triples = bgp.triples.filter(
+    // Verify both entity URIs appear in delete patterns
+    const entity1Triples = plan.deletePatterns.filter(
       (t) =>
         (t.subject.kind === 'iri' &&
           t.subject.value === `${tmpEntityBase}to-delete-1`) ||
@@ -595,7 +602,7 @@ describe('deleteToAlgebra', () => {
     );
     expect(entity1Triples.length).toBeGreaterThanOrEqual(2);
 
-    const entity2Triples = bgp.triples.filter(
+    const entity2Triples = plan.deletePatterns.filter(
       (t) =>
         (t.subject.kind === 'iri' &&
           t.subject.value === `${tmpEntityBase}to-delete-2`) ||

@@ -104,7 +104,14 @@ export function serializeExpression(
 
     case 'logical_expr': {
       const op = expr.op === 'and' ? '&&' : '||';
-      const parts = expr.exprs.map((e) => serializeExpression(e, collector));
+      const parts = expr.exprs.map((e) => {
+        const s = serializeExpression(e, collector);
+        // Parenthesize OR children inside AND (AND binds tighter than OR)
+        if (expr.op === 'and' && e.kind === 'logical_expr' && e.op === 'or') {
+          return `(${s})`;
+        }
+        return s;
+      });
       return parts.join(` ${op} `);
     }
 
@@ -165,7 +172,9 @@ export function serializeAlgebraNode(
         // Re-build to include filter inside the OPTIONAL block
         optionalBlock = `OPTIONAL {\n${indent(right)}\n  FILTER(${cond})\n}`;
       }
-      return `${left}\n${optionalBlock}`;
+      // If left side is empty (e.g. UPDATE WHERE with all-OPTIONAL triples),
+      // omit the empty prefix to avoid blank lines
+      return left ? `${left}\n${optionalBlock}` : optionalBlock;
     }
 
     case 'filter': {

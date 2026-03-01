@@ -446,7 +446,7 @@ WHERE {
     ?a0 <${P}/friends> ?a1 .
     ?a1 <${P}/name> ?a1_name .
     ?a1 <${P}/hobby> ?a1_hobby .
-    FILTER(?a1_name = "Jinx" || ?a1_hobby = "Jogging" && ?a1_name = "Moa")
+    FILTER((?a1_name = "Jinx" || ?a1_hobby = "Jogging") && ?a1_name = "Moa")
   }
 }`);
   });
@@ -633,11 +633,11 @@ WHERE {
     ?a1 <${P}/name> ?a1_name .
   }
   OPTIONAL {
-    <user-1> <${P}/name> ?__ctx__user-1_name .
+    <user-1> <${P}/name> ?__ctx__user_1_name .
   }
   FILTER(EXISTS {
     ?a0 <${P}/friends> ?a1 .
-    FILTER(?a1_name = ?__ctx__user-1_name)
+    FILTER(?a1_name = ?__ctx__user_1_name)
   })
 }`);
   });
@@ -666,7 +666,7 @@ GROUP BY ?a0`);
     const sparql = await goldenSelect(queryFactories.countNestedFriends);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT ?a0 (count(?a1_friends) AS ?a1)
+SELECT ?a0 (count(?a1_friends) AS ?a1_agg)
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
@@ -681,7 +681,7 @@ GROUP BY ?a0`);
     const sparql = await goldenSelect(queryFactories.countLabel);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT ?a0 (count(?a1_friends) AS ?a1)
+SELECT ?a0 (count(?a1_friends) AS ?a1_agg)
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
