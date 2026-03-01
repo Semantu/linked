@@ -3053,3 +3053,84 @@ When parent operator is AND and a child expression is `logical_expr` with operat
 - `npx jest --config jest.config.js src/tests/sparql-mutation-golden.test.ts` — all pass
 - `npx jest --config jest.config.js src/tests/sparql-fuseki.test.ts` — all 75 pass
 - `npx jest --config jest.config.js` — all pass
+
+---
+
+## Final Review
+
+### Summary
+
+All 17 phases are complete. 456 unit/golden tests pass, 75/75 Fuseki integration tests pass, TypeScript compiles clean. The SPARQL conversion layer covers the full DSL surface: selects (flat, nested, filtered, aggregated, ordered, paged), creates (flat, nested, with references), updates (simple, set overwrite, set add/remove, nested create, nested create with predefined ID, unset), and deletes (single, multi-entity).
+
+### Architecture
+
+The three-layer pipeline (IR → SPARQL Algebra → SPARQL String) is cleanly separated:
+
+| File | Responsibility | Lines |
+|---|---|---|
+| `SparqlAlgebra.ts` | Type definitions (algebra nodes, expressions, plans) | ~200 |
+| `irToAlgebra.ts` | IR → SPARQL algebra conversion | ~1140 |
+| `algebraToString.ts` | Algebra → SPARQL string serialization | ~380 |
+| `resultMapping.ts` | SPARQL JSON → Linked DSL result types | ~615 |
+| `sparqlUtils.ts` | Shared helpers (URI formatting, prefix collection, entity URI generation) | ~85 |
+| `index.ts` | Public API re-exports | ~45 |
+
+Key design decisions:
+- `VariableRegistry` maps `(alias, property)` → SPARQL variable names, ensuring deduplication across traverse and property_expr references.
+- Property triples are always wrapped in OPTIONAL (LeftJoin) for safe access, preventing missing values from eliminating result rows.
+- Inline `.where()` filters produce filtered OPTIONAL blocks where the traverse triple and filter property triples are co-located.
+- Mutations use DELETE/INSERT/WHERE pattern (not DELETE WHERE) for safe updates when old values may not exist.
+- Result mapping uses a `NestingDescriptor` tree built from `resultMap` and `projection`, which guides recursive grouping of flat SPARQL bindings into nested objects.
+
+### Remaining gaps
+
+#### Must fix (before production use)
+
+1. **String literal escaping** — `formatLiteral()` in `sparqlUtils.ts` does not escape special characters (`"`, `\`, newlines, tabs). Literals containing these characters will produce invalid SPARQL. Fix: escape `\` → `\\`, `"` → `\"`, newline → `\n`, tab → `\t`, carriage return → `\r` inside `formatLiteral()`.
+
+2. **Unused `varCounter`** — `updateToAlgebra()` in `irToAlgebra.ts:915` declares `let varCounter = 0` but never uses it. The code uses `propertySuffix()` for variable naming instead. Fix: remove the declaration.
+
+#### Should fix
+
+3. **EXISTS pattern conversion is partial** — `convertExistsPattern()` only handles `traverse`, `join`, and `shape_scan` patterns. If an EXISTS body contains `optional`, `union`, or nested `exists` patterns, they are silently dropped or throw. The current DSL doesn't produce these combinations, but the function should either support them or throw a clear "unsupported" error.
+
+4. **Literal traversal detection heuristic** — `detectLiteralTraversals()` returns after the first non-null binding per group. If different root entities have different types for the same traversal alias (unlikely but possible with UNION patterns), the detection would be incorrect for some entities. Document this assumption or add consistency validation.
+
+5. **`localName()` key collision** — Both `resultMapping.ts` and `irToAlgebra.ts` use `localName()` to extract the last URI segment. Two properties with the same local name but different namespaces would collide in result row keys. The current DSL doesn't produce such collisions because property URIs share a single namespace, but this is fragile.
+
+6. **Context property key collision** — `irToAlgebra.ts` uses `__ctx__${sanitizeVarName(iri)}` as registry keys. Two different IRIs that sanitize to the same string would collide. Low probability but possible.
+
+#### Nice to have
+
+7. **Commented code in MutationQuery.ts** — ~18 lines of commented-out set modification logic (lines 230-247) and a commented simpler condition check (line 41). Should be removed for cleanliness.
+
+8. **`as any` casts in error throws** — `irToAlgebra.ts:703, 754` use `(expr as any).kind` in error messages. Can be replaced with a type-safe exhaustiveness check.
+
+9. **Algebra types not fully utilized** — `SparqlDeleteWherePlan`, `SparqlExtend`, `SparqlGraph`, `SparqlMinus` types are defined but not produced by the current IR conversion. They exist for future use (named graphs, BIND expressions, MINUS patterns). Document their status.
+
+10. **XSD constant duplication** — XSD constants are defined locally in both `irToAlgebra.ts` and `resultMapping.ts`. Could be centralized in `sparqlUtils.ts`.
+
+### Test coverage
+
+| Test file | Tests | Coverage |
+|---|---|---|
+| `sparql-select-golden.test.ts` | All select fixtures → exact SPARQL string | Golden |
+| `sparql-mutation-golden.test.ts` | All mutation fixtures → exact SPARQL string | Golden |
+| `sparql-mutation-algebra.test.ts` | Mutation IR → algebra structure assertions | Structural |
+| `sparql-result-mapping.test.ts` | SPARQL JSON → result mapping unit tests | Unit |
+| `sparql-negative.test.ts` | Error cases and edge cases | Negative |
+| `ir-mutation-parity.test.ts` | IR capture layer correctness | Unit |
+| `sparql-fuseki.test.ts` | Full pipeline → Fuseki SPARQL endpoint | Integration (75 fixtures) |
+
+**Test gaps** (not blocking but worth adding):
+- String literals with special characters (blocked by gap #1)
+- Deeply nested results (4+ levels)
+- Empty result sets for all query types
+- Multiple filtered traversals on the same entity
+
+### Next steps
+
+1. Fix string literal escaping (#1) and remove unused varCounter (#2) — these are quick fixes.
+2. Write SPARQL algebra layer documentation (in progress).
+3. Consider adding the test cases listed above.
+4. Wire the SPARQL layer into a real `IQuadStore` implementation for `@_linked/sparql-store`.
