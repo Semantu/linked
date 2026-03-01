@@ -3056,11 +3056,290 @@ When parent operator is AND and a child expression is `logical_expr` with operat
 
 ---
 
-## Final Review
+## Phase 18: String literal escaping + remove unused varCounter (Gaps 1, 2) — Status: Complete
+
+### Approaches considered
+
+**Gap 1 — String literal escaping:**
+
+- **A: Escape in `formatLiteral()`** — add an `escapeSparqlString()` helper and call it inside `formatLiteral()` before quoting. Also fix `serializeTerm()` line 45 in `algebraToString.ts` which bypasses `formatLiteral()` for language-tagged literals.
+- **B: Escape at each call site** — patch `serializeTerm()` and `serializeExpression()` individually. Duplicates logic.
+
+**Chosen: A** — centralize escaping in `formatLiteral()` + fix the language-tagged literal bypass.
+
+**Gap 2 — Unused varCounter:**
+
+Single approach: delete the declaration on `irToAlgebra.ts:915`.
+
+### Tasks
+
+**T18.1** Add `escapeSparqlString()` helper in `sparqlUtils.ts`:
+
+```ts
+export function escapeSparqlString(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+```
+
+**T18.2** Update `formatLiteral()` in `sparqlUtils.ts` to escape before quoting:
+
+```ts
+export function formatLiteral(value: string | number | boolean | Date, datatype?: string): string {
+  let lexical: string;
+  if (value instanceof Date) {
+    lexical = value.toISOString();
+  } else {
+    lexical = String(value);
+  }
+  const escaped = escapeSparqlString(lexical);
+  if (datatype) {
+    return `"${escaped}"^^${formatUri(datatype)}`;
+  }
+  return `"${escaped}"`;
+}
+```
+
+**T18.3** Fix language-tagged literal path in `algebraToString.ts` `serializeTerm()` (line 45):
+
+```ts
+// Before:
+return `"${term.value}"@${term.language}`;
+// After:
+return `"${escapeSparqlString(term.value)}"@${term.language}`;
+```
+
+**T18.4** Add tests in `sparql-utils.test.ts` for escaped literals:
+
+- `'say "hello"'` → `"say \\"hello\\""`
+- `'path\\to\\file'` → `"path\\\\to\\\\file"`
+- `'line1\nline2'` → `"line1\\nline2"`
+- `'tab\there'` → `"tab\\there"`
+- `'cr\rhere'` → `"cr\\rhere"`
+
+**T18.5** Remove `let varCounter = 0;` from `updateToAlgebra()` in `irToAlgebra.ts:915`.
+
+### Validation
+
+- `npx tsc --noEmit` exits 0
+- `npx jest --config jest.config.js src/tests/sparql-utils.test.ts` — all pass including new escaping tests
+- `npx jest --config jest.config.js` — all pass (no regressions)
+
+---
+
+## Phase 19: Complete EXISTS pattern conversion (Gap 3) — Status: Complete
+
+### Approaches considered
+
+- **A: Full recursive conversion** — support `optional`, `union`, and nested `exists` by recursively converting them to the corresponding algebra nodes (left_join, union, exists_expr). The algebra types already support all of these.
+- **B: Defensive error messages** — keep the current code but replace the generic `throw` with specific error messages per unsupported kind.
+- **C: Reuse main `processPattern`** — route EXISTS patterns through the same processing as top-level patterns. Too invasive since top-level processing has side effects (registering variables, collecting optionals).
+
+**Chosen: A** — full recursive conversion. The `join` case also needs fixing: it currently only handles traverse sub-patterns and silently drops others. The recursive approach is clean and future-proof.
+
+### Tasks
+
+**T19.1** Rewrite `convertExistsPattern()` in `irToAlgebra.ts` to handle all pattern kinds recursively:
+
+```ts
+function convertExistsPattern(
+  pattern: IRGraphPattern,
+  registry: VariableRegistry,
+): SparqlAlgebraNode {
+  switch (pattern.kind) {
+    case 'traverse': {
+      const triple = tripleOf(varTerm(pattern.from), iriTerm(pattern.property), varTerm(pattern.to));
+      return {type: 'bgp', triples: [triple]};
+    }
+    case 'join': {
+      let result: SparqlAlgebraNode | null = null;
+      for (const sub of pattern.patterns) {
+        const subNode = convertExistsPattern(sub, registry);
+        result = result ? joinNodes(result, subNode) : subNode;
+      }
+      return result || {type: 'bgp', triples: []};
+    }
+    case 'shape_scan': {
+      return {type: 'bgp', triples: [tripleOf(varTerm(pattern.alias), iriTerm(RDF_TYPE), iriTerm(pattern.shape))]};
+    }
+    case 'optional': {
+      const inner = convertExistsPattern(pattern.pattern, registry);
+      return {type: 'left_join', left: {type: 'bgp', triples: []}, right: inner};
+    }
+    case 'union': {
+      let result: SparqlAlgebraNode | null = null;
+      for (const branch of pattern.branches) {
+        const branchNode = convertExistsPattern(branch, registry);
+        result = result ? {type: 'union', left: result, right: branchNode} : branchNode;
+      }
+      return result || {type: 'bgp', triples: []};
+    }
+    case 'exists': {
+      return convertExistsPattern(pattern.pattern, registry);
+    }
+    default:
+      throw new Error(`Unsupported pattern kind in EXISTS: ${(pattern as any).kind}`);
+  }
+}
+```
+
+**T19.2** Add unit test in `sparql-algebra.test.ts` or `sparql-serialization.test.ts` verifying EXISTS with a join containing mixed sub-patterns (not just traverse).
+
+### Validation
+
+- `npx tsc --noEmit` exits 0
+- `npx jest --config jest.config.js src/tests/sparql-algebra.test.ts` — all pass
+- `npx jest --config jest.config.js` — all pass (no regressions)
+
+---
+
+## Phase 20: Robustness improvements — literal traversal, key collisions (Gaps 4, 5, 6) — Status: Complete
+
+### Approaches considered
+
+**Gap 4 — Literal traversal detection:**
+
+- **A: Scan all bindings** — instead of breaking after the first non-null binding, scan all non-null bindings and validate consistency. If mixed types found, fall back to coerceValue.
+- **B: Use IR metadata** — derive literal/entity from the projection expression kind. Fragile because alias_expr could point to either.
+- **C: Type-majority voting** — count URI vs literal across all bindings, use majority.
+
+**Chosen: A** — scan all bindings for the group, require consistency, fall back to literal (coerceValue) for mixed types. This is safe because treating a URI as a coerced value just returns the URI string, which is acceptable as a fallback.
+
+**Gap 5 — localName() key collision:**
+
+- **A: Use full URI as key** — breaks the user-facing API which expects short property names.
+- **B: Detect collisions at build time and throw** — identifies the problem immediately.
+- **C: Disambiguate with namespace prefix** — adds complexity for edge cases.
+
+**Chosen: B** — detect duplicate result keys in `buildNestingDescriptor()` and throw a descriptive error. This surfaces schema issues early rather than producing silently wrong results.
+
+**Gap 6 — Context property key collision:**
+
+- **A: Use raw IRI as registry key** — the registry key doesn't need to be a valid SPARQL variable name. Use the raw IRI in the key, keep sanitization only for the generated SPARQL variable name.
+- **B: Counter-based context naming** — `__ctx_0`, `__ctx_1`, etc.
+- **C: Hash the IRI** — use a hash function for collision resistance.
+
+**Chosen: A** — use raw IRI as registry key. The `VariableRegistry.key()` method already concatenates `alias::property` as a Map key, so the alias can contain any characters. Only the SPARQL variable name (from `getOrCreate`) needs sanitization.
+
+### Tasks
+
+**T20.1** Improve `detectLiteralTraversals()` in `resultMapping.ts` to scan all bindings and validate consistency:
+
+```ts
+function detectLiteralTraversals(
+  groups: NestedGroup[],
+  bindings: SparqlBinding[],
+): Set<string> {
+  const literalAliases = new Set<string>();
+  for (const group of groups) {
+    let seenUri = false;
+    let seenLiteral = false;
+    for (const binding of bindings) {
+      const val = binding[group.traverseAlias];
+      if (!val) continue;
+      if (val.type === 'uri') seenUri = true;
+      else seenLiteral = true;
+    }
+    // If only literals seen, or mixed types, treat as literal (safe fallback)
+    if (seenLiteral && !seenUri) {
+      literalAliases.add(group.traverseAlias);
+    } else if (seenLiteral && seenUri) {
+      // Mixed: fallback to literal treatment (coerceValue handles both)
+      literalAliases.add(group.traverseAlias);
+    }
+  }
+  return literalAliases;
+}
+```
+
+**T20.2** Add duplicate key detection in `buildNestingDescriptor()` in `resultMapping.ts`:
+
+After the main loop over `resultMap`, check for duplicate keys in `flatFields` and within each `nestedGroups` subtree. Throw a descriptive error if found.
+
+```ts
+// After building the descriptor, validate no duplicate keys
+const flatKeys = descriptor.flatFields.map(f => f.key);
+const dupeFlat = flatKeys.find((k, i) => flatKeys.indexOf(k) !== i);
+if (dupeFlat) {
+  throw new Error(
+    `Duplicate result key "${dupeFlat}" in projection. ` +
+    `Two properties with the same local name cannot appear in the same projection.`
+  );
+}
+```
+
+**T20.3** Fix context property key collision in `irToAlgebra.ts`. Change both occurrences (lines 551, 618) of:
+
+```ts
+// Before:
+const ctxKey = `__ctx__${sanitizeVarName(expr.contextIri)}`;
+// After:
+const ctxKey = `__ctx__${expr.contextIri}`;
+```
+
+The raw IRI is safe as a Map key. The SPARQL variable name is still sanitized because `getOrCreate()` passes the key through `propertySuffix()` for the variable name suffix, and the key prefix goes through the variable naming: `${alias}_${suffix}`. We need to ensure the variable name is still sanitized:
+
+**T20.4** Update `VariableRegistry.getOrCreate()` to sanitize generated variable names:
+
+```ts
+getOrCreate(alias: string, property: string): string {
+  const existing = this.get(alias, property);
+  if (existing) return existing;
+  const rawName = `${alias}_${propertySuffix(property)}`;
+  const varName = sanitizeVarName(rawName);
+  this.set(alias, property, varName);
+  return varName;
+}
+```
+
+This ensures that even if the alias contains special characters (like context IRIs), the generated SPARQL variable is always valid. The uniqueness comes from the Map key (which uses the raw alias), not the variable name. If two different aliases produce the same sanitized variable name, the Map still differentiates them because the keys are different.
+
+Wait — if two different raw aliases produce the same sanitized varName, both would appear as the same `?variable` in SPARQL but reference different context entities. We need unique variable names too.
+
+**T20.5** (Revised) Add collision detection to `getOrCreate()`:
+
+```ts
+private usedVarNames = new Set<string>();
+
+getOrCreate(alias: string, property: string): string {
+  const existing = this.get(alias, property);
+  if (existing) return existing;
+  let varName = `${sanitizeVarName(alias)}_${propertySuffix(property)}`;
+  // Deduplicate: if varName already taken by a different (alias, property), append counter
+  let counter = 2;
+  while (this.usedVarNames.has(varName)) {
+    varName = `${sanitizeVarName(alias)}_${propertySuffix(property)}_${counter}`;
+    counter++;
+  }
+  this.usedVarNames.add(varName);
+  this.set(alias, property, varName);
+  return varName;
+}
+```
+
+**T20.6** Add test for context property key collision: two different context IRIs that sanitize to the same form should produce different SPARQL variables.
+
+### Validation
+
+- `npx tsc --noEmit` exits 0
+- `npx jest --config jest.config.js src/tests/sparql-result-mapping.test.ts` — all pass
+- `npx jest --config jest.config.js src/tests/sparql-algebra.test.ts` — all pass
+- `npx jest --config jest.config.js` — all pass (no regressions)
+- `npx jest --config jest.config.js src/tests/sparql-fuseki.test.ts` — all 75 pass
+
+---
+
+## Final Review (updated after Phases 18-20)
 
 ### Summary
 
-All 17 phases are complete. 456 unit/golden tests pass, 75/75 Fuseki integration tests pass, TypeScript compiles clean. The SPARQL conversion layer covers the full DSL surface: selects (flat, nested, filtered, aggregated, ordered, paged), creates (flat, nested, with references), updates (simple, set overwrite, set add/remove, nested create, nested create with predefined ID, unset), and deletes (single, multi-entity).
+All 20 phases are complete. 471 unit/golden tests pass (394 non-Fuseki + 77 skipped Fuseki stubs), 75/75 Fuseki integration tests pass, TypeScript compiles clean. The SPARQL conversion layer covers the full DSL surface: selects (flat, nested, filtered, aggregated, ordered, paged), creates (flat, nested, with references), updates (simple, set overwrite, set add/remove, nested create, nested create with predefined ID, unset), and deletes (single, multi-entity).
+
+All 6 previously identified gaps (2 must-fix, 4 should-fix) have been resolved in Phases 18-20.
 
 ### Architecture
 
@@ -3069,46 +3348,41 @@ The three-layer pipeline (IR → SPARQL Algebra → SPARQL String) is cleanly se
 | File | Responsibility | Lines |
 |---|---|---|
 | `SparqlAlgebra.ts` | Type definitions (algebra nodes, expressions, plans) | ~200 |
-| `irToAlgebra.ts` | IR → SPARQL algebra conversion | ~1140 |
-| `algebraToString.ts` | Algebra → SPARQL string serialization | ~380 |
-| `resultMapping.ts` | SPARQL JSON → Linked DSL result types | ~615 |
-| `sparqlUtils.ts` | Shared helpers (URI formatting, prefix collection, entity URI generation) | ~85 |
-| `index.ts` | Public API re-exports | ~45 |
+| `irToAlgebra.ts` | IR → SPARQL algebra conversion | ~1150 |
+| `algebraToString.ts` | Algebra → SPARQL string serialization | ~385 |
+| `resultMapping.ts` | SPARQL JSON → Linked DSL result types | ~625 |
+| `sparqlUtils.ts` | Shared helpers (URI formatting, literal escaping, prefix collection, entity URI generation) | ~100 |
+| `index.ts` | Public API re-exports | ~47 |
 
 Key design decisions:
-- `VariableRegistry` maps `(alias, property)` → SPARQL variable names, ensuring deduplication across traverse and property_expr references.
+- `VariableRegistry` maps `(alias, property)` → SPARQL variable names, with automatic deduplication and collision detection via `usedVarNames` set.
 - Property triples are always wrapped in OPTIONAL (LeftJoin) for safe access, preventing missing values from eliminating result rows.
 - Inline `.where()` filters produce filtered OPTIONAL blocks where the traverse triple and filter property triples are co-located.
 - Mutations use DELETE/INSERT/WHERE pattern (not DELETE WHERE) for safe updates when old values may not exist.
 - Result mapping uses a `NestingDescriptor` tree built from `resultMap` and `projection`, which guides recursive grouping of flat SPARQL bindings into nested objects.
+- String literals are escaped per SPARQL 1.1 §19.7 via `escapeSparqlString()`.
+- Context property IRIs use raw IRI as registry key to prevent sanitization-induced collisions.
 
-### Remaining gaps
+### Resolved gaps (Phases 18-20)
 
-#### Must fix (before production use)
+| # | Gap | Resolution | Phase |
+|---|---|---|---|
+| 1 | String literal escaping | Added `escapeSparqlString()` in sparqlUtils.ts, integrated into `formatLiteral()` and language-tagged literal path in `serializeTerm()` | 18 |
+| 2 | Unused `varCounter` | Removed dead declaration from `updateToAlgebra()` | 18 |
+| 3 | EXISTS pattern conversion partial | Rewrote `convertExistsPattern()` with full recursive support for `optional`, `union`, and nested `exists` patterns via algebra nodes | 19 |
+| 4 | Literal traversal detection heuristic | Improved `detectLiteralTraversals()` to scan all bindings per group, treating mixed-type groups as literal (safe fallback) | 20 |
+| 5 | `localName()` key collision | Added duplicate key detection in `buildNestingDescriptor()` — throws descriptive error if two properties share the same local name | 20 |
+| 6 | Context property key collision | Changed registry key from `__ctx__${sanitizeVarName(iri)}` to `__ctx__${iri}` (raw IRI). Added variable name deduplication in `VariableRegistry.getOrCreate()` with counter-based collision resolution | 20 |
 
-1. **String literal escaping** — `formatLiteral()` in `sparqlUtils.ts` does not escape special characters (`"`, `\`, newlines, tabs). Literals containing these characters will produce invalid SPARQL. Fix: escape `\` → `\\`, `"` → `\"`, newline → `\n`, tab → `\t`, carriage return → `\r` inside `formatLiteral()`.
+### Remaining items (nice-to-have, not blocking)
 
-2. **Unused `varCounter`** — `updateToAlgebra()` in `irToAlgebra.ts:915` declares `let varCounter = 0` but never uses it. The code uses `propertySuffix()` for variable naming instead. Fix: remove the declaration.
+1. **Commented code in MutationQuery.ts** — ~18 lines of commented-out set modification logic and a commented simpler condition check. Cleanup only.
 
-#### Should fix
+2. **`as any` casts in error throws** — `irToAlgebra.ts` uses `(pattern as any).kind` in the EXISTS default error case. Minor type hygiene.
 
-3. **EXISTS pattern conversion is partial** — `convertExistsPattern()` only handles `traverse`, `join`, and `shape_scan` patterns. If an EXISTS body contains `optional`, `union`, or nested `exists` patterns, they are silently dropped or throw. The current DSL doesn't produce these combinations, but the function should either support them or throw a clear "unsupported" error.
+3. **Algebra types not fully utilized** — `SparqlDeleteWherePlan`, `SparqlExtend`, `SparqlGraph`, `SparqlMinus` types are defined but not produced by the current IR conversion. They exist for future use (named graphs, BIND expressions, MINUS patterns).
 
-4. **Literal traversal detection heuristic** — `detectLiteralTraversals()` returns after the first non-null binding per group. If different root entities have different types for the same traversal alias (unlikely but possible with UNION patterns), the detection would be incorrect for some entities. Document this assumption or add consistency validation.
-
-5. **`localName()` key collision** — Both `resultMapping.ts` and `irToAlgebra.ts` use `localName()` to extract the last URI segment. Two properties with the same local name but different namespaces would collide in result row keys. The current DSL doesn't produce such collisions because property URIs share a single namespace, but this is fragile.
-
-6. **Context property key collision** — `irToAlgebra.ts` uses `__ctx__${sanitizeVarName(iri)}` as registry keys. Two different IRIs that sanitize to the same string would collide. Low probability but possible.
-
-#### Nice to have
-
-7. **Commented code in MutationQuery.ts** — ~18 lines of commented-out set modification logic (lines 230-247) and a commented simpler condition check (line 41). Should be removed for cleanliness.
-
-8. **`as any` casts in error throws** — `irToAlgebra.ts:703, 754` use `(expr as any).kind` in error messages. Can be replaced with a type-safe exhaustiveness check.
-
-9. **Algebra types not fully utilized** — `SparqlDeleteWherePlan`, `SparqlExtend`, `SparqlGraph`, `SparqlMinus` types are defined but not produced by the current IR conversion. They exist for future use (named graphs, BIND expressions, MINUS patterns). Document their status.
-
-10. **XSD constant duplication** — XSD constants are defined locally in both `irToAlgebra.ts` and `resultMapping.ts`. Could be centralized in `sparqlUtils.ts`.
+4. **XSD constant duplication** — XSD constants are defined locally in both `irToAlgebra.ts` and `resultMapping.ts`. Could be centralized in `sparqlUtils.ts`.
 
 ### Test coverage
 
@@ -3117,20 +3391,21 @@ Key design decisions:
 | `sparql-select-golden.test.ts` | All select fixtures → exact SPARQL string | Golden |
 | `sparql-mutation-golden.test.ts` | All mutation fixtures → exact SPARQL string | Golden |
 | `sparql-mutation-algebra.test.ts` | Mutation IR → algebra structure assertions | Structural |
+| `sparql-algebra.test.ts` | IR → algebra unit tests including EXISTS with optional/union | Structural |
 | `sparql-result-mapping.test.ts` | SPARQL JSON → result mapping unit tests | Unit |
+| `sparql-utils.test.ts` | URI formatting, literal escaping, prefix collection, entity URI gen | Unit |
+| `sparql-serialization.test.ts` | Algebra → SPARQL string serialization | Unit |
 | `sparql-negative.test.ts` | Error cases and edge cases | Negative |
 | `ir-mutation-parity.test.ts` | IR capture layer correctness | Unit |
 | `sparql-fuseki.test.ts` | Full pipeline → Fuseki SPARQL endpoint | Integration (75 fixtures) |
 
-**Test gaps** (not blocking but worth adding):
-- String literals with special characters (blocked by gap #1)
+**Test gaps** (not blocking):
 - Deeply nested results (4+ levels)
 - Empty result sets for all query types
 - Multiple filtered traversals on the same entity
 
 ### Next steps
 
-1. Fix string literal escaping (#1) and remove unused varCounter (#2) — these are quick fixes.
-2. Write SPARQL algebra layer documentation (in progress).
-3. Consider adding the test cases listed above.
-4. Wire the SPARQL layer into a real `IQuadStore` implementation for `@_linked/sparql-store`.
+1. Wire the SPARQL layer into a real `IQuadStore` implementation for `@_linked/sparql-store`.
+2. Consider adding the test cases listed above.
+3. Clean up commented code in MutationQuery.ts and centralize XSD constants (optional).

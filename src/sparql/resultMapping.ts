@@ -274,6 +274,16 @@ function buildNestingDescriptor(query: IRSelectQuery): NestingDescriptor {
     }
   }
 
+  // Validate: no duplicate keys at the flat level
+  const flatKeys = descriptor.flatFields.map((f) => f.key);
+  const dupFlat = flatKeys.find((k, i) => flatKeys.indexOf(k) !== i);
+  if (dupFlat) {
+    throw new Error(
+      `Duplicate result key "${dupFlat}" in projection. ` +
+      `Two properties with the same local name cannot appear in the same projection.`,
+    );
+  }
+
   return descriptor;
 }
 
@@ -395,8 +405,9 @@ function populateFields(row: ResultRow, fields: FieldDescriptor[], binding: Spar
  * traversals (e.g. `p.hobby.where(h => h.equals('Jogging'))`) vs entity
  * traversals. Returns a set of traverse aliases that resolve to literals.
  *
- * Must scan ALL bindings (not just one root group's) because a particular
- * root entity may have no binding for the alias at all (OPTIONAL miss).
+ * Scans ALL non-null bindings for each group to validate type consistency.
+ * If mixed types are found (both URI and literal), defaults to literal
+ * treatment — coerceValue handles both safely.
  */
 function detectLiteralTraversals(
   groups: NestedGroup[],
@@ -404,11 +415,17 @@ function detectLiteralTraversals(
 ): Set<string> {
   const literalAliases = new Set<string>();
   for (const group of groups) {
+    let seenUri = false;
+    let seenLiteral = false;
     for (const binding of bindings) {
       const val = binding[group.traverseAlias];
       if (!val) continue;
-      if (val.type !== 'uri') literalAliases.add(group.traverseAlias);
-      break;
+      if (val.type === 'uri') seenUri = true;
+      else seenLiteral = true;
+    }
+    // Literal-only or mixed types → treat as literal (safe fallback)
+    if (seenLiteral) {
+      literalAliases.add(group.traverseAlias);
     }
   }
   return literalAliases;

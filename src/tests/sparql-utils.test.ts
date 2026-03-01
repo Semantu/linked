@@ -3,6 +3,7 @@ import {Prefix} from '../utils/Prefix';
 import {
   formatUri,
   formatLiteral,
+  escapeSparqlString,
   collectPrefixes,
   generateEntityUri,
 } from '../sparql/sparqlUtils';
@@ -62,6 +63,50 @@ describe('formatLiteral', () => {
       'http://www.w3.org/2001/XMLSchema#dateTime',
     );
     expect(result).toBe('"2020-01-01T00:00:00.000Z"^^xsd:dateTime');
+  });
+});
+
+describe('escapeSparqlString', () => {
+  test('escapes double quotes', () => {
+    expect(escapeSparqlString('say "hello"')).toBe('say \\"hello\\"');
+  });
+
+  test('escapes backslashes', () => {
+    expect(escapeSparqlString('path\\to\\file')).toBe('path\\\\to\\\\file');
+  });
+
+  test('escapes newlines', () => {
+    expect(escapeSparqlString('line1\nline2')).toBe('line1\\nline2');
+  });
+
+  test('escapes tabs', () => {
+    expect(escapeSparqlString('tab\there')).toBe('tab\\there');
+  });
+
+  test('escapes carriage returns', () => {
+    expect(escapeSparqlString('cr\rhere')).toBe('cr\\rhere');
+  });
+
+  test('escapes combined special characters', () => {
+    expect(escapeSparqlString('a"b\\c\nd')).toBe('a\\"b\\\\c\\nd');
+  });
+
+  test('leaves plain strings unchanged', () => {
+    expect(escapeSparqlString('hello world')).toBe('hello world');
+  });
+});
+
+describe('formatLiteral — escaping', () => {
+  test('escapes double quotes in literal values', () => {
+    expect(formatLiteral('say "hello"')).toBe('"say \\"hello\\""');
+  });
+
+  test('escapes backslashes in typed literals', () => {
+    expect(formatLiteral('c:\\path')).toBe('"c:\\\\path"');
+  });
+
+  test('escapes newlines in plain literals', () => {
+    expect(formatLiteral('line1\nline2')).toBe('"line1\\nline2"');
   });
 });
 

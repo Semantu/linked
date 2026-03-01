@@ -6,6 +6,7 @@ export type {SparqlOptions} from './sparqlUtils.js';
 export {
   formatUri,
   formatLiteral,
+  escapeSparqlString,
   collectPrefixes,
   generateEntityUri,
 } from './sparqlUtils.js';

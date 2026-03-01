@@ -12,6 +12,7 @@ import {
   SparqlOptions,
   formatUri,
   formatLiteral,
+  escapeSparqlString,
   collectPrefixes,
 } from './sparqlUtils.js';
 
@@ -42,7 +43,7 @@ export function serializeTerm(
       return formatUri(term.value);
     case 'literal': {
       if (term.language) {
-        return `"${term.value}"@${term.language}`;
+        return `"${escapeSparqlString(term.value)}"@${term.language}`;
       }
       if (term.datatype) {
         if (collector) collectUri(collector, term.datatype);

@@ -142,6 +142,7 @@ function collectTraversalAliases(patterns: IRGraphPattern[]): string[] {
  */
 class VariableRegistry {
   private map = new Map<string, string>();
+  private usedVarNames = new Set<string>();
 
   private key(alias: string, property: string): string {
     return `${alias}::${property}`;
@@ -157,12 +158,21 @@ class VariableRegistry {
 
   set(alias: string, property: string, variable: string): void {
     this.map.set(this.key(alias, property), variable);
+    this.usedVarNames.add(variable);
   }
 
   getOrCreate(alias: string, property: string): string {
     const existing = this.get(alias, property);
     if (existing) return existing;
-    const varName = `${alias}_${propertySuffix(property)}`;
+    const suffix = propertySuffix(property);
+    let varName = `${sanitizeVarName(alias)}_${suffix}`;
+    // Deduplicate: if varName is already used by a different (alias, property),
+    // append a counter to ensure unique SPARQL variable names
+    let counter = 2;
+    while (this.usedVarNames.has(varName)) {
+      varName = `${sanitizeVarName(alias)}_${suffix}_${counter}`;
+      counter++;
+    }
     this.set(alias, property, varName);
     return varName;
   }
@@ -547,8 +557,10 @@ function processExpressionForProperties(
       }
       break;
     case 'context_property_expr': {
-      // Context entity property — emit a triple with fixed IRI as subject
-      const ctxKey = `__ctx__${sanitizeVarName(expr.contextIri)}`;
+      // Context entity property — emit a triple with fixed IRI as subject.
+      // Use raw IRI as registry key to avoid collision between IRIs that
+      // sanitize to the same string (e.g. ctx-1 vs ctx_1).
+      const ctxKey = `__ctx__${expr.contextIri}`;
       if (!registry.has(ctxKey, expr.property)) {
         const varName = registry.getOrCreate(ctxKey, expr.property);
         optionalPropertyTriples.push(
@@ -615,7 +627,7 @@ function convertExpression(
       return {kind: 'variable_expr', name: expr.alias};
 
     case 'context_property_expr': {
-      const ctxKey = `__ctx__${sanitizeVarName(expr.contextIri)}`;
+      const ctxKey = `__ctx__${expr.contextIri}`;
       const ctxVarName = registry.getOrCreate(ctxKey, expr.property);
       return {kind: 'variable_expr', name: ctxVarName};
     }
@@ -706,6 +718,7 @@ function convertExpression(
 
 /**
  * Convert an exists pattern (from exists_expr) into an algebra node.
+ * Recursively handles all IR graph pattern kinds.
  */
 function convertExistsPattern(
   pattern: IRGraphPattern,
@@ -722,19 +735,12 @@ function convertExistsPattern(
     }
 
     case 'join': {
-      const triples: SparqlTriple[] = [];
+      let result: SparqlAlgebraNode | null = null;
       for (const sub of pattern.patterns) {
-        if (sub.kind === 'traverse') {
-          triples.push(
-            tripleOf(
-              varTerm(sub.from),
-              iriTerm(sub.property),
-              varTerm(sub.to),
-            ),
-          );
-        }
+        const subNode = convertExistsPattern(sub, registry);
+        result = result ? joinNodes(result, subNode) : subNode;
       }
-      return {type: 'bgp', triples};
+      return result || {type: 'bgp', triples: []};
     }
 
     case 'shape_scan': {
@@ -748,6 +754,28 @@ function convertExistsPattern(
           ),
         ],
       };
+    }
+
+    case 'optional': {
+      const inner = convertExistsPattern(pattern.pattern, registry);
+      return wrapOptional({type: 'bgp', triples: []}, inner);
+    }
+
+    case 'union': {
+      let result: SparqlAlgebraNode | null = null;
+      for (const branch of pattern.branches) {
+        const branchNode = convertExistsPattern(branch, registry);
+        if (!result) {
+          result = branchNode;
+        } else {
+          result = {type: 'union', left: result, right: branchNode};
+        }
+      }
+      return result || {type: 'bgp', triples: []};
+    }
+
+    case 'exists': {
+      return convertExistsPattern(pattern.pattern, registry);
     }
 
     default:
@@ -912,7 +940,6 @@ export function updateToAlgebra(
   const deletePatterns: SparqlTriple[] = [];
   const insertPatterns: SparqlTriple[] = [];
   const whereTriples: SparqlTriple[] = [];
-  let varCounter = 0;
 
   for (const field of query.data.fields) {
     const propertyTerm = iriTerm(field.property);

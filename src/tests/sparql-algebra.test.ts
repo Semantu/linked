@@ -18,6 +18,8 @@ import type {
   SparqlTriple,
   SparqlAlgebraNode,
   SparqlExpression,
+  SparqlExistsExpr,
+  SparqlUnion,
 } from '../sparql/SparqlAlgebra';
 
 // Ensure prefixes are registered
@@ -596,5 +598,134 @@ describe('selectToAlgebra — projection', () => {
   test('DISTINCT is not set for aggregate queries', async () => {
     const plan = await capturePlan(() => queryFactories.countFriends());
     expect(plan.distinct).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EXISTS pattern conversion — verifies all pattern kinds are supported
+// ---------------------------------------------------------------------------
+
+describe('EXISTS pattern conversion', () => {
+  const P = Person.shape.id;
+
+  test('EXISTS with join containing mixed sub-patterns handles all kinds', () => {
+    // Hand-crafted IR with EXISTS whose pattern is a join containing
+    // a traverse and a shape_scan (the old code silently dropped shape_scan
+    // inside join)
+    const ir: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: P, alias: 'a0'},
+      patterns: [],
+      projection: [],
+      where: {
+        kind: 'exists_expr',
+        pattern: {
+          kind: 'join',
+          patterns: [
+            {kind: 'traverse', from: 'a0', to: 'a1', property: `${P}/friends`},
+            {kind: 'shape_scan', shape: `${P}Employee`, alias: 'a1'},
+          ],
+        },
+      },
+      singleResult: false,
+    };
+
+    const plan = selectToAlgebra(ir);
+
+    // The WHERE should contain a FILTER with EXISTS
+    // Dig through the algebra to find the exists_expr
+    function findExists(node: SparqlAlgebraNode): SparqlExistsExpr | null {
+      if (node.type === 'filter') {
+        if (node.expression.kind === 'exists_expr') return node.expression;
+        return findExists(node.inner);
+      }
+      if (node.type === 'join') {
+        return findExists(node.left) || findExists(node.right);
+      }
+      if (node.type === 'left_join') {
+        return findExists(node.left) || findExists(node.right);
+      }
+      return null;
+    }
+
+    const existsExpr = findExists(plan.algebra);
+    expect(existsExpr).not.toBeNull();
+    // The inner pattern should be a join of BGPs (traverse + shape_scan)
+    // Both sub-patterns should be present (old code only kept traverse)
+    expect(existsExpr!.pattern.type).toBe('join');
+    const joinNode = existsExpr!.pattern;
+    if (joinNode.type === 'join') {
+      // Left: traverse BGP, right: shape_scan BGP — both are BGPs with triples
+      expect((joinNode.left as SparqlBGP).triples.length).toBeGreaterThan(0);
+      expect((joinNode.right as SparqlBGP).triples.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('EXISTS with optional pattern produces left_join', () => {
+    const ir: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: P, alias: 'a0'},
+      patterns: [],
+      projection: [],
+      where: {
+        kind: 'exists_expr',
+        pattern: {
+          kind: 'optional',
+          pattern: {kind: 'traverse', from: 'a0', to: 'a1', property: `${P}/friends`},
+        },
+      },
+      singleResult: false,
+    };
+
+    const plan = selectToAlgebra(ir);
+
+    function findExists(node: SparqlAlgebraNode): SparqlExistsExpr | null {
+      if (node.type === 'filter' && node.expression.kind === 'exists_expr') return node.expression;
+      if (node.type === 'filter') return findExists(node.inner);
+      if (node.type === 'join') return findExists(node.left) || findExists(node.right);
+      if (node.type === 'left_join') return findExists(node.left) || findExists(node.right);
+      return null;
+    }
+
+    const existsExpr = findExists(plan.algebra);
+    expect(existsExpr).not.toBeNull();
+    expect(existsExpr!.pattern.type).toBe('left_join');
+  });
+
+  test('EXISTS with union pattern produces union algebra', () => {
+    const ir: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: P, alias: 'a0'},
+      patterns: [],
+      projection: [],
+      where: {
+        kind: 'exists_expr',
+        pattern: {
+          kind: 'union',
+          branches: [
+            {kind: 'traverse', from: 'a0', to: 'a1', property: `${P}/friends`},
+            {kind: 'traverse', from: 'a0', to: 'a2', property: `${P}/bestFriend`},
+          ],
+        },
+      },
+      singleResult: false,
+    };
+
+    const plan = selectToAlgebra(ir);
+
+    function findExists(node: SparqlAlgebraNode): SparqlExistsExpr | null {
+      if (node.type === 'filter' && node.expression.kind === 'exists_expr') return node.expression;
+      if (node.type === 'filter') return findExists(node.inner);
+      if (node.type === 'join') return findExists(node.left) || findExists(node.right);
+      if (node.type === 'left_join') return findExists(node.left) || findExists(node.right);
+      return null;
+    }
+
+    const existsExpr = findExists(plan.algebra);
+    expect(existsExpr).not.toBeNull();
+    expect(existsExpr!.pattern.type).toBe('union');
+    const union = existsExpr!.pattern as SparqlUnion;
+    expect((union.left as SparqlBGP).triples.length).toBe(1);
+    expect((union.right as SparqlBGP).triples.length).toBe(1);
   });
 });

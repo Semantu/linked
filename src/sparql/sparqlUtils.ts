@@ -18,8 +18,22 @@ export function formatUri(uri: string): string {
 }
 
 /**
+ * Escapes special characters in a string for use inside SPARQL double-quoted literals.
+ * Per SPARQL 1.1 §19.7 (Escape sequences in strings).
+ */
+export function escapeSparqlString(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
+}
+
+/**
  * Format a literal value for SPARQL output.
  * Returns a quoted string with optional `^^<datatype>` suffix.
+ * Special characters in the value are escaped per SPARQL spec.
  */
 export function formatLiteral(
   value: string | number | boolean | Date,
@@ -32,10 +46,12 @@ export function formatLiteral(
     lexical = String(value);
   }
 
+  const escaped = escapeSparqlString(lexical);
+
   if (datatype) {
-    return `"${lexical}"^^${formatUri(datatype)}`;
+    return `"${escaped}"^^${formatUri(datatype)}`;
   }
-  return `"${lexical}"`;
+  return `"${escaped}"`;
 }
 
 /**
