@@ -429,7 +429,8 @@ Echoes back the updated fields from `IRUpdateMutation.data` as an `UpdateResult`
 | Function | Purpose |
 |---|---|
 | `formatUri(uri)` | Returns prefixed form (`rdf:type`) if a prefix is registered, otherwise `<full-uri>` |
-| `formatLiteral(value, datatype?)` | Returns `"value"` or `"value"^^<datatype>` |
+| `formatLiteral(value, datatype?)` | Returns `"value"` or `"value"^^<datatype>` with special characters escaped |
+| `escapeSparqlString(value)` | Escapes `\`, `"`, `\n`, `\r`, `\t` per SPARQL 1.1 §19.7 |
 | `collectPrefixes(uris)` | Computes minimal PREFIX declarations for a set of URIs |
 | `generateEntityUri(shape, options?)` | Generates `{dataRoot}/{shapeLabel}_{ulid}` for create mutations |
 
@@ -586,14 +587,12 @@ export class SparqlStore implements IQuadStore {
 
 ## Known limitations
 
-1. **String literal escaping** — `formatLiteral()` does not escape special characters (`"`, `\`, newlines) inside literal values. Strings containing these characters will produce invalid SPARQL.
+1. **Named graphs** — `SparqlGraph` algebra node type and `graph` fields on plans are defined but not produced by the IR conversion. The current pipeline operates on the default graph.
 
-2. **EXISTS patterns** — only `traverse`, `join`, and `shape_scan` patterns are supported inside EXISTS. Nested `optional`, `union`, or `exists` patterns in EXISTS bodies are not converted.
+2. **VALUES / SERVICE** — not supported in the algebra or serialization.
 
-3. **Named graphs** — `SparqlGraph` algebra node type and `graph` fields on plans are defined but not produced by the IR conversion. The current pipeline operates on the default graph.
+3. **Update functions** — the IR does not capture function expressions in update mutations (e.g., computed values). Update values must be concrete.
 
-4. **VALUES / SERVICE** — not supported in the algebra or serialization.
+4. **Lateral / subquery** — SPARQL subqueries (SELECT inside WHERE) are not produced by the current IR conversion.
 
-5. **Update functions** — the IR does not capture function expressions in update mutations (e.g., computed values). Update values must be concrete.
-
-6. **Lateral / subquery** — SPARQL subqueries (SELECT inside WHERE) are not produced by the current IR conversion.
+5. **Property key uniqueness** — two properties with the same `localName()` (last URI segment) in the same projection will cause a descriptive error. This is by design — the result row uses short property names as JS object keys.
