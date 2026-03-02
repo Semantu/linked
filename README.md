@@ -6,6 +6,7 @@ Linked core gives you a type-safe, schema-parameterized query language and SHACL
 ## Linked core offers
 
 - **Schema-Parameterized Query DSL**: TypeScript-embedded queries driven by your Shape definitions.
+- **Fully Inferred Result Types**: The TypeScript return type of every query is automatically inferred from the selected paths — no manual type annotations needed. Select `p.name` and get `{id: string; name: string}[]`. Select `p.friends.name` and get nested result types. This works for all operations: select, create, update, and delete.
 - **Shape Classes (SHACL)**: TypeScript classes that generate SHACL shape metadata.
 - **Object-Oriented Data Operations**: Query, create, update, and delete data using the same Shape-based API.
 - **Storage Routing**: `LinkedStorage` routes query objects to your configured store(s) that implement `IQuadStore`.
@@ -30,11 +31,6 @@ npm run setup
 
 - `.claude/agents`
 - `.agents/agents`
-
-```typescript
-import {Shape, LinkedStorage} from '@_linked/core';
-import {linkedPackage} from '@_linked/core/utils/Package';
-```
 
 ## Related packages
 
@@ -71,12 +67,16 @@ export class Person extends Shape {
 }
 ```
 
-### 2. Type-safe query DSL
+### 2. Type-safe query DSL with inferred result types
 
-The DSL uses these shape classes to provide compile-time checked queries. You cannot write a query that references a property not defined on the shape.
+The DSL uses these shape classes to provide compile-time checked queries. You cannot write a query that references a property not defined on the shape. The result type is **fully inferred** from the selected paths — no manual type annotations needed:
 
 ```typescript
+// TypeScript infers: Promise<{id: string; name: string}[]>
 const result = await Person.select(p => p.name);
+
+// TypeScript infers: Promise<{id: string; friends: {id: string; name: string}[]}[]>
+const nested = await Person.select(p => p.friends.name);
 ```
 
 ### 3. SHACL-based Intermediate Representation (IR)
@@ -114,7 +114,9 @@ Properties are wrapped in `LeftJoin` (OPTIONAL) so missing values don't eliminat
 
 ### 5. SPARQL Algebra → SPARQL string
 
-The algebra tree is serialized into a SPARQL query string with automatic PREFIX generation:
+The algebra is a plain data structure — stores can inspect or optimize it before serialization (e.g., rewriting patterns, adding graph clauses, or pruning redundant joins).
+
+The algebra tree is then serialized into a SPARQL query string with automatic PREFIX generation:
 
 ```sparql
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -594,7 +596,7 @@ All IR types are available from `@_linked/core/queries/IntermediateRepresentatio
 
 **Store packages:**
 
-- `@_linked/sparql-store` — SPARQL endpoint store (coming soon)
+- `SparqlStore` base class — included in `@_linked/core/sparql`, extend it for any SPARQL endpoint
 - `@_linked/rdf-mem-store` — in-memory RDF store
 
 ## Changelog

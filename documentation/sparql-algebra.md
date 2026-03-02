@@ -19,7 +19,7 @@ IR (SelectQuery, CreateQuery, UpdateQuery, DeleteQuery)
   → Layer 3: resultMapping — SPARQL JSON → DSL result types (SelectResult, CreateResult, etc.)
 ```
 
-All code lives in `src/sparql/`. Pure functions, no base classes.
+All code lives in `src/sparql/`. Pure conversion functions plus a `SparqlStore` abstract base class that wires the full pipeline together.
 
 ## File structure
 
@@ -29,6 +29,7 @@ src/sparql/
   irToAlgebra.ts        — IR → SPARQL algebra conversion (Layer 1)
   algebraToString.ts    — Algebra → SPARQL string serialization (Layer 2)
   resultMapping.ts      — SPARQL JSON results → DSL result types (Layer 3)
+  SparqlStore.ts        — Abstract base class wiring the full pipeline (IR → string → execute → map)
   sparqlUtils.ts        — Shared helpers (URI formatting, literal serialization, prefix collection)
   index.ts              — Public API re-exports
 ```
@@ -447,6 +448,14 @@ interface SparqlOptions {
 
 ## Public API (`index.ts`)
 
+### Store base class
+
+```ts
+import {SparqlStore} from '@_linked/core/sparql';
+```
+
+Extend `SparqlStore` to create a concrete SPARQL-backed store (see [Implementing a SPARQL store](#implementing-a-sparql-store) above).
+
 ### IR → Algebra conversion
 
 ```ts
@@ -524,64 +533,39 @@ import type {
 
 ## Implementing a SPARQL store
 
-To implement a SPARQL-backed `IQuadStore`:
+The `SparqlStore` abstract base class (`src/sparql/SparqlStore.ts`) handles the full pipeline — IR → algebra → SPARQL string → execute → result mapping. Concrete stores only need to implement two transport methods:
 
 ```ts
-import type {IQuadStore} from '@_linked/core/interfaces/IQuadStore';
-import type {SelectQuery} from '@_linked/core/queries/SelectQuery';
-import type {CreateQuery} from '@_linked/core/queries/CreateQuery';
-import type {UpdateQuery} from '@_linked/core/queries/UpdateQuery';
-import type {DeleteQuery, DeleteResponse} from '@_linked/core/queries/DeleteQuery';
-import type {SelectResult, CreateResult, UpdateResult} from '@_linked/core/queries/IntermediateRepresentation';
-import {
-  selectToSparql,
-  createToSparql,
-  updateToSparql,
-  deleteToSparql,
-  mapSparqlSelectResult,
-  mapSparqlCreateResult,
-  mapSparqlUpdateResult,
-} from '@_linked/core/sparql';
+import {SparqlStore} from '@_linked/core/sparql';
 import type {SparqlJsonResults, SparqlOptions} from '@_linked/core/sparql';
 
-export class SparqlStore implements IQuadStore {
-  constructor(private endpoint: string, private options?: SparqlOptions) {}
+export class MyEndpointStore extends SparqlStore {
+  private endpoint: string;
 
-  async selectQuery(query: SelectQuery): Promise<SelectResult> {
-    const sparql = selectToSparql(query, this.options);
-    const json: SparqlJsonResults = await this.executeSparqlQuery(sparql);
-    return mapSparqlSelectResult(json, query);
+  constructor(endpoint: string, options?: SparqlOptions) {
+    super(options);
+    this.endpoint = endpoint;
   }
 
-  async createQuery(query: CreateQuery): Promise<CreateResult> {
-    const sparql = createToSparql(query, this.options);
-    const generatedUri = /* extract from the SPARQL or pre-generate */;
-    await this.executeSparqlUpdate(sparql);
-    return mapSparqlCreateResult(generatedUri, query);
-  }
-
-  async updateQuery(query: UpdateQuery): Promise<UpdateResult> {
-    const sparql = updateToSparql(query, this.options);
-    await this.executeSparqlUpdate(sparql);
-    return mapSparqlUpdateResult(query);
-  }
-
-  async deleteQuery(query: DeleteQuery): Promise<DeleteResponse> {
-    const sparql = deleteToSparql(query, this.options);
-    await this.executeSparqlUpdate(sparql);
-    return {deleted: query.ids, count: query.ids.length};
-  }
-
-  private async executeSparqlQuery(sparql: string): Promise<SparqlJsonResults> {
+  protected async executeSparqlSelect(sparql: string): Promise<SparqlJsonResults> {
     // POST to endpoint with Content-Type: application/sparql-query
-    // Parse JSON response
+    // Return parsed JSON response
   }
 
-  private async executeSparqlUpdate(sparql: string): Promise<void> {
+  protected async executeSparqlUpdate(sparql: string): Promise<void> {
     // POST to endpoint with Content-Type: application/sparql-update
   }
 }
 ```
+
+The base class implements all four `IQuadStore` methods (`selectQuery`, `createQuery`, `updateQuery`, `deleteQuery`) by orchestrating the conversion layers:
+
+1. Convert IR to SPARQL algebra plan (`irToAlgebra`)
+2. Serialize the algebra plan to a SPARQL string (`algebraToString`)
+3. Execute via the concrete store's `executeSparqlSelect` or `executeSparqlUpdate`
+4. Map results back to DSL types (`resultMapping`)
+
+See `src/test-helpers/FusekiStore.ts` for a complete example of a concrete implementation targeting Apache Jena Fuseki.
 
 ---
 
