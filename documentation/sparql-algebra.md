@@ -577,6 +577,6 @@ A minimal example implementation for Apache Jena Fuseki exists in `src/test-help
 
 3. **Update functions** — the IR does not capture function expressions in update mutations (e.g., computed values). Update values must be concrete.
 
-4. **Lateral / subquery** — SPARQL subqueries (SELECT inside WHERE) are not produced by the current IR conversion.
+4. **SPARQL subqueries** — SPARQL subqueries (`SELECT` inside `WHERE`, used for top-N-per-group and similar patterns) are not produced. The DSL's `.select()` sub-queries are flattened into traversals + OPTIONAL triples on a single query — they do not require SPARQL subqueries.
 
 5. **Property key uniqueness** — two properties with the same `localName()` (last URI segment) in the same projection will cause a descriptive error. This is by design — the result row uses short property names as JS object keys.

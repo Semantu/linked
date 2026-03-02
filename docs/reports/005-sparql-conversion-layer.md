@@ -308,7 +308,7 @@ The following types are defined in `SparqlAlgebra.ts` and serialized by `algebra
 1. **Named graphs** — pipeline operates on the default graph only. `SparqlGraph` is ready but not wired.
 2. **VALUES / SERVICE** — not supported in the algebra or serialization.
 3. **Update functions** — IR does not capture function expressions in mutations (e.g., `L.plus(p.age, 1)`). Update values must be concrete.
-4. **Lateral / subquery** — SPARQL subqueries (SELECT inside WHERE) are not produced.
+4. **SPARQL subqueries** — SPARQL subqueries (`SELECT` inside `WHERE`) are not produced. Note: the DSL's `.select()` sub-queries (e.g., `p.friends.select(f => f.name)`) do NOT need SPARQL subqueries — they are flattened into traversals + OPTIONAL property triples on a single query, and the result mapper reconstructs nesting from flat bindings.
 5. **Property key uniqueness** — two properties with the same `localName()` in the same projection throw a descriptive error. By design — result rows use short property names as JS object keys.
 6. **Proxy operator limitation** — JavaScript proxies cannot intercept operators (`+`, `*`, `>`), so computed expressions require function-call syntax (e.g., `L.times(p.age, 12)`) — see ideation doc 006.
 
