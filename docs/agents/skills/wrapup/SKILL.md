@@ -41,6 +41,8 @@ The report replaces the plan as the permanent record. Any agent working on code 
 - Test coverage summary (which test files, what they cover, total counts)
 - Known limitations and remaining test gaps
 - Deferred work with pointers to ideation docs
+- Links to relevant documentation files (e.g., `documentation/sparql-algebra.md`)
+- PR reference (number and URL) when a PR was created during this scope
 - Anything that affects future work or that future agents need to know
 
 **What to remove from the plan:**
