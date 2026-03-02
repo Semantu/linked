@@ -38,7 +38,6 @@ export class MutationQueryFactory extends QueryFactory {
   }
 
   protected isSetModification(obj, shape) {
-    // return obj.add || obj.remove;
     let hasAdd = obj.add;
     let hasRemove = obj.remove;
     let numKeysExpected = (hasAdd ? 1 : 0) + (hasRemove ? 1 : 0);
@@ -227,24 +226,6 @@ export class MutationQueryFactory extends QueryFactory {
         } else {
           return this.convertNodeDescription(value, valueShape);
         }
-        // //check if the property shape allows a single value
-        // if(propShape.maxCount === 1) {
-        //   //if yes, then the object should be seen as a node description
-        //   return this.convertNodeDescription(value,propShape.valueShape);
-        // } else {
-        //   if(this.isSetModification(value,propShape)) {
-        //     //but if multiple values are allowed, the value should either be an Array of node descriptions
-        //     //OR an object with add or remove keys
-        //     return this.convertSetModification(value,propShape);
-        //   } else {
-        //     //it must be a set overwrite, and it must be coming from an array
-        //     if(!allowArrays) {
-        //       return this.convertNodeDescription(value,propShape.valueShape);
-        //     } else {
-        //       throw new Error("Invalid array value. Should be a node reference or node description")
-        //     }
-        //   }
-        // }
       }
     }
     throw new Error(`Unsupported update value type: ${typeof value}`);

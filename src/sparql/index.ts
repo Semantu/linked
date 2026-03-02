@@ -45,3 +45,6 @@ export {
   mapSparqlUpdateResult,
 } from './resultMapping.js';
 export type {SparqlJsonResults, SparqlBinding} from './resultMapping.js';
+
+// Store base class
+export {SparqlStore} from './SparqlStore.js';

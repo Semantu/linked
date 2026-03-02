@@ -36,6 +36,7 @@ import {
   executeSparqlUpdate,
   clearAllData,
 } from '../test-helpers/fuseki-test-store';
+import {FusekiStore} from '../test-helpers/FusekiStore';
 
 import '../ontologies/rdf';
 import '../ontologies/xsd';
@@ -1541,5 +1542,115 @@ describe('Fuseki mutations — DELETE', () => {
     `);
     expect(after1.results.bindings.length).toBe(0);
     expect(after2.results.bindings.length).toBe(0);
+  });
+});
+
+// =========================================================================
+// SparqlStore base class — via FusekiStore
+// =========================================================================
+
+const FUSEKI_BASE_URL = process.env.FUSEKI_BASE_URL || 'http://localhost:3030';
+const FUSEKI_DATASET = 'nashville-test';
+
+describe('SparqlStore (via FusekiStore)', () => {
+  const store = new FusekiStore(FUSEKI_BASE_URL, FUSEKI_DATASET);
+
+  test('selectQuery — returns mapped result rows', async () => {
+    if (!fusekiAvailable) return;
+
+    const raw = await captureQuery(queryFactories.selectName);
+    const ir = buildSelectQuery(raw);
+    const result = await store.selectQuery(ir);
+
+    expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+    expect(rows.length).toBe(4);
+
+    const names = extractNames(rows);
+    expect(names).toContain('Semmy');
+    expect(names).toContain('Moa');
+  });
+
+  test('selectQuery — nested traversals', async () => {
+    if (!fusekiAvailable) return;
+
+    const raw = await captureQuery(queryFactories.selectFriendsName);
+    const ir = buildSelectQuery(raw);
+    const result = await store.selectQuery(ir);
+
+    expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+    // selectFriendsName projects friends.name — rows should have friends arrays
+    const withFriends = rows.find(
+      (r) => Array.isArray(r.friends) && (r.friends as ResultRow[]).length > 0,
+    );
+    expect(withFriends).toBeDefined();
+  });
+
+  test('createQuery — creates entity and returns echoed result', async () => {
+    if (!fusekiAvailable) return;
+
+    const ir = (await captureQuery(queryFactories.createSimple)) as IRCreateMutation;
+    const result = await store.createQuery(ir);
+
+    expect(result).toBeDefined();
+    expect(result.id).toBeDefined();
+    expect(typeof result.id).toBe('string');
+    expect(result.name).toBe('Test Create');
+
+    // Verify the entity was actually created in Fuseki
+    const verifyResult = await executeSparqlQuery(`
+      SELECT ?name WHERE { <${result.id}> <${P}/name> ?name . }
+    `);
+    expect(verifyResult.results.bindings.length).toBe(1);
+    expect(verifyResult.results.bindings[0].name.value).toBe('Test Create');
+
+    // Cleanup
+    await executeSparqlUpdate(`DELETE WHERE { <${result.id}> ?p ?o }`);
+  });
+
+  test('updateQuery — updates entity and returns echoed result', async () => {
+    if (!fusekiAvailable) return;
+
+    const ir = (await captureQuery(queryFactories.updateSimple)) as IRUpdateMutation;
+    const result = await store.updateQuery(ir);
+
+    expect(result).toBeDefined();
+    expect(result.id).toBeDefined();
+
+    // Restore the original name
+    await executeSparqlUpdate(`
+      DELETE { <${ENT}p1> <${P}/name> ?old . }
+      INSERT { <${ENT}p1> <${P}/name> "Semmy" . }
+      WHERE { <${ENT}p1> <${P}/name> ?old . }
+    `);
+  });
+
+  test('deleteQuery — deletes entity and returns response', async () => {
+    if (!fusekiAvailable) return;
+
+    const toDeleteUri = `${ENT}store-delete-test`;
+    await executeSparqlUpdate(`
+      INSERT DATA {
+        <${toDeleteUri}> <${RDF_TYPE}> <${P}> .
+        <${toDeleteUri}> <${P}/name> "StoreDeleteTest" .
+      }
+    `);
+
+    const ir = {
+      kind: 'delete' as const,
+      shape: P,
+      ids: [{id: toDeleteUri}],
+    };
+    const result = await store.deleteQuery(ir);
+
+    expect(result.count).toBe(1);
+    expect(result.deleted).toEqual([{id: toDeleteUri}]);
+
+    // Verify deletion
+    const afterResult = await executeSparqlQuery(`
+      SELECT ?name WHERE { <${toDeleteUri}> <${P}/name> ?name . }
+    `);
+    expect(afterResult.results.bindings.length).toBe(0);
   });
 });

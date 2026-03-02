@@ -3333,13 +3333,13 @@ getOrCreate(alias: string, property: string): string {
 
 ---
 
-## Final Review (updated after Phases 18-20)
+## Final Review (updated after post-review cleanup)
 
 ### Summary
 
-All 20 phases are complete. 471 unit/golden tests pass (394 non-Fuseki + 77 skipped Fuseki stubs), 75/75 Fuseki integration tests pass, TypeScript compiles clean. The SPARQL conversion layer covers the full DSL surface: selects (flat, nested, filtered, aggregated, ordered, paged), creates (flat, nested, with references), updates (simple, set overwrite, set add/remove, nested create, nested create with predefined ID, unset), and deletes (single, multi-entity).
+All 20 implementation phases plus post-review cleanup are complete. 474 unit/golden tests pass (394 non-Fuseki + 80 Fuseki integration), TypeScript compiles clean. The SPARQL conversion layer covers the full DSL surface: selects (flat, nested, filtered, aggregated, ordered, paged), creates (flat, nested, with references), updates (simple, set overwrite, set add/remove, nested create, nested create with predefined ID, unset), and deletes (single, multi-entity).
 
-All 6 previously identified gaps (2 must-fix, 4 should-fix) have been resolved in Phases 18-20.
+All 6 previously identified gaps (2 must-fix, 4 should-fix) were resolved in Phases 18-20. All 4 nice-to-have items from the second review have been resolved.
 
 ### Architecture
 
@@ -3352,7 +3352,8 @@ The three-layer pipeline (IR → SPARQL Algebra → SPARQL String) is cleanly se
 | `algebraToString.ts` | Algebra → SPARQL string serialization | ~385 |
 | `resultMapping.ts` | SPARQL JSON → Linked DSL result types | ~625 |
 | `sparqlUtils.ts` | Shared helpers (URI formatting, literal escaping, prefix collection, entity URI generation) | ~100 |
-| `index.ts` | Public API re-exports | ~47 |
+| `SparqlStore.ts` | Abstract base class for SPARQL-backed IQuadStore implementations | ~95 |
+| `index.ts` | Public API re-exports | ~50 |
 
 Key design decisions:
 - `VariableRegistry` maps `(alias, property)` → SPARQL variable names, with automatic deduplication and collision detection via `usedVarNames` set.
@@ -3362,6 +3363,8 @@ Key design decisions:
 - Result mapping uses a `NestingDescriptor` tree built from `resultMap` and `projection`, which guides recursive grouping of flat SPARQL bindings into nested objects.
 - String literals are escaped per SPARQL 1.1 §19.7 via `escapeSparqlString()`.
 - Context property IRIs use raw IRI as registry key to prevent sanitization-induced collisions.
+- XSD/RDF constants use the existing ontology modules (`src/ontologies/xsd.ts`, `src/ontologies/rdf.ts`) — no hardcoded URIs.
+- `SparqlStore` base class handles the full IR → SPARQL → execute → map pipeline; concrete stores only implement `executeSparqlSelect()` and `executeSparqlUpdate()`.
 
 ### Resolved gaps (Phases 18-20)
 
@@ -3374,15 +3377,14 @@ Key design decisions:
 | 5 | `localName()` key collision | Added duplicate key detection in `buildNestingDescriptor()` — throws descriptive error if two properties share the same local name | 20 |
 | 6 | Context property key collision | Changed registry key from `__ctx__${sanitizeVarName(iri)}` to `__ctx__${iri}` (raw IRI). Added variable name deduplication in `VariableRegistry.getOrCreate()` with counter-based collision resolution | 20 |
 
-### Remaining items (nice-to-have, not blocking)
+### Resolved nice-to-have items (post-review cleanup)
 
-1. **Commented code in MutationQuery.ts** — ~18 lines of commented-out set modification logic and a commented simpler condition check. Cleanup only.
-
-2. **`as any` casts in error throws** — `irToAlgebra.ts` uses `(pattern as any).kind` in the EXISTS default error case. Minor type hygiene.
-
-3. **Algebra types not fully utilized** — `SparqlDeleteWherePlan`, `SparqlExtend`, `SparqlGraph`, `SparqlMinus` types are defined but not produced by the current IR conversion. They exist for future use (named graphs, BIND expressions, MINUS patterns).
-
-4. **XSD constant duplication** — XSD constants are defined locally in both `irToAlgebra.ts` and `resultMapping.ts`. Could be centralized in `sparqlUtils.ts`.
+| # | Item | Resolution |
+|---|---|---|
+| A | Commented code in MutationQuery.ts | Removed ~18 lines of dead commented code (old maxCount logic and old condition) |
+| B | `as any` casts | Changed 2 defensive switch defaults to `as never` (irToAlgebra.ts:715, :782). Fixed actual type gap in resultMapping.ts:608 with explicit `ResultRow[]` cast |
+| C | XSD/RDF constant duplication | Replaced all hardcoded URI strings with imports from `src/ontologies/xsd.ts` and `src/ontologies/rdf.ts` in both `irToAlgebra.ts` and `resultMapping.ts` |
+| D | SparqlStore base class | Created `SparqlStore` abstract base class in `src/sparql/SparqlStore.ts` with full pipeline. Created `FusekiStore` concrete implementation in `src/test-helpers/FusekiStore.ts`. Added 5 integration tests that exercise all CRUD methods through the store |
 
 ### Test coverage
 
@@ -3397,15 +3399,13 @@ Key design decisions:
 | `sparql-serialization.test.ts` | Algebra → SPARQL string serialization | Unit |
 | `sparql-negative.test.ts` | Error cases and edge cases | Negative |
 | `ir-mutation-parity.test.ts` | IR capture layer correctness | Unit |
-| `sparql-fuseki.test.ts` | Full pipeline → Fuseki SPARQL endpoint | Integration (75 fixtures) |
+| `sparql-fuseki.test.ts` | Full pipeline → Fuseki (75 fixtures + 5 SparqlStore) | Integration (80 tests) |
 
-**Test gaps** (not blocking):
+**Remaining test gaps** (not blocking):
 - Deeply nested results (4+ levels)
 - Empty result sets for all query types
 - Multiple filtered traversals on the same entity
 
-### Next steps
+### Unused algebra types (ready for future DSL extensions)
 
-1. Wire the SPARQL layer into a real `IQuadStore` implementation for `@_linked/sparql-store`.
-2. Consider adding the test cases listed above.
-3. Clean up commented code in MutationQuery.ts and centralize XSD constants (optional).
+`SparqlDeleteWherePlan`, `SparqlExtend`, `SparqlGraph`, `SparqlMinus` are defined in `SparqlAlgebra.ts` but not yet produced by IR conversion. They exist for future DSL features (named graphs, BIND/computed expressions, MINUS set difference, DELETE WHERE shorthand).

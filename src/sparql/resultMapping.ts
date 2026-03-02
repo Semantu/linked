@@ -33,19 +33,20 @@ export type SparqlBinding = Record<
   }
 >;
 
+import {xsd} from '../ontologies/xsd.js';
+
 // ---------------------------------------------------------------------------
-// XSD constants (kept local to avoid pulling in the full ontology module)
+// XSD constants (derived from ontology module)
 // ---------------------------------------------------------------------------
 
-const XSD = 'http://www.w3.org/2001/XMLSchema#';
-const XSD_BOOLEAN = `${XSD}boolean`;
-const XSD_INTEGER = `${XSD}integer`;
-const XSD_LONG = `${XSD}long`;
-const XSD_DECIMAL = `${XSD}decimal`;
-const XSD_FLOAT = `${XSD}float`;
-const XSD_DOUBLE = `${XSD}double`;
-const XSD_DATE_TIME = `${XSD}dateTime`;
-const XSD_DATE = `${XSD}date`;
+const XSD_BOOLEAN = xsd.boolean.id;
+const XSD_INTEGER = xsd.integer.id;
+const XSD_LONG = xsd.long.id;
+const XSD_DECIMAL = xsd.decimal.id;
+const XSD_FLOAT = xsd.float.id;
+const XSD_DOUBLE = xsd.double.id;
+const XSD_DATE_TIME = xsd.dateTime.id;
+const XSD_DATE = xsd.date.id;
 
 const NUMERIC_DATATYPES = new Set([
   XSD_INTEGER,
@@ -604,9 +605,8 @@ function fieldValueToResult(value: IRFieldValue): ResultFieldValue {
       if (result && typeof result === 'object' && 'id' in result) {
         return result as ResultRow;
       }
-      // Wrap primitive array items into rows if needed
-      return result as any;
-    });
+      return result as ResultRow;
+    }) as ResultRow[];
   }
 
   return null;

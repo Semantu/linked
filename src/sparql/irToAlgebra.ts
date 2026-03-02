@@ -31,16 +31,18 @@ import {
   insertDataPlanToSparql,
   deleteInsertPlanToSparql,
 } from './algebraToString.js';
+import {rdf} from '../ontologies/rdf.js';
+import {xsd} from '../ontologies/xsd.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
-const XSD_DATETIME = 'http://www.w3.org/2001/XMLSchema#dateTime';
-const XSD_BOOLEAN = 'http://www.w3.org/2001/XMLSchema#boolean';
-const XSD_INTEGER = 'http://www.w3.org/2001/XMLSchema#integer';
-const XSD_DOUBLE = 'http://www.w3.org/2001/XMLSchema#double';
+const RDF_TYPE = rdf.type.id;
+const XSD_DATETIME = xsd.dateTime.id;
+const XSD_BOOLEAN = xsd.boolean.id;
+const XSD_INTEGER = xsd.integer.id;
+const XSD_DOUBLE = xsd.double.id;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -712,7 +714,7 @@ function convertExpression(
     }
 
     default:
-      throw new Error(`Unknown IR expression kind: ${(expr as any).kind}`);
+      throw new Error(`Unknown IR expression kind: ${(expr as never as {kind: string}).kind}`);
   }
 }
 
@@ -779,7 +781,7 @@ function convertExistsPattern(
     }
 
     default:
-      throw new Error(`Unsupported pattern kind in EXISTS: ${(pattern as any).kind}`);
+      throw new Error(`Unsupported pattern kind in EXISTS: ${(pattern as never as {kind: string}).kind}`);
   }
 }
 
