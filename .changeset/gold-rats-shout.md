@@ -2,8 +2,4 @@
 "@_linked/core": minor
 ---
 
-Introduce canonical Intermediate Representation (IR) support for query and mutation objects.
-
-- Add select-query IR pipeline stages (desugar, canonicalize, projection, alias scope, pipeline helpers) and expose `getCanonicalIR()` on select factories.
-- Add canonical mutation IR conversion for create/update/delete query objects.
-- Add IR documentation and parity/golden test coverage for select and mutation conversion behavior.
+Replaced internal query representation with a canonical backend-agnostic IR AST. `SelectQuery`, `CreateQuery`, `UpdateQuery`, and `DeleteQuery` are now typed IR objects with `kind` discriminators, compact shape/property ID references, and expression trees — replacing the previous ad-hoc nested arrays. The public Shape DSL is unchanged; what changed is what `IQuadStore` implementations receive. Store result types (`ResultRow`, `SelectResult`, `CreateResult`, `UpdateResult`) are now exported. All factories expose `build()` as the primary method. See `documentation/intermediate-representation.md` for the full IR reference and migration guidance.
