@@ -676,7 +676,7 @@ Mutation field values (`IRFieldValue`) can be:
 
 ### Reference implementations
 
-- **`SparqlStore`** (built-in) — abstract base class in `@_linked/core/sparql` that wires the full SPARQL pipeline (IR → algebra → string → execute → map results). Extend it and implement `executeSparqlSelect()` and `executeSparqlUpdate()` to create a concrete SPARQL-backed store. See `src/test-helpers/FusekiStore.ts` for a complete example and [sparql-algebra.md](./sparql-algebra.md#implementing-a-sparql-store) for documentation.
+- **`SparqlStore`** (built-in) — abstract base class in `@_linked/core/sparql` that wires the full SPARQL pipeline (IR → algebra → string → execute → map results). Extend it and implement `executeSparqlSelect()` and `executeSparqlUpdate()` to create a concrete SPARQL-backed store. See [sparql-algebra.md](./sparql-algebra.md#implementing-a-sparql-store) for documentation.
 - **`@_linked/rdf-mem-store`** — in-memory RDF store
 
 ## Extensibility

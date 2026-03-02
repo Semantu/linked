@@ -565,7 +565,7 @@ The base class implements all four `IQuadStore` methods (`selectQuery`, `createQ
 3. Execute via the concrete store's `executeSparqlSelect` or `executeSparqlUpdate`
 4. Map results back to DSL types (`resultMapping`)
 
-See `src/test-helpers/FusekiStore.ts` for a complete example of a concrete implementation targeting Apache Jena Fuseki.
+A minimal example implementation for Apache Jena Fuseki exists in `src/test-helpers/FusekiStore.ts`.
 
 ---
 
