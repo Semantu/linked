@@ -1210,6 +1210,20 @@ export class QueryShapeSet<
     return subQuery as any;
   }
 
+  selectAll(): SelectQueryFactory<
+    S,
+    SelectAllQueryResponse<S>,
+    QueryShapeSet<S, Source, Property>
+  > {
+    let leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
+    const propertyLabels = leastSpecificShape.shape
+      .getUniquePropertyShapes()
+      .map((propertyShape) => propertyShape.label);
+    return this.select((shape) =>
+      propertyLabels.map((label) => (shape as any)[label]),
+    );
+  }
+
   some(validation: WhereClause<S>): SetEvaluation {
     return this.someOrEvery(validation, WhereMethods.SOME);
   }
@@ -1366,6 +1380,22 @@ export class QueryShape<
     );
     subQuery.parentQueryPath = this.getPropertyPath();
     return subQuery as any;
+  }
+
+  selectAll(): SelectQueryFactory<
+    S,
+    SelectAllQueryResponse<S>,
+    QueryShape<S, Source, Property>
+  > {
+    let leastSpecificShape = getShapeClass(
+      (this.getOriginalValue() as Shape).nodeShape.id,
+    );
+    const propertyLabels = leastSpecificShape.shape
+      .getUniquePropertyShapes()
+      .map((propertyShape) => propertyShape.label);
+    return this.select((shape) =>
+      propertyLabels.map((label) => (shape as any)[label]),
+    );
   }
 
   // count(countable: QueryBuilderObject, resultKey?: string): SetSize<this> {
