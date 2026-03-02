@@ -244,6 +244,7 @@ export abstract class Shape {
     ) as Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
   }
 
+
   static update<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
     this: {new (...args: any[]): ShapeType; },
     id: string | NodeReferenceValue | QShape<ShapeType>,
