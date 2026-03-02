@@ -55,6 +55,7 @@ export type IRTraversePattern = {
   from: IRAlias;
   to: IRAlias;
   property: string;
+  filter?: IRExpression;
 };
 
 export type IRJoinPattern = {
@@ -79,8 +80,10 @@ export type IRExistsPattern = {
 
 export type IRExpression =
   | IRLiteralExpression
+  | IRReferenceExpression
   | IRAliasExpression
   | IRPropertyExpression
+  | IRContextPropertyExpression
   | IRBinaryExpression
   | IRLogicalExpression
   | IRNotExpression
@@ -93,6 +96,11 @@ export type IRLiteralExpression = {
   value: IRValue;
 };
 
+export type IRReferenceExpression = {
+  kind: 'reference_expr';
+  value: string;
+};
+
 export type IRAliasExpression = {
   kind: 'alias_expr';
   alias: IRAlias;
@@ -101,6 +109,12 @@ export type IRAliasExpression = {
 export type IRPropertyExpression = {
   kind: 'property_expr';
   sourceAlias: IRAlias;
+  property: string;
+};
+
+export type IRContextPropertyExpression = {
+  kind: 'context_property_expr';
+  contextIri: string;
   property: string;
 };
 

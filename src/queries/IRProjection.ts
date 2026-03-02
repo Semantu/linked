@@ -1,6 +1,16 @@
-import {DesugaredSelectionPath} from './IRDesugar.js';
+import {DesugaredSelectionPath, DesugaredWhere} from './IRDesugar.js';
 import {IRAliasScope} from './IRAliasScope.js';
 import {IRExpression, IRProjectionItem, IRResultMapEntry} from './IntermediateRepresentation.js';
+
+/**
+ * Callback invoked when a property step with an inline `.where()` is encountered
+ * during path lowering. The callback receives the traversal alias (target entity)
+ * and the desugared where predicate so the caller can canonicalize and lower it.
+ */
+export type InlineFilterCallback = (
+  traverseAlias: string,
+  where: DesugaredWhere,
+) => void;
 
 export type ProjectionPathLoweringOptions = {
   rootAlias: string;
@@ -32,10 +42,16 @@ export const projectionKeyFromPath = (path: DesugaredSelectionPath): string => {
 /**
  * Lowers a single desugared selection path into an IR expression,
  * creating traversal aliases for intermediate property steps.
+ *
+ * When `onInlineFilter` is provided, property steps with `.where()` will
+ * force a traversal creation and invoke the callback with the traversal
+ * alias and the where predicate. For last steps with `.where()`, an
+ * `alias_expr` is returned instead of a `property_expr`.
  */
 export const lowerSelectionPathExpression = (
   path: DesugaredSelectionPath,
   options: ProjectionPathLoweringOptions,
+  onInlineFilter?: InlineFilterCallback,
 ): IRExpression => {
   if (path.steps.length === 0) {
     return {kind: 'alias_expr', alias: options.rootAlias};
@@ -48,6 +64,16 @@ export const lowerSelectionPathExpression = (
     const isLast = i === path.steps.length - 1;
 
     if (step.kind === 'property_step') {
+      if (step.where && onInlineFilter) {
+        // Force traversal creation for step with inline where
+        currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId);
+        onInlineFilter(currentAlias, step.where);
+        if (isLast) {
+          return {kind: 'alias_expr', alias: currentAlias};
+        }
+        continue;
+      }
+
       if (isLast) {
         return {
           kind: 'property_expr',

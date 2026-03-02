@@ -96,6 +96,20 @@ const toExists = (
   return toComparison(comparison);
 };
 
+const canonicalizeComparison = (
+  comparison: DesugaredWhereComparison,
+): CanonicalWhereExpression => {
+  if (
+    comparison.operator === WhereMethods.SOME ||
+    comparison.operator === WhereMethods.EVERY ||
+    (comparison.operator as unknown as string) === 'some' ||
+    (comparison.operator as unknown as string) === 'every'
+  ) {
+    return toExists(comparison);
+  }
+  return toComparison(comparison);
+};
+
 const flattenLogical = (
   operator: 'and' | 'or',
   left: CanonicalWhereExpression,
@@ -155,7 +169,7 @@ export const canonicalizeWhere = (
   }
 
   const grouped = where as DesugaredWhereBoolean;
-  let current: CanonicalWhereExpression = toComparison(grouped.first);
+  let current: CanonicalWhereExpression = canonicalizeComparison(grouped.first);
 
   grouped.andOr.forEach((token) => {
     if (token.and) {

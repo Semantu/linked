@@ -10,6 +10,7 @@ import {
   DesugaredSelection,
   DesugaredSelectionPath,
   DesugaredStep,
+  DesugaredWhere,
   DesugaredWhereArg,
 } from './IRDesugar.js';
 import {
@@ -31,6 +32,7 @@ class LoweringContext {
   private counter = 0;
   private patterns: IRGraphPattern[] = [];
   private traverseMap = new Map<string, string>();
+  private filterMap = new Map<string, IRExpression>();
   readonly rootAlias: string;
 
   constructor() {
@@ -61,8 +63,21 @@ class LoweringContext {
     return this.nextAlias();
   }
 
+  /**
+   * Attaches an inline where filter to the traverse pattern targeting `toAlias`.
+   * The filter will be merged into the pattern when `getPatterns()` is called.
+   */
+  attachFilter(toAlias: string, filter: IRExpression): void {
+    this.filterMap.set(toAlias, filter);
+  }
+
   getPatterns(): IRGraphPattern[] {
-    return [...this.patterns];
+    return this.patterns.map((p) => {
+      if (p.kind === 'traverse' && this.filterMap.has(p.to)) {
+        return {...p, filter: this.filterMap.get(p.to)!};
+      }
+      return p;
+    });
   }
 }
 
@@ -95,14 +110,25 @@ const lowerWhereArg = (
   }
   if (arg && typeof arg === 'object') {
     if ('kind' in arg && arg.kind === 'arg_path') {
-      const argPath = arg as {kind: 'arg_path'; path: DesugaredSelectionPath};
+      const argPath = arg as {kind: 'arg_path'; subject?: ShapeReferenceValue; path: DesugaredSelectionPath};
+      if (argPath.subject && argPath.subject.id) {
+        // Context entity path — resolve property relative to the context IRI
+        const lastStep = argPath.path.steps[argPath.path.steps.length - 1];
+        if (lastStep && lastStep.kind === 'property_step') {
+          return {
+            kind: 'context_property_expr',
+            contextIri: argPath.subject.id,
+            property: lastStep.propertyShapeId,
+          };
+        }
+      }
       return lowerPath(argPath.path, options);
     }
     if (isShapeRef(arg)) {
-      return {kind: 'literal_expr', value: arg.id};
+      return {kind: 'reference_expr', value: arg.id};
     }
     if (isNodeRef(arg)) {
-      return {kind: 'literal_expr', value: (arg as NodeReferenceValue).id};
+      return {kind: 'reference_expr', value: (arg as NodeReferenceValue).id};
     }
   }
   return {kind: 'literal_expr', value: null};
@@ -296,6 +322,17 @@ export const lowerSelectQuery = (
   const projection: IRProjectionItem[] = [];
   const resultMapEntries: IRResultMapEntry[] = [];
 
+  // Inline filter handler: when a property step has `.where()`, canonicalize
+  // and lower the where predicate, then attach it to the traverse pattern.
+  const inlineFilterHandler = (traverseAlias: string, where: DesugaredWhere) => {
+    const canonical = canonicalizeWhere(where);
+    const filterExpr = lowerWhere(canonical, ctx, {
+      rootAlias: traverseAlias,
+      resolveTraversal: pathOptions.resolveTraversal,
+    });
+    ctx.attachFilter(traverseAlias, filterExpr);
+  };
+
   for (const seed of projectionSeeds) {
     const key = seed.kind === 'path'
       ? (seed.key || projectionKeyFromPath(seed.path))
@@ -304,7 +341,7 @@ export const lowerSelectQuery = (
     projection.push({
       alias,
       expression: seed.kind === 'path'
-        ? lowerSelectionPathExpression(seed.path, pathOptions)
+        ? lowerSelectionPathExpression(seed.path, pathOptions, inlineFilterHandler)
         : seed.expression,
     });
     resultMapEntries.push({
