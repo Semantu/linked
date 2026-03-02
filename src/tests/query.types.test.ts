@@ -1,56 +1,6 @@
 import {describe, test} from '@jest/globals';
-import {Shape} from '../shapes/Shape';
-import {SelectQueryFactory} from '../queries/SelectQuery';
-import {IQueryParser} from '../interfaces/IQueryParser';
-import {DeleteResponse} from '../queries/DeleteQuery';
-import {CreateResponse} from '../queries/CreateQuery';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
-import {UpdateQueryFactory} from '../queries/UpdateQuery';
-import {CreateQueryFactory} from '../queries/CreateQuery';
-import {DeleteQueryFactory} from '../queries/DeleteQuery';
-import {NodeId} from '../queries/MutationQuery';
 import {Dog, Person, Pet, queryFactories} from '../test-helpers/query-fixtures';
 import {setQueryContext} from '../queries/QueryContext';
-
-class QueryCaptureStore implements IQueryParser {
-  async selectQuery<ResultType>(query: SelectQueryFactory<Shape>) {
-    query.getQueryObject();
-    return [] as ResultType;
-  }
-
-  async createQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<CreateResponse<U>> {
-    const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    factory.getQueryObject();
-    return {} as CreateResponse<U>;
-  }
-
-  async updateQuery<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    id: string | NodeReferenceValue,
-    updateObjectOrFn: U,
-    shapeClass: typeof Shape,
-  ): Promise<AddId<U>> {
-    const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    factory.getQueryObject();
-    return {} as AddId<U>;
-  }
-
-  async deleteQuery(
-    id: NodeId | NodeId[] | NodeReferenceValue[],
-    shapeClass: typeof Shape,
-  ): Promise<DeleteResponse> {
-    const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
-    const factory = new DeleteQueryFactory(shapeClass, ids);
-    factory.getQueryObject();
-    return {deleted: [], count: 0};
-  }
-}
-
-Person.queryParser = new QueryCaptureStore();
-Pet.queryParser = Person.queryParser;
-Dog.queryParser = Person.queryParser;
 
 const expectType = <T>(_value: T) => _value;
 
@@ -205,6 +155,16 @@ describe.skip('query result type inference (compile only)', () => {
     expectType<string | undefined>(first.id);
   });
 
+  test('select all properties of the shape', () => {
+    const promise = queryFactories.selectAllProperties();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | undefined>(first.id);
+    expectType<string | null | undefined>(first.name);
+    type HasNodeShape = 'nodeShape' extends keyof typeof first ? true : false;
+    expectType<false>(null as unknown as HasNodeShape);
+  });
+
   test('empty select with where', () => {
     const promise = queryFactories.selectWhereNameSemmy();
     type Result = Awaited<typeof promise>;
@@ -324,6 +284,24 @@ describe.skip('query result type inference (compile only)', () => {
     const first = (null as unknown as Result)[0];
     expectType<string | null | undefined>(first.friends[0].name);
     expectType<string | null | undefined>(first.friends[0].hobby);
+  });
+
+  test('sub select all properties on a shape set', () => {
+    const promise = queryFactories.subSelectAllProperties();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | undefined>(first.friends[0].id);
+    expectType<string | null | undefined>(first.friends[0].name);
+    expectType<string | null | undefined>(first.friends[0].hobby);
+  });
+
+  test('sub select all properties on a single shape', () => {
+    const promise = queryFactories.subSelectAllPropertiesSingle();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | undefined>(first.bestFriend.id);
+    expectType<string | null | undefined>(first.bestFriend.name);
+    expectType<string | null | undefined>(first.bestFriend.hobby);
   });
 
   test('double nested sub select', () => {

@@ -42,7 +42,10 @@
     "build": "npx rimraf ./lib && npx tsc -p tsconfig-cjs.json && npx tsc -p tsconfig-esm.json && node ./scripts/dual-package.js",
     "compile": "echo '💫 Compiling CJS' && npx tsc -p tsconfig-cjs.json && echo '💫 Compiling ESM' && npx tsc -p tsconfig-esm.json",
     "dual-package": "node ./scripts/dual-package.js",
-    "test": "npx jest --config jest.config.js"
+    "sync:agents": "node ./scripts/sync-agents.mjs",
+    "setup": "npm run sync:agents",
+    "test": "npx jest --config jest.config.js",
+    "test:fuseki": "docker compose -f src/tests/docker-compose.test.yml up -d --wait && npx jest --config jest.config.js --testPathPattern='sparql-fuseki' --verbose; EXIT=$?; docker compose -f src/tests/docker-compose.test.yml down; exit $EXIT"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",
@@ -56,6 +59,7 @@
     "typescript": "^5.7.3"
   },
   "dependencies": {
-    "next-tick": "^1.1.0"
+    "next-tick": "^1.1.0",
+    "ulid": "^3.0.2"
   }
 }

@@ -21,6 +21,7 @@ import * as DeleteQuery from './queries/DeleteQuery.js';
 import * as CreateQuery from './queries/CreateQuery.js';
 import * as QueryParser from './queries/QueryParser.js';
 import * as QueryFactory from './queries/QueryFactory.js';
+import * as IntermediateRepresentation from './queries/IntermediateRepresentation.js';
 import * as NameSpace from './utils/NameSpace.js';
 import * as ShapeClass from './utils/ShapeClass.js';
 import * as cached from './utils/cached.js';
@@ -35,6 +36,7 @@ import * as shacl from './ontologies/shacl.js';
 import * as lincd from './ontologies/lincd.js';
 import * as owl from './ontologies/owl.js';
 import * as npm from './ontologies/npm.js';
+import * as Sparql from './sparql/index.js';
 import nextTick from 'next-tick';
 export {nextTick};
 
@@ -64,6 +66,7 @@ export function initModularApp() {
     CreateQuery,
     QueryParser,
     QueryFactory,
+    IntermediateRepresentation,
     SHACLShapes,
     rdf,
     rdfs,
@@ -72,6 +75,7 @@ export function initModularApp() {
     lincd,
     owl,
     npm,
+    Sparql,
   };
   var lincdExport = {};
   for (let fileKey in publicFiles) {

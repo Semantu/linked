@@ -1,4 +1,3 @@
-import {LinkedQuery} from './SelectQuery.js';
 import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {Shape} from '../shapes/Shape.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
@@ -21,9 +20,6 @@ type _AddId<U> = U extends string | number | boolean | Date | null | undefined
     : WithId<U>;
 
 type RemoveId<U> = Omit<U, 'id'>;
-// type WithId<U> = {
-//   [K in keyof U]-?: _AddId<U[K]>; // Make all fields required
-// } & { id: string };
 
 type WithId<U> = U & {id: string};
 
@@ -58,20 +54,6 @@ type IsPlainObject<T> = T extends object
                   ? true
                   : false
   : false;
-
-// type X = [{
-//   id:string
-// },{
-//   id:string
-// },{
-//   name:string
-// }];
-// type OfX<X> = Prettify<{
-//   updatedTo:(X extends Array<infer U> ? U : X)[]
-// }>;
-// type Y = OfX<X>;
-// let x:Y;
-// let name = x.updatedTo[0].name;
 
 type RecursiveTransform<T, IsCreate = false> = T extends
   | string
@@ -117,53 +99,7 @@ type ModifiedSet<T, IsCreate = false> = {
 export type AddId<T, IsCreate = false> = Prettify<
   RecursiveTransform<T, IsCreate>
 >;
-// export type AddId<T> = Prettify<_AddId<T>>;
-// type _AddId<T> = T extends Array<infer U>
-//   ? Array<AddId<U>>
-//   : T extends Record<string, any> // Record checks for plain objects, hence we exclude dates and other objects that extend Object
-//     ? WithId<T>
-//     : T;
-//
-//
-// /**
-//  * Makes all keys optional and adds an id property.
-//  */
-// type WithId<T> = {
-//   [K in keyof T]-?: AddId<T[K]>; // Recursively apply AddId to all properties
-// } & { id: string };
 
-// export type AddId<U> = Prettify<U extends String ? U :
-//     U extends Number ? U :
-//       U extends Date ? U :
-//        U extends Boolean ? U :
-//        U extends null ? U :
-//        U extends undefined ? U :
-//          U extends Array<infer T> ? Array<AddId<CombineTypes<T>>> : WithId<U>>;
-//
-//
-// type WithId<U> = {[K in keyof U]: AddId<U[K]>} & {id:string};
-//
-// type UnionToIntersection<U> =
-//   (U extends any ? (k: U) => void : never) extends
-//     ((k: infer I) => void) ? I : never;
-//
-//
-// type CombineTypes<T> = {
-//   [K in keyof UnionToIntersection<T>]: T extends { [P in K]?: infer V }
-//     ? AddId<V>
-//     : never;
-// };
-// type CombineTypes<T> = Partial<{
-//   [K in keyof UnionToIntersection<T>]: T extends { [P in K]?: infer V } ? V : never;
-// }>;
-
-// type Prettify<T> = { [K in keyof T]: T[K] };
-
-// type RemoveUndefinedKeys<T> = {
-//   [K in keyof T as T[K] extends undefined ? never : K]: T[K];
-// };
-
-// type UpdatePartial<Shape> = WithoutFunctions<Shape>;
 export type UpdatePartial<S = Shape> =
   | UpdateNodeDescription<S>
   | NodeReferenceValue;
@@ -177,12 +113,10 @@ type UpdateNodeDescription<Shape> = Partial<
     'node' | 'nodeShape' | 'namedNode' | 'targetClass'
   >
 >;
-// type AvailableUpdateKeys<Shape> = Omit<KeysWithoutFunctions<Shape>,'nodeShape'|'node'|'namedNode'>
 type KeysWithoutFunctions<T> = {
   [K in keyof T]: T[K] extends Function ? never : K;
 }[keyof T];
 
-// type ShapePropertyToUpdatePartial<ShapeProperty> = ShapeProperty;
 type ShapePropValueToUpdatePartial<ShapeProperty> = ShapeProperty extends Shape
   ? UpdatePartial<ShapeProperty>
   : ShapeProperty extends ShapeSet<infer SSType>
@@ -229,11 +163,7 @@ export type ShapeReferenceValue = {id: string; shape: NodeReferenceValue};
 export {toNodeReference} from '../utils/NodeReference.js';
 export type {NodeReferenceValue};
 
-export abstract class QueryFactory {
-  getQueryObject(): LinkedQuery | Promise<LinkedQuery> {
-    return null;
-  }
-}
+export abstract class QueryFactory {}
 
 export function isSetModificationValue(
   value: any,

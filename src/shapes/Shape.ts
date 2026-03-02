@@ -14,9 +14,10 @@ import {
   QueryBuildFn,
   QueryResponseToResultType,
   QueryShape,
+  SelectAllQueryResponse,
   SelectQueryFactory,
 } from '../queries/SelectQuery.js';
-import type {IQueryParser} from '../interfaces/IQueryParser.js';
+import {QueryParser} from '../queries/QueryParser.js';
 import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
 import {CreateResponse} from '../queries/CreateQuery.js';
 import {DeleteResponse} from '../queries/DeleteQuery.js';
@@ -41,7 +42,6 @@ export type ShapeType<S extends Shape = Shape> = (abstract new (
 
 export abstract class Shape {
   static targetClass: NodeReferenceValue = null;
-  static queryParser: IQueryParser;
   static shape: NodeShape;
   static typesToShapes: Map<string, Set<typeof Shape>> = new Map();
 
@@ -126,7 +126,7 @@ export abstract class Shape {
     S = unknown,
     ResultType = QueryResponseToResultType<S, ShapeType>[],
   >(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
+    this: {new (...args: any[]): ShapeType; },
     selectFn: QueryBuildFn<ShapeType, S>,
   ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
   static select<
@@ -136,10 +136,9 @@ export abstract class Shape {
       GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
       ShapeType
     >[],
-  >(this: {
-    new (...args: any[]): ShapeType;
-    queryParser: IQueryParser;
-  }): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  >(
+    this: {new (...args: any[]): ShapeType},
+  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
   static select<
     ShapeType extends Shape,
     S = unknown,
@@ -148,7 +147,7 @@ export abstract class Shape {
       ShapeType
     >,
   >(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
+    this: {new (...args: any[]): ShapeType; },
     subjects?: ShapeType | QResult<ShapeType>,
     selectFn?: QueryBuildFn<ShapeType, S>,
   ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
@@ -160,7 +159,7 @@ export abstract class Shape {
       ShapeType
     >[],
   >(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
+    this: {new (...args: any[]): ShapeType; },
     subjects?: ICoreIterable<ShapeType> | QResult<ShapeType>[],
     selectFn?: QueryBuildFn<ShapeType, S>,
   ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
@@ -172,7 +171,7 @@ export abstract class Shape {
       ShapeType
     >[],
   >(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
+    this: {new (...args: any[]): ShapeType; },
     targetOrSelectFn?: ShapeType | QueryBuildFn<ShapeType, S>,
     selectFn?: QueryBuildFn<ShapeType, S>,
   ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType> {
@@ -192,8 +191,7 @@ export abstract class Shape {
     );
     let p = new Promise<ResultType>((resolve, reject) => {
       nextTick(() => {
-        this.queryParser
-          .selectQuery(query)
+        QueryParser.selectQuery(query)
           .then((result) => {
             resolve(result as ResultType);
           })
@@ -205,12 +203,54 @@ export abstract class Shape {
     return query.patchResultPromise<ResultType>(p);
   }
 
+  /**
+   * Select all decorated properties of this shape.
+   * Returns a single result if a single subject is provided, or an array of results if no subject is provided.
+   */
+  static selectAll<
+    ShapeType extends Shape,
+    ResultType = QueryResponseToResultType<
+      SelectAllQueryResponse<ShapeType>,
+      ShapeType
+    >[],
+  >(
+    this: {new (...args: any[]): ShapeType; },
+  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  static selectAll<
+    ShapeType extends Shape,
+    ResultType = QueryResponseToResultType<
+      SelectAllQueryResponse<ShapeType>,
+      ShapeType
+    >,
+  >(
+    this: {new (...args: any[]): ShapeType; },
+    subject: ShapeType | QResult<ShapeType>,
+  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  static selectAll<
+    ShapeType extends Shape,
+    ResultType = QueryResponseToResultType<
+      SelectAllQueryResponse<ShapeType>,
+      ShapeType
+    >[],
+  >(
+    this: {new (...args: any[]): ShapeType; },
+    subject?: ShapeType | QResult<ShapeType>,
+  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType> {
+    const propertyLabels = (this as any)
+      .shape.getUniquePropertyShapes()
+      .map((propertyShape: PropertyShape) => propertyShape.label);
+    return (this as any).select(subject as any, (shape: ShapeType) =>
+      propertyLabels.map((label) => (shape as any)[label]),
+    ) as Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  }
+
+
   static update<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
+    this: {new (...args: any[]): ShapeType; },
     id: string | NodeReferenceValue | QShape<ShapeType>,
     updateObjectOrFn?: U,
   ): Promise<AddId<U>> {
-    return this.queryParser.updateQuery(
+    return QueryParser.updateQuery(
       id,
       updateObjectOrFn,
       this as any as typeof Shape,
@@ -218,20 +258,20 @@ export abstract class Shape {
   }
 
   static create<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
+    this: {new (...args: any[]): ShapeType; },
     updateObjectOrFn?: U,
   ): Promise<CreateResponse<U>> {
-    return this.queryParser.createQuery(
+    return QueryParser.createQuery(
       updateObjectOrFn,
       this as any as typeof Shape,
     );
   }
 
   static delete<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    this: {new (...args: any[]): ShapeType; queryParser: IQueryParser},
+    this: {new (...args: any[]): ShapeType; },
     id: NodeId | NodeId[] | NodeReferenceValue[],
   ): Promise<DeleteResponse> {
-    return this.queryParser.deleteQuery(id, this as any as typeof Shape);
+    return QueryParser.deleteQuery(id, this as any as typeof Shape);
   }
 
   static mapPropertyShapes<ShapeType extends Shape, ResponseType = unknown>(

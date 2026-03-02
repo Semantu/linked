@@ -7,6 +7,18 @@ import {CoreMap} from '../collections/CoreMap.js';
 import {getPropertyShapeByLabel,getShapeClass} from '../utils/ShapeClass.js';
 import {NodeReferenceValue,Prettify,QueryFactory,ShapeReferenceValue} from './QueryFactory.js';
 import {xsd} from '../ontologies/xsd.js';
+import {
+  buildSelectQuery,
+} from './IRPipeline.js';
+import {QueryParser} from './QueryParser.js';
+import type {RawSelectInput} from './IRDesugar.js';
+import type {IRSelectQuery} from './IntermediateRepresentation.js';
+
+/**
+ * The canonical SelectQuery type — an IR AST node representing a select query.
+ * This is the type received by IQuadStore.selectQuery().
+ */
+export type SelectQuery = IRSelectQuery;
 
 /**
  * ###################################
@@ -57,38 +69,12 @@ export type SortByPath = {
   direction: 'ASC' | 'DESC';
 };
 
-/**
- * A LinkedQuery is used to build a query, when complete it can be turned into a LinkedQueryObject
- * that is used to send across the network as it can be serialized to JSON
- * @todo add | UpdateQuery and others
- */
-export interface LinkedQuery {
-  type: string;
-}
-
 export type SubQueryPaths = SelectPath;
 
 /**
  * A QueryPath is an array of QuerySteps, representing the path of properties that were requested to reach a certain value
  */
 export type QueryPath = (QueryStep | SubQueryPaths)[] | WherePath;
-
-/**
- * A plain JS object that represents a LinkedQuery created by a Shape.select(...) call
- * It can be sent across the network.
- * @see LinkedQuery
- */
-export interface SelectQuery<S extends Shape = Shape, ResultType = any>
-  extends LinkedQuery {
-  select: SelectPath;
-  where?: WherePath;
-  sortBy?: SortByPath;
-  subject?: S | QResult<S>;
-  limit?: number;
-  offset?: number;
-  shape?: ShapeType<S>;
-  singleResult?: boolean;
-}
 
 /**
  * Much like a querypath, except it can only contain QuerySteps
@@ -119,8 +105,7 @@ export type WhereAndOr = {
 };
 
 /**
- * A WhereQuery is a (sub)query that is used to filter down the results of its parent query
- * Hence it extends LinkedQuery and can do anything a normal query can
+ * A WhereQuery is a (sub)query that is used to filter down the results of its parent query.
  */
 export type AndOrQueryToken = {
   and?: WherePath;
@@ -143,6 +128,18 @@ export type QueryShapeProps<
 > = {
   [P in keyof T]: ToQueryBuilderObject<T[P], QShape<T, Source, Property>, P>;
 };
+
+export type SelectAllQueryResponse<T extends Shape> = Array<
+  QueryShapeProps<T, null, ''>[Exclude<
+    Extract<
+      {
+        [K in keyof T]-?: T[K] extends (...args: any[]) => any ? never : K;
+      }[keyof T],
+      string
+    >,
+    Extract<keyof Shape, string>
+  >]
+>;
 
 /**
  * This type states that the ShapeSet has access to the same methods as the shape of all the items in the set
@@ -923,23 +920,29 @@ export class BoundComponent<
       }
     }
     throw new Error(
-      'Unknown data query type. Expected a LinkedQuery (from Shape.query()) or an object with 1 key whose value is a LinkedQuery',
+      'Unknown data query type. Expected a SelectQueryFactory (from Shape.query()) or an object with 1 key whose value is a SelectQueryFactory',
     );
   }
 
   getPropertyPath() {
     let sourcePath: ComponentQueryPath = this.source.getPropertyPath();
     let requestQuery = this.getParentQueryFactory();
-    let compSelectQuery = requestQuery.getQueryObject().select;
+    let compSelectQuery: SelectPath = requestQuery.getQueryPaths();
 
     if (Array.isArray(sourcePath)) {
-      sourcePath.push(
-        compSelectQuery.length === 1
-          ? compSelectQuery[0].length === 1
-            ? compSelectQuery[0][0]
-            : compSelectQuery[0]
-          : compSelectQuery,
-      );
+      if (Array.isArray(compSelectQuery)) {
+        // QueryPath[] — unwrap single-element arrays for compact representation
+        const unwrapped =
+          compSelectQuery.length === 1
+            ? Array.isArray(compSelectQuery[0]) && compSelectQuery[0].length === 1
+              ? compSelectQuery[0][0]
+              : compSelectQuery[0]
+            : compSelectQuery;
+        sourcePath.push(unwrapped as QueryStep | SubQueryPaths);
+      } else {
+        // CustomQueryObject
+        sourcePath.push(compSelectQuery);
+      }
     }
     return sourcePath as QueryPropertyPath;
   }
@@ -1207,6 +1210,20 @@ export class QueryShapeSet<
     return subQuery as any;
   }
 
+  selectAll(): SelectQueryFactory<
+    S,
+    SelectAllQueryResponse<S>,
+    QueryShapeSet<S, Source, Property>
+  > {
+    let leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
+    const propertyLabels = leastSpecificShape.shape
+      .getUniquePropertyShapes()
+      .map((propertyShape) => propertyShape.label);
+    return this.select((shape) =>
+      propertyLabels.map((label) => (shape as any)[label]),
+    );
+  }
+
   some(validation: WhereClause<S>): SetEvaluation {
     return this.someOrEvery(validation, WhereMethods.SOME);
   }
@@ -1365,6 +1382,22 @@ export class QueryShape<
     return subQuery as any;
   }
 
+  selectAll(): SelectQueryFactory<
+    S,
+    SelectAllQueryResponse<S>,
+    QueryShape<S, Source, Property>
+  > {
+    let leastSpecificShape = getShapeClass(
+      (this.getOriginalValue() as Shape).nodeShape.id,
+    );
+    const propertyLabels = leastSpecificShape.shape
+      .getUniquePropertyShapes()
+      .map((propertyShape) => propertyShape.label);
+    return this.select((shape) =>
+      propertyLabels.map((label) => (shape as any)[label]),
+    );
+  }
+
   // count(countable: QueryBuilderObject, resultKey?: string): SetSize<this> {
   //   return new SetSize(this, countable, resultKey);
   //   // return this._count;
@@ -1442,15 +1475,6 @@ export class Evaluation {
 }
 
 class SetEvaluation extends Evaluation {}
-
-// class QueryBoolean extends QueryBuilderObject<boolean> {
-//   constructor(
-//     property?: PropertyShape,
-//     subject?: QueryShape<any> | QueryShapeSet<any>,
-//   ) {
-//     super(property, subject);
-//   }
-// }
 
 /**
  * The class that is used for when JS primitives are converted to a QueryValue
@@ -1691,45 +1715,38 @@ export class SelectQueryFactory<
   }
 
   exec(): Promise<QueryResponseToResultType<ResponseType>[]> {
-    return Shape.queryParser.selectQuery(this);
+    return QueryParser.selectQuery(this);
   }
 
   /**
-   * Turns the LinkedQuery into a SelectQuery, which is a plain JS object that can be serialized to JSON
+   * Returns the raw pipeline input for this query.
+   * Used internally by build() and by test helpers that need
+   * to feed factory state into individual pipeline stages.
    */
-  getQueryObject(): SelectQuery<S> {
-    try {
-      let queryPaths = this.getQueryPaths();
-      let selectQuery = {
-        type: 'select',
-        select: queryPaths,
-        subject: this.getSubject(),
-        limit: this.limit,
-        offset: this.offset,
-        shape: this.shape,
-        sortBy: this.getSortByPath(),
-        //the query is selecting a single result if it explicitly requested it, or if the subject is a specific subject (with a URI or ID)
-        singleResult:
-          this.singleResult ||
-          !!(
-            this.subject &&
-            ('id' in (this.subject as S) || 'id' in (this.subject as QResult<S>))
-          ),
-      } as SelectQuery<S>;
-
-      if (this.wherePath) {
-        selectQuery.where = this.wherePath;
-      }
-      return selectQuery;
-    } catch (err) {
-      console.error('Error in getQueryObject', err);
-      throw err;
+  toRawInput(): RawSelectInput {
+    const input: RawSelectInput = {
+      select: this.getQueryPaths(),
+      subject: this.getSubject(),
+      limit: this.limit,
+      offset: this.offset,
+      shape: this.shape,
+      sortBy: this.getSortByPath() as SortByPath | undefined,
+      singleResult:
+        this.singleResult ||
+        !!(
+          this.subject &&
+          ('id' in (this.subject as S) || 'id' in (this.subject as QResult<S>))
+        ),
+    };
+    if (this.wherePath) {
+      input.where = this.wherePath;
     }
+    return input;
   }
 
-  // applyTo(subject) {
-  //   return new LinkedQuery(this.shape, this.queryBuildFn, subject);
-  // }
+  build(): SelectQuery {
+    return buildSelectQuery(this.toRawInput());
+  }
 
   getSubject() {
     //if the subject is a QueryShape which comes from query context
@@ -1820,7 +1837,7 @@ export class SelectQueryFactory<
   }
 
   isValidResult(qResult: QResult<any>) {
-    let select = this.getQueryObject().select;
+    let select = this.getQueryPaths();
     if (Array.isArray(select)) {
       return this.isValidQueryPathsResult(qResult, select);
     } else if (typeof select === 'object') {

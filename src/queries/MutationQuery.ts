@@ -38,7 +38,6 @@ export class MutationQueryFactory extends QueryFactory {
   }
 
   protected isSetModification(obj, shape) {
-    // return obj.add || obj.remove;
     let hasAdd = obj.add;
     let hasRemove = obj.remove;
     let numKeysExpected = (hasAdd ? 1 : 0) + (hasRemove ? 1 : 0);
@@ -112,6 +111,11 @@ export class MutationQueryFactory extends QueryFactory {
       id = obj.__id.toString();
       //but we should not include it in the fields
       delete obj.__id;
+    } else if (obj && 'id' in obj) {
+      //if the object has an id key alongside other data properties,
+      //treat it as a nested create with a predefined ID
+      id = (obj as any).id.toString();
+      delete (obj as any).id;
     }
     for (var key in obj) {
       let propShape = props.find((p) => p.label === key);
@@ -222,34 +226,15 @@ export class MutationQueryFactory extends QueryFactory {
         } else {
           return this.convertNodeDescription(value, valueShape);
         }
-        // //check if the property shape allows a single value
-        // if(propShape.maxCount === 1) {
-        //   //if yes, then the object should be seen as a node description
-        //   return this.convertNodeDescription(value,propShape.valueShape);
-        // } else {
-        //   if(this.isSetModification(value,propShape)) {
-        //     //but if multiple values are allowed, the value should either be an Array of node descriptions
-        //     //OR an object with add or remove keys
-        //     return this.convertSetModification(value,propShape);
-        //   } else {
-        //     //it must be a set overwrite, and it must be coming from an array
-        //     if(!allowArrays) {
-        //       return this.convertNodeDescription(value,propShape.valueShape);
-        //     } else {
-        //       throw new Error("Invalid array value. Should be a node reference or node description")
-        //     }
-        //   }
-        // }
       }
     }
     throw new Error(`Unsupported update value type: ${typeof value}`);
   }
 
   protected isNodeReference(obj): obj is NodeReferenceValue {
-    //check if obj is an object with an id property
-    //if yes, all other properties are ignored
-    return typeof obj === 'object' && obj !== null && 'id' in obj; // && Object.keys(obj).length === 1);
-    //and id is the only property
+    //check if obj is an object with only an id property
+    //if additional data properties are present, it's a nested create with predefined ID
+    return typeof obj === 'object' && obj !== null && 'id' in obj && Object.keys(obj).length === 1;
   }
 
   protected convertNodeReferences(

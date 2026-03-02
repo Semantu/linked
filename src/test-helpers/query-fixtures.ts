@@ -31,8 +31,11 @@ export const hasPet = prop('hasPet');
 export const guardDogLevel = prop('guardDogLevel');
 export const pluralTestProp = prop('pluralTestProp');
 export const personClass = type('Person');
+export const employeeClass = type('Employee');
 export const petClass = type('Pet');
 export const dogClass = type('Dog');
+export const employeeName = prop('employeeName');
+export const employeeDepartment = prop('employeeDepartment');
 
 @linkedShape
 export class Pet extends Shape {
@@ -109,6 +112,26 @@ export class Person extends Shape {
   }
 }
 
+@linkedShape
+export class Employee extends Person {
+  static targetClass = employeeClass;
+
+  @literalProperty({path: employeeName, maxCount: 1})
+  get name(): string {
+    return '';
+  }
+
+  @objectProperty({path: bestFriend, maxCount: 1, shape: Employee})
+  get bestFriend(): Employee {
+    return null;
+  }
+
+  @literalProperty({path: employeeDepartment, maxCount: 1})
+  get department(): string {
+    return '';
+  }
+}
+
 const componentQuery = Person.query((p) => ({name: p.name}));
 const componentLike = {query: componentQuery};
 
@@ -171,6 +194,7 @@ export const queryFactories = {
     Person.select((p) =>
       p.friends.where((f) => f.name.equals('Jinx').or(f.hobby.equals('Jogging'))),
     ),
+  selectAllProperties: () => Person.selectAll(),
   selectAll: () => Person.select(),
   selectWhereNameSemmy: () =>
     Person.select().where((p) => p.name.equals('Semmy')),
@@ -231,6 +255,10 @@ export const queryFactories = {
         p2.bestFriend.select((p3) => ({name: p3.name})),
       ),
     ),
+  subSelectAllProperties: () =>
+    Person.select((p) => p.friends.selectAll()),
+  subSelectAllPropertiesSingle: () =>
+    Person.select((p) => p.bestFriend.selectAll()),
   subSelectAllPrimitives: () =>
     Person.select((p) =>
       p.bestFriend.select((f) => [f.name, f.birthDate, f.isRealPerson]),
@@ -310,4 +338,5 @@ export const queryFactories = {
   updateBirthDate: () => Person.update(entity('p1'), updateBirthDate),
   preloadBestFriend: () =>
     Person.select((p) => p.bestFriend.preloadFor(componentLike)),
+  selectAllEmployeeProperties: () => Employee.selectAll(),
 };

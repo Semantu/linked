@@ -1,11 +1,12 @@
 # @_linked/core
 Core Linked package for the query DSL, SHACL shape decorators/metadata, and package registration.
 
-Linked core gives you a type-safe, schema-parameterized query language and SHACL-driven Shape classes for linked data. It compiles queries into a plain JS query object that can be executed by a store.
+Linked core gives you a type-safe, schema-parameterized query language and SHACL-driven Shape classes for linked data. It compiles queries into a normalized [Intermediate Representation (IR)](./documentation/intermediate-representation.md) that can be executed by any store.
 
 ## Linked core offers
 
 - **Schema-Parameterized Query DSL**: TypeScript-embedded queries driven by your Shape definitions.
+- **Fully Inferred Result Types**: The TypeScript return type of every query is automatically inferred from the selected paths — no manual type annotations needed. Select `p.name` and get `{id: string; name: string}[]`. Select `p.friends.name` and get nested result types. This works for all operations: select, create, update, and delete.
 - **Shape Classes (SHACL)**: TypeScript classes that generate SHACL shape metadata.
 - **Object-Oriented Data Operations**: Query, create, update, and delete data using the same Shape-based API.
 - **Storage Routing**: `LinkedStorage` routes query objects to your configured store(s) that implement `IQuadStore`.
@@ -17,15 +18,150 @@ Linked core gives you a type-safe, schema-parameterized query language and SHACL
 npm install @_linked/core
 ```
 
-```typescript
-import {Shape, LinkedStorage} from '@_linked/core';
-import {linkedPackage} from '@_linked/core/utils/Package';
+## Repository setup (contributors)
+
+After cloning this repository, run:
+
+```bash
+npm install
+npm run setup
 ```
+
+`npm run setup` syncs `docs/agents` into local folders for agent tooling:
+
+- `.claude/agents`
+- `.agents/agents`
 
 ## Related packages
 
 - `@_linked/rdf-mem-store`: in-memory RDF store that implements `IQuadStore`.
 - `@_linked/react`: React bindings for Linked queries and shapes.
+
+## Documentation
+
+- [Intermediate Representation (IR)](./documentation/intermediate-representation.md)
+- [SPARQL Algebra Layer](./documentation/sparql-algebra.md)
+
+## How Linked works — from shapes to query results
+
+Linked turns TypeScript classes into a type-safe query pipeline. Here is the full flow, traced through a single example:
+
+```
+Shape class → DSL query → IR (AST) → Target query language → Execute → Map results
+```
+
+### 1. SHACL shapes from TypeScript classes
+
+Shape classes use decorators to generate SHACL metadata. These shapes define the data model, drive the DSL's type safety, and can be synced to a store for runtime data validation.
+
+```typescript
+@linkedShape
+export class Person extends Shape {
+  static targetClass = schema('Person');
+
+  @literalProperty({path: schema('name'), maxCount: 1})
+  get name(): string { return ''; }
+
+  @objectProperty({path: schema('knows'), shape: Person})
+  get friends(): ShapeSet<Person> { return null; }
+}
+```
+
+### 2. Type-safe query DSL with inferred result types
+
+The DSL uses these shape classes to provide compile-time checked queries. You cannot write a query that references a property not defined on the shape. The result type is **fully inferred** from the selected paths — no manual type annotations needed:
+
+```typescript
+// TypeScript infers: Promise<{id: string; name: string}[]>
+const result = await Person.select(p => p.name);
+
+// TypeScript infers: Promise<{id: string; friends: {id: string; name: string}[]}[]>
+const nested = await Person.select(p => p.friends.name);
+```
+
+### 3. SHACL-based Intermediate Representation (IR)
+
+The DSL compiles to a backend-agnostic AST — the [Intermediate Representation](./documentation/intermediate-representation.md). This is the contract between the DSL and any store implementation.
+
+```json
+{
+  "kind": "select",
+  "root": { "kind": "shape_scan", "shape": ".../Person", "alias": "a0" },
+  "projection": [
+    { "alias": "a1", "expression": { "kind": "property_expr", "sourceAlias": "a0", "property": ".../name" } }
+  ],
+  "resultMap": [{ "key": ".../name", "alias": "a1" }]
+}
+```
+
+The IR uses full SHACL-derived URIs for shapes and properties. Any store that implements `IQuadStore` receives these IR objects and translates them into its native query language.
+
+### 4. IR → SPARQL Algebra
+
+For SPARQL-backed stores, the IR is converted into a formal [SPARQL algebra](./documentation/sparql-algebra.md) — a tree of typed nodes aligned with the SPARQL 1.1 specification.
+
+```
+SparqlSelectPlan {
+  projection: [?a0, ?a0_name]
+  algebra: LeftJoin(
+    BGP(?a0 rdf:type <Person>),
+    BGP(?a0 <name> ?a0_name)       ← wrapped in OPTIONAL
+  )
+}
+```
+
+Properties are wrapped in `LeftJoin` (OPTIONAL) so missing values don't eliminate result rows.
+
+### 5. SPARQL Algebra → SPARQL string
+
+The algebra is a plain data structure — stores can inspect or optimize it before serialization (e.g., rewriting patterns, adding graph clauses, or pruning redundant joins).
+
+The algebra tree is then serialized into a SPARQL query string with automatic PREFIX generation:
+
+```sparql
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <.../Person> .
+  OPTIONAL {
+    ?a0 <.../name> ?a0_name .
+  }
+}
+```
+
+### 6. Execute and map results
+
+The SPARQL endpoint returns JSON results, which are mapped back into typed result objects:
+
+```
+Endpoint returns:                        Mapped to:
+┌──────────┬──────────┐                  ┌──────────────────────────────┐
+│ a0       │ a0_name  │                  │ { id: ".../p1", name: "Semmy" } │
+│ .../p1   │ "Semmy"  │        →         │ { id: ".../p2", name: "Moa"   } │
+│ .../p2   │ "Moa"    │                  │ ...                          │
+└──────────┴──────────┘                  └──────────────────────────────┘
+```
+
+Values are automatically coerced: `xsd:boolean` → `boolean`, `xsd:integer` → `number`, `xsd:dateTime` → `Date`. Nested traversals are grouped and deduplicated into nested result objects.
+
+### The SparqlStore base class
+
+`SparqlStore` handles this entire pipeline. Concrete stores only implement the transport:
+
+```typescript
+import { SparqlStore } from '@_linked/core/sparql';
+
+class MyStore extends SparqlStore {
+  protected async executeSparqlSelect(sparql: string) {
+    // Send SPARQL to your endpoint, return JSON results
+  }
+  protected async executeSparqlUpdate(sparql: string) {
+    // Send SPARQL UPDATE to your endpoint
+  }
+}
+```
+
+See the [SPARQL Algebra Layer docs](./documentation/sparql-algebra.md) for the full type reference, conversion algorithm, and store implementation guide.
 
 ## Linked Package Setup
 
@@ -85,41 +221,35 @@ export class Person extends Shape {
 ## Queries: Create, Select, Update, Delete
 
 Queries are expressed with the same Shape classes and compile to a query object that a store executes.
+Use this section as a quick start. Detailed query variations are documented in `Query examples` below.
 
+A few quick examples:
+
+**1) Select one field for all matching nodes**
 ```typescript
-/* Result: Array<{id: string; name: string}> */
 const names = await Person.select((p) => p.name);
+/* names: {id: string; name: string}[] */
+```
 
+**2) Select all decorated fields of nested related nodes**
+```typescript
+const allFriends = await Person.select((p) => p.knows.selectAll());
+/* allFriends: {
+  id?: string; 
+  knows: {
+    id?: string; 
+    ...all decorated Person fields...
+  }[]
+	}[] */
+```
+
+**3) Apply a simple mutation**
+```typescript
 const myNode = {id: 'https://my.app/node1'};
-/* Result: {id: string; name: string} | null */
-const person = await Person.select(myNode, (p) => p.name);
-const missing = await Person.select({id: 'https://my.app/missing'}, (p) => p.name); // null
-
-/* Result: {id: string} & UpdatePartial<Person> */
-const created = await Person.create({
-  name: 'Alice',
-  knows: [{id: 'https://my.app/node2'}],
-});
-
 const updated = await Person.update(myNode, {
   name: 'Alicia',
 });
-
-// Overwrite a multi-value property
-const overwriteFriends = await Person.update(myNode, {
-  knows: [{id: 'https://my.app/node2'}],
-});
-
-// Add/remove items in a multi-value property
-const addRemoveFriends = await Person.update(myNode, {
-  knows: {
-    add: [{id: 'https://my.app/node3'}],
-    remove: [{id: 'https://my.app/node2'}],
-  },
-});
-
-/* Result: {deleted: Array<{id: string}>, count: number} */
-await Person.delete(myNode);
+/* updated: {id: string} & UpdatePartial<Person> */
 ```
 
 ## Storage configuration
@@ -172,10 +302,13 @@ Result types are inferred from your Shape definitions and the selected paths. Ex
 
 #### Basic selection
 ```typescript
-/* Result: Array<{id: string; name: string}> */
+/* names: {id: string; name: string}[] */
 const names = await Person.select((p) => p.name);
 
-/* Result: Array<{id: string; knows: Array<{id: string}>}> */
+/* friends: {
+  id: string; 
+  knows: { id: string }[]
+}[] */
 const friends = await Person.select((p) => p.knows);
 
 const dates = await Person.select((p) => [p.birthDate, p.name]);
@@ -201,6 +334,12 @@ const deep = await Person.select((p) => p.knows.bestFriend.name);
 ```typescript
 const detailed = await Person.select((p) =>
   p.knows.select((f) => f.name),
+);
+
+const allPeople = await Person.selectAll();
+
+const detailedAll = await Person.select((p) =>
+  p.knows.selectAll(),
 );
 ```
 
@@ -261,7 +400,9 @@ const custom = await Person.select((p) => ({
 }));
 ```
 
-#### Query As (type casting)
+#### Query As (type casting to a sub shape)
+If person.pets returns an array of Pets. And Dog extends Pet.
+And you want to select properties of those pets that are dogs:
 ```typescript
 const guards = await Person.select((p) => p.pets.as(Dog).guardDogLevel);
 ```
@@ -293,33 +434,170 @@ const preloaded = await Person.select((p) => [
 ]);
 ```
 
-#### Create / Update / Delete
+#### Create
+
 ```typescript
 /* Result: {id: string} & UpdatePartial<Person> */
 const created = await Person.create({name: 'Alice'});
+```
+Where UpdatePartial<Shape> reflects the created properties.
 
+#### Update
+
+Update will patch any property that you send as payload and leave the rest untouched.
+```typescript
+/* Result: {id: string} & UpdatePartial<Person> */
 const updated = await Person.update({id: 'https://my.app/node1'}, {name: 'Alicia'});
+```
+Returns:
+```json
+{
+  id:"https://my.app/node1",
+  name:"Alicia"
+}
+```
 
-// Overwrite a multi-value property
-const overwriteFriends = await Person.update({id: 'https://my.app/node1'}, {
-  knows: [{id: 'https://my.app/node2'}],
+**Updating multi-value properties**
+When updating a property that holds multiple values (one that returns an array in the results), you can either overwrite all the values with a new explicit array of values, or delete from/add to the current values.
+
+To overwrite all values:
+```typescript
+// Overwrite the full set of "knows" values.
+const overwriteFriends = await Person.update({id: 'https://my.app/person1'}, {
+  knows: [{id: 'https://my.app/person2'}],
 });
-
-// Add/remove items in a multi-value property
-const addRemoveFriends = await Person.update({id: 'https://my.app/node1'}, {
+```
+The result will contain an object with `updatedTo`, to indicate that previous values were overwritten to this new set of values:
+```json
+{
+  id: "https://my.app/person1",
   knows: {
-    add: [{id: 'https://my.app/node3'}],
-    remove: [{id: 'https://my.app/node2'}],
+    updatedTo: [{id:"https://my.app/person2"}],
+  }
+}
+``` 
+
+To make incremental changes to the current set of values you can provide an object with `add` and/or `remove` keys:
+```typescript
+// Add one value and remove one value without replacing the whole set.
+const addRemoveFriends = await Person.update({id: 'https://my.app/person1'}, {
+  knows: {
+    add: [{id: 'https://my.app/person2'}],
+    remove: [{id: 'https://my.app/person3'}],
   },
 });
-
-await Person.delete({id: 'https://my.app/node1'});
 ```
+This returns an object with the added and removed items
+```json
+{
+  id: "https://my.app/person1",
+  knows: {
+    added?: [{id:"https://my.app/person2"},
+    removed?: [{id:"https://my.app/person3"}],
+  }
+}
+```
+
+
+#### Delete
+To delete a node entirely:
+
+```typescript
+/* Result: {deleted: Array<{id: string}>, count: number} */
+const deleted = await Person.delete({id: 'https://my.app/node1'});
+```
+Returns
+```json
+{
+  deleted:[
+    {id:"https://my.app/node1"}
+  ],
+  count:1
+}
+```
+
+To delete multiple nodes pass an array:
+
+```typescript
+/* Result: {deleted: Array<{id: string}>, count: number} */
+const deleted = await Person.delete([{id: 'https://my.app/node1'},{id: 'https://my.app/node2'}]);
+```
+
+
+## Extending shapes
+
+Shape classes can extend other shape classes. Subclasses inherit property shapes from their superclasses and may override them.
+This example assumes `Person` from the `Shapes` section above.
+
+```typescript
+import {literalProperty} from '@_linked/core/shapes/SHACL';
+import {createNameSpace} from '@_linked/core/utils/NameSpace';
+import {linkedShape} from './package';
+
+const schema = createNameSpace('https://schema.org/');
+const EmployeeClass = schema('Employee');
+const name = schema('name');
+const employeeId = schema('employeeId');
+
+@linkedShape
+export class Employee extends Person {
+  static targetClass = EmployeeClass;
+
+  // Override inherited "name" with stricter constraints (still maxCount: 1)
+  @literalProperty({path: name, required: true, minLength: 2, maxCount: 1})
+  declare name: string;
+
+  @literalProperty({path: employeeId, required: true, maxCount: 1})
+  declare employeeId: string;
+}
+```
+
+Override behavior:
+
+- `NodeShape.getUniquePropertyShapes()` returns one property shape per label, with subclass overrides taking precedence.
+- Overrides must be tighten-only for `minCount`, `maxCount`, and `nodeKind` (widening is rejected at registration time).
+- If an override omits `minCount`, `maxCount`, or `nodeKind`, inherited values are kept.
+- Current scope: compatibility checks for `datatype`, `class`, and `pattern` are not enforced yet.
 
 ## TODO
 
 - Allow `preloadFor` to accept another query (not just a component).
 - Make and expose functions for auto syncing shapes to the graph.
+
+## Intermediate Representation (IR)
+
+Every Linked query compiles to a plain, JSON-serializable JavaScript object — the **Intermediate Representation**. This IR is the contract between the DSL and any storage backend. A store receives these objects and translates them into its native query language (SPARQL, SQL, etc.).
+
+For example, this DSL call:
+
+```typescript
+const names = await Person.select((p) => p.name);
+```
+
+produces the following IR object, which is passed to your store's `selectQuery()` method:
+
+```json
+{
+  "kind": "select",
+  "root": {"kind": "shape_scan", "shape": "https://schema.org/Person", "alias": "a0"},
+  "patterns": [],
+  "projection": [
+    {
+      "alias": "a1",
+      "expression": {"kind": "property_expr", "sourceAlias": "a0", "property": "https://schema.org/name"}
+    }
+  ],
+  "resultMap": [{"key": "name", "alias": "a1"}],
+  "singleResult": false
+}
+```
+
+All IR types are available from `@_linked/core/queries/IntermediateRepresentation`. See the full [Intermediate Representation docs](./documentation/intermediate-representation.md) for the complete type reference, examples, and a store implementer guide.
+
+**Store packages:**
+
+- `SparqlStore` base class — included in `@_linked/core/sparql`, extend it for any SPARQL endpoint
+- `@_linked/rdf-mem-store` — in-memory RDF store
 
 ## Changelog
 
