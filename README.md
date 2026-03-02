@@ -44,6 +44,122 @@ import {linkedPackage} from '@_linked/core/utils/Package';
 ## Documentation
 
 - [Intermediate Representation (IR)](./documentation/intermediate-representation.md)
+- [SPARQL Algebra Layer](./documentation/sparql-algebra.md)
+
+## How Linked works — from shapes to query results
+
+Linked turns TypeScript classes into a type-safe query pipeline. Here is the full flow, traced through a single example:
+
+```
+Shape class → DSL query → IR (AST) → Target query language → Execute → Map results
+```
+
+### 1. SHACL shapes from TypeScript classes
+
+Shape classes use decorators to generate SHACL metadata. These shapes define the data model, drive the DSL's type safety, and can be synced to a store for runtime data validation.
+
+```typescript
+@linkedShape
+export class Person extends Shape {
+  static targetClass = schema('Person');
+
+  @literalProperty({path: schema('name'), maxCount: 1})
+  get name(): string { return ''; }
+
+  @objectProperty({path: schema('knows'), shape: Person})
+  get friends(): ShapeSet<Person> { return null; }
+}
+```
+
+### 2. Type-safe query DSL
+
+The DSL uses these shape classes to provide compile-time checked queries. You cannot write a query that references a property not defined on the shape.
+
+```typescript
+const result = await Person.select(p => p.name);
+```
+
+### 3. SHACL-based Intermediate Representation (IR)
+
+The DSL compiles to a backend-agnostic AST — the [Intermediate Representation](./documentation/intermediate-representation.md). This is the contract between the DSL and any store implementation.
+
+```json
+{
+  "kind": "select",
+  "root": { "kind": "shape_scan", "shape": ".../Person", "alias": "a0" },
+  "projection": [
+    { "alias": "a1", "expression": { "kind": "property_expr", "sourceAlias": "a0", "property": ".../name" } }
+  ],
+  "resultMap": [{ "key": ".../name", "alias": "a1" }]
+}
+```
+
+The IR uses full SHACL-derived URIs for shapes and properties. Any store that implements `IQuadStore` receives these IR objects and translates them into its native query language.
+
+### 4. IR → SPARQL Algebra
+
+For SPARQL-backed stores, the IR is converted into a formal [SPARQL algebra](./documentation/sparql-algebra.md) — a tree of typed nodes aligned with the SPARQL 1.1 specification.
+
+```
+SparqlSelectPlan {
+  projection: [?a0, ?a0_name]
+  algebra: LeftJoin(
+    BGP(?a0 rdf:type <Person>),
+    BGP(?a0 <name> ?a0_name)       ← wrapped in OPTIONAL
+  )
+}
+```
+
+Properties are wrapped in `LeftJoin` (OPTIONAL) so missing values don't eliminate result rows.
+
+### 5. SPARQL Algebra → SPARQL string
+
+The algebra tree is serialized into a SPARQL query string with automatic PREFIX generation:
+
+```sparql
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <.../Person> .
+  OPTIONAL {
+    ?a0 <.../name> ?a0_name .
+  }
+}
+```
+
+### 6. Execute and map results
+
+The SPARQL endpoint returns JSON results, which are mapped back into typed result objects:
+
+```
+Endpoint returns:                        Mapped to:
+┌──────────┬──────────┐                  ┌──────────────────────────────┐
+│ a0       │ a0_name  │                  │ { id: ".../p1", name: "Semmy" } │
+│ .../p1   │ "Semmy"  │        →         │ { id: ".../p2", name: "Moa"   } │
+│ .../p2   │ "Moa"    │                  │ ...                          │
+└──────────┴──────────┘                  └──────────────────────────────┘
+```
+
+Values are automatically coerced: `xsd:boolean` → `boolean`, `xsd:integer` → `number`, `xsd:dateTime` → `Date`. Nested traversals are grouped and deduplicated into nested result objects.
+
+### The SparqlStore base class
+
+`SparqlStore` handles this entire pipeline. Concrete stores only implement the transport:
+
+```typescript
+import { SparqlStore } from '@_linked/core/sparql';
+
+class MyStore extends SparqlStore {
+  protected async executeSparqlSelect(sparql: string) {
+    // Send SPARQL to your endpoint, return JSON results
+  }
+  protected async executeSparqlUpdate(sparql: string) {
+    // Send SPARQL UPDATE to your endpoint
+  }
+}
+```
+
+See the [SPARQL Algebra Layer docs](./documentation/sparql-algebra.md) for the full type reference, conversion algorithm, and store implementation guide.
 
 ## Linked Package Setup
 
