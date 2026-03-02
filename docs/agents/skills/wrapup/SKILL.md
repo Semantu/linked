@@ -69,8 +69,7 @@ A changeset is only skippable when the scope is purely internal (docs, CI config
 
 **Process:**
 - Ask the user for the version bump level (patch/minor/major) unless they already specified it.
-- Write the changeset file directly to `.changeset/` using the standard format (YAML frontmatter with package name and bump level, followed by markdown description). Use a descriptive kebab-case filename.
-- Do NOT run `npx changeset` interactively — it requires TTY input. Write the file directly.
+- The `npx changeset add` command requires interactive TTY input, which is not available in agent environments. Instead, write the changeset file directly to `.changeset/` — this is the standard approach for CI/automation and produces identical results. Use the standard format: YAML frontmatter with package name and bump level, followed by markdown description. Use a descriptive kebab-case filename (e.g., `sparql-conversion-layer.md`).
 
 ## Output
 
