@@ -441,6 +441,12 @@ const transformationCases: SelectCase[] = [
     minPatterns: 1,
   },
   {
+    name: "pluralFilteredNestedSubSelect",
+    run: () => queryFactories.pluralFilteredNestedSubSelect(),
+    minProjection: 3,
+    minPatterns: 2,
+  },
+  {
     name: "selectDuplicatePaths",
     run: () => queryFactories.selectDuplicatePaths(),
     exactProjection: 3,
@@ -646,5 +652,41 @@ describe("IR pipeline behavior", () => {
     const ir = selectFactory.build();
 
     expect(buildSelectQuery(ir)).toBe(ir);
+  });
+
+  test("build preserves nested sub-select projections inside array selections", async () => {
+    const query = await captureQuery(() =>
+      queryFactories.pluralFilteredNestedSubSelect()
+    );
+    const ir = buildSelectQuery(query);
+
+    expect(ir.projection.length).toBeGreaterThanOrEqual(3);
+    expect(
+      ir.patterns.some(
+        (p) =>
+          p.kind === "traverse" &&
+          p.property.endsWith("/pluralTestProp")
+      )
+    ).toBe(true);
+    expect(
+      ir.patterns.some(
+        (p) => p.kind === "traverse" && p.property.endsWith("/friends")
+      )
+    ).toBe(true);
+
+    const projectedProperties = ir.projection
+      .filter(
+        (item): item is {
+          alias: string;
+          expression: {kind: "property_expr"; sourceAlias: string; property: string};
+        } => item.expression.kind === "property_expr"
+      )
+      .map((item) => item.expression.property);
+    expect(projectedProperties.some((prop) => prop.endsWith("/hobby"))).toBe(
+      true
+    );
+    expect(
+      projectedProperties.filter((prop) => prop.endsWith("/name")).length
+    ).toBeGreaterThanOrEqual(2);
   });
 });

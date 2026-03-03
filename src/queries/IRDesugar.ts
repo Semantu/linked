@@ -77,7 +77,7 @@ export type DesugaredEvaluationSelect = {
 
 export type DesugaredMultiSelection = {
   kind: 'multi_selection';
-  selections: DesugaredSelectionPath[];
+  selections: DesugaredSelection[];
 };
 
 export type DesugaredSelection =
@@ -281,7 +281,7 @@ const toSubSelections = (select: SelectPath): DesugaredSelection => {
     // Multiple selections in a sub-select
     return {
       kind: 'multi_selection' as const,
-      selections: selections.filter((s): s is DesugaredSelectionPath => s.kind === 'selection_path'),
+      selections,
     };
   }
   return toCustomObjectSelect(select);

@@ -291,11 +291,9 @@ export const lowerSelectQuery = (
     }
 
     if (selection.kind === 'multi_selection') {
-      return selection.selections.map((path) => ({
-        kind: 'path' as const,
-        path: combineWithParentPath(parentPath, path),
-        key,
-      }));
+      return selection.selections.flatMap((nestedSelection) =>
+        collectProjectionSeeds(nestedSelection, key, parentPath),
+      );
     }
 
     if (selection.kind === 'evaluation_select') {
