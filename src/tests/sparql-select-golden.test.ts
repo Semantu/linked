@@ -956,12 +956,16 @@ WHERE {
     const sparql = await goldenSelect(queryFactories.nestedQueries2);
     expect(sparql).toBe(
 `PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_firstPet ?a1
+SELECT DISTINCT ?a0 ?a1_firstPet ?a2_name ?a1 ?a2
 WHERE {
   ?a0 rdf:type <${P}> .
   ?a0 <${P}/friends> ?a1 .
+  ?a1 <${P}/bestFriend> ?a2 .
   OPTIONAL {
     ?a1 <${P}/firstPet> ?a1_firstPet .
+  }
+  OPTIONAL {
+    ?a2 <${P}/name> ?a2_name .
   }
 }`);
   });

@@ -286,6 +286,15 @@ export const queryFactories = {
         p2.bestFriend.select((p3) => ({name: p3.name})),
       ]),
     ]),
+  pluralFilteredNestedSubSelect: () =>
+    Person.select((p) =>
+      p.pluralTestProp
+        .where((pp) => pp.name.equals('Moa'))
+        .select((pp) => [
+          pp.name,
+          pp.friends.select((f) => [f.name, f.hobby]),
+        ]),
+    ),
   selectDuplicatePaths: () =>
     Person.select((p) => [
       p.bestFriend.name,
