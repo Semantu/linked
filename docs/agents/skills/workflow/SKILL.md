@@ -1,6 +1,6 @@
 ---
 name: workflow
-description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> implementation -> review -> wrapup) with transition gates and optional single-mode overrides.
+description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> implementation -> review -> wrapup) with transition gates and optional single-mode overrides, and route explicit automatic-mode requests to the automatic meta workflow.
 ---
 
 # Instructions
@@ -12,6 +12,8 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 ## Mode selection at task start
 
 - If the user has already explicitly chosen a mode (or explicitly called a mode skill), enter that mode directly.
+- `automatic` is a special meta mode and can only be entered when the user explicitly requests it.
+- Never auto-suggest `automatic` in startup prompts.
 - **Auto-enter ideation**: If the user is clearly brainstorming — weighing trade-offs, thinking out loud, exploring options — enter `ideation` mode directly without asking. This exception applies **only to ideation** (the first mode in the sequence). For all other starting modes (plan, implementation, etc.), always ask first.
 - If the user is not clearly ideating, ask using this prompt pattern:
   `Should we start with exploring the options in ideation mode? Or do you want to go straight to planning the details in plan mode?`
@@ -27,6 +29,10 @@ description: Enforce the explicit mode cadence (ideation -> plan -> tasks -> imp
 5. `review`
 6. `wrapup`
 
+Meta mode:
+
+- `automatic` (explicit-only): run the full workflow without user confirmations between internal mode transitions; handoff behavior is defined in `docs/agents/skills/automatic/SKILL.md`.
+
 ## Transition gates
 Only switch to the next sequential mode with explicit user confirmation. When completing any mode, the agent must ask: `Shall we switch to {name of next mode}?`.
 Never skip a mode unless explicitly told to. 
@@ -34,6 +40,7 @@ If user seems to suggest skipping a mode but is not explicitly saying which mode
 When review identifies remaining work, the agent may loop `review -> tasks -> implementation -> review`, but every switch still requires explicit user confirmation.
 When review defers work for future scope, the agent may switch `review -> ideation`, with explicit user confirmation.
 Requests related to PR preparation/publishing are an explicit exception and should route directly to `wrapup` mode.
+These transition gates apply to standard modes. `automatic` mode is an explicit exception and manages internal transitions autonomously until its review pause point.
 
 ## Required artifacts by mode
 

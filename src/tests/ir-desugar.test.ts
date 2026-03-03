@@ -36,6 +36,11 @@ const asEvaluation = (s: unknown): DesugaredEvaluationSelect => {
   return s as DesugaredEvaluationSelect;
 };
 
+const asMultiSelection = (s: unknown): DesugaredMultiSelection => {
+  expect((s as any).kind).toBe('multi_selection');
+  return s as DesugaredMultiSelection;
+};
+
 describe('IR desugar conversion', () => {
   // === Basic selection ===
 
@@ -311,6 +316,26 @@ describe('IR desugar conversion', () => {
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     // Should not throw — contains double-nested sub-selects
+  });
+
+  test('preserves nested sub-select paths inside multi-selection arrays', async () => {
+    const query = await capture(() => queryFactories.pluralFilteredNestedSubSelect());
+    const desugared = desugarSelectQuery(query);
+
+    expect(desugared.selections).toHaveLength(1);
+    const outer = asSubSelect(desugared.selections[0]);
+    const outerMulti = asMultiSelection(outer.selections);
+
+    expect(outerMulti.selections).toHaveLength(2);
+    expect(outerMulti.selections[0].kind).toBe('selection_path');
+
+    const nestedFriends = asSubSelect(outerMulti.selections[1]);
+    expect(nestedFriends.parentPath).toHaveLength(1);
+    expect(nestedFriends.parentPath[0].kind).toBe('property_step');
+
+    const innerMulti = asMultiSelection(nestedFriends.selections);
+    expect(innerMulti.selections).toHaveLength(2);
+    expect(innerMulti.selections.every((s) => s.kind === 'selection_path')).toBe(true);
   });
 
   // === Where with query context ===
