@@ -10,7 +10,7 @@ import {xsd} from '../ontologies/xsd.js';
 import {
   buildSelectQuery,
 } from './IRPipeline.js';
-import {QueryParser} from './QueryParser.js';
+import {getQueryDispatch} from './queryDispatch.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import type {IRSelectQuery} from './IntermediateRepresentation.js';
 
@@ -1715,7 +1715,7 @@ export class SelectQueryFactory<
   }
 
   exec(): Promise<QueryResponseToResultType<ResponseType>[]> {
-    return QueryParser.selectQuery(this);
+    return getQueryDispatch().selectQuery(this.build());
   }
 
   /**

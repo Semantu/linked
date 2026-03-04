@@ -5,12 +5,12 @@ import type {SelectQuery} from '../queries/SelectQuery.js';
 import type {CreateQuery} from '../queries/CreateQuery.js';
 import type {UpdateQuery} from '../queries/UpdateQuery.js';
 import type {DeleteQuery, DeleteResponse} from '../queries/DeleteQuery.js';
-import {Shape, ShapeType} from '../shapes/Shape.js';
+import {setQueryDispatch} from '../queries/queryDispatch.js';
 import {getShapeClass} from './ShapeClass.js';
 
 export abstract class LinkedStorage {
   private static defaultStore?: IQuadStore;
-  private static shapeToStore: CoreMap<typeof Shape, IQuadStore> =
+  private static shapeToStore: CoreMap<Function, IQuadStore> =
     new CoreMap();
 
   static isInitialised() {
@@ -26,9 +26,15 @@ export abstract class LinkedStorage {
     if (this.defaultStore?.init) {
       this.defaultStore.init();
     }
+    setQueryDispatch({
+      selectQuery: (q) => this.selectQuery(q),
+      createQuery: (q) => this.createQuery(q),
+      updateQuery: (q) => this.updateQuery(q),
+      deleteQuery: (q) => this.deleteQuery(q),
+    });
   }
 
-  static setStoreForShapes(store: IQuadStore, ...shapeClasses: (typeof Shape)[]) {
+  static setStoreForShapes(store: IQuadStore, ...shapeClasses: Function[]) {
     shapeClasses.forEach((shapeClass) => {
       this.shapeToStore.set(shapeClass, store);
     });
@@ -43,33 +49,32 @@ export abstract class LinkedStorage {
     return stores;
   }
 
-  static getShapeToStoreMap(): CoreMap<typeof Shape, IQuadStore> {
+  static getShapeToStoreMap(): CoreMap<Function, IQuadStore> {
     return this.shapeToStore;
   }
 
-  static getStoreForShapeClass(shapeClass?: typeof Shape | null): IQuadStore {
-    let current = shapeClass || null;
-    while (current) {
+  static getStoreForShapeClass(shapeClass?: Function | null): IQuadStore {
+    let current: Function | null = shapeClass ?? null;
+    while (typeof current === 'function') {
       const store = this.shapeToStore.get(current);
       if (store) {
         return store;
       }
-      if (current === Shape) {
-        break;
-      }
-      current = Object.getPrototypeOf(current);
+      const parent = Object.getPrototypeOf(current);
+      if (parent === Function.prototype || parent === null) break;
+      current = parent;
     }
     return this.defaultStore;
   }
 
   private static resolveStoreForQueryShape(
-    shape?: string | typeof Shape | ShapeType | null,
+    shape?: string | Function | null,
   ): IQuadStore {
     if (!shape) {
       return this.defaultStore;
     }
     if (typeof shape === 'function') {
-      return this.getStoreForShapeClass(shape as typeof Shape);
+      return this.getStoreForShapeClass(shape);
     }
     if (typeof shape === 'string') {
       const shapeClass = getShapeClass(shape);

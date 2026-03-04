@@ -1,55 +1,48 @@
 import {jest} from '@jest/globals';
-import {QueryParser} from '../queries/QueryParser';
-import {UpdateQueryFactory} from '../queries/UpdateQuery';
-import {CreateQueryFactory} from '../queries/CreateQuery';
-import {DeleteQueryFactory} from '../queries/DeleteQuery';
-import type {NodeId} from '../queries/MutationQuery';
+import {setQueryDispatch} from '../queries/queryDispatch';
+import * as IRPipeline from '../queries/IRPipeline';
 
 /**
- * Test utility that intercepts QueryParser methods via jest.spyOn and captures
- * the query object for inspection by test assertions.
+ * Test utility that intercepts the query dispatch and captures
+ * the built IR query for inspection by test assertions.
  *
- * For select queries, captures the RawSelectInput (pipeline input format).
- * For mutations, captures the IR (canonical format).
- *
- * Import this module and call `captureQuery(runner)` to execute a DSL
- * call (e.g. Person.select(...)) and retrieve the captured query.
+ * - `captureQuery` captures the built IR (post-pipeline) — use for
+ *   full-pipeline and mutation tests.
+ * - `captureRawQuery` captures the raw pipeline input (pre-pipeline)
+ *   — use for tests that feed intermediate pipeline stages.
  */
 let _lastQuery: any;
+let _lastRawInput: any;
 
-jest.spyOn(QueryParser, 'selectQuery').mockImplementation(async (query: any) => {
-  _lastQuery = query.toRawInput();
-  return [] as any;
+// Spy on buildSelectQuery to capture pre-pipeline raw input
+const originalBuildSelectQuery = IRPipeline.buildSelectQuery;
+jest.spyOn(IRPipeline, 'buildSelectQuery').mockImplementation((raw: any) => {
+  _lastRawInput = raw;
+  return originalBuildSelectQuery(raw);
 });
 
-jest.spyOn(QueryParser, 'createQuery').mockImplementation(
-  async (updateObjectOrFn: any, shapeClass: any) => {
-    const factory = new CreateQueryFactory(shapeClass, updateObjectOrFn);
-    _lastQuery = factory.build();
+setQueryDispatch({
+  selectQuery: async (query) => {
+    _lastQuery = query;
+    return [] as any;
+  },
+  createQuery: async (query) => {
+    _lastQuery = query;
     return {} as any;
   },
-);
-
-jest.spyOn(QueryParser, 'updateQuery').mockImplementation(
-  async (id: any, updateObjectOrFn: any, shapeClass: any) => {
-    const factory = new UpdateQueryFactory(shapeClass, id, updateObjectOrFn);
-    _lastQuery = factory.build();
+  updateQuery: async (query) => {
+    _lastQuery = query;
     return {} as any;
   },
-);
-
-jest.spyOn(QueryParser, 'deleteQuery').mockImplementation(
-  async (id: any, shapeClass: any) => {
-    const ids = (Array.isArray(id) ? id : [id]) as NodeId[];
-    const factory = new DeleteQueryFactory(shapeClass, ids);
-    _lastQuery = factory.build();
+  deleteQuery: async (query) => {
+    _lastQuery = query;
     return {deleted: [], count: 0};
   },
-);
+});
 
 /**
- * Execute a query-producing callback and return whatever
- * the capture intercepted.
+ * Execute a query-producing callback and return the built IR
+ * (the same object that would reach IQuadStore).
  */
 export const captureQuery = async (
   runner: () => Promise<unknown>,
@@ -57,4 +50,17 @@ export const captureQuery = async (
   _lastQuery = undefined;
   await runner();
   return _lastQuery;
+};
+
+/**
+ * Execute a query-producing callback and return the raw pipeline
+ * input (RawSelectInput) — the state before the IR build pipeline runs.
+ * Only works for select queries.
+ */
+export const captureRawQuery = async (
+  runner: () => Promise<unknown>,
+) => {
+  _lastRawInput = undefined;
+  await runner();
+  return _lastRawInput;
 };

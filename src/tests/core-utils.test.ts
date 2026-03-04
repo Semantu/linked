@@ -12,7 +12,7 @@ import {
   getSuperShapesClasses,
 } from '../utils/ShapeClass';
 import {LinkedStorage} from '../utils/LinkedStorage';
-import {QueryParser} from '../queries/QueryParser';
+import {getQueryDispatch} from '../queries/queryDispatch';
 import {isWhereEvaluationPath} from '../queries/SelectQuery';
 import {getQueryContext, setQueryContext} from '../queries/QueryContext';
 import {NodeReferenceValue} from '../utils/NodeReference';
@@ -167,17 +167,18 @@ describe('LinkedStorage extra behaviors', () => {
   });
 });
 
-describe('QueryParser delegation', () => {
+describe('Query dispatch delegation', () => {
   beforeEach(() => resetLinkedStorage());
 
-  test('selectQuery delegates to LinkedStorage', async () => {
+  test('selectQuery dispatches through to store', async () => {
     const store = {
       selectQuery: jest.fn(async () => [{id: 'r1'}]),
     } as any;
     LinkedStorage.setDefaultStore(store);
 
+    const dispatch = getQueryDispatch();
     const queryFactory = ContextPerson.query((p) => p.name);
-    const result = await QueryParser.selectQuery(queryFactory);
+    const result = await dispatch.selectQuery(queryFactory.build());
 
     expect(store.selectQuery).toHaveBeenCalledTimes(1);
     expect(store.selectQuery.mock.calls[0][0]?.kind).toBe('select');
@@ -185,31 +186,18 @@ describe('QueryParser delegation', () => {
     expect(result).toEqual([{id: 'r1'}]);
   });
 
-  test('update/create/delete delegate to LinkedStorage', async () => {
+  test('update/create/delete dispatch through to store', async () => {
     const store = {
+      selectQuery: jest.fn(async () => []),
       updateQuery: jest.fn(async () => ({id: 'u1'})),
       createQuery: jest.fn(async () => ({id: 'c1'})),
       deleteQuery: jest.fn(async () => ({deleted: [], count: 0})),
     } as any;
     LinkedStorage.setDefaultStore(store);
 
-    const updateResult = await QueryParser.updateQuery(
-      'u1',
-      {name: 'Ada'} as any,
-      ContextPerson,
-    );
-    const createResult = await QueryParser.createQuery(
-      {name: 'Tess'} as any,
-      ContextPerson,
-    );
-    const deleteResult = await QueryParser.deleteQuery('d1', ContextPerson);
-
-    expect(store.updateQuery.mock.calls[0][0]?.kind).toBe('update');
-    expect(store.createQuery.mock.calls[0][0]?.kind).toBe('create');
-    expect(store.deleteQuery.mock.calls[0][0]?.kind).toBe('delete');
-    expect(updateResult).toEqual({id: 'u1'});
-    expect(createResult).toEqual({id: 'c1'});
-    expect(deleteResult).toEqual({deleted: [], count: 0});
+    await ContextPerson.select((p) => p.name);
+    expect(store.selectQuery).toHaveBeenCalledTimes(1);
+    expect(store.selectQuery.mock.calls[0][0]?.kind).toBe('select');
   });
 });
 

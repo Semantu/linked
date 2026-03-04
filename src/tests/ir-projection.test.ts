@@ -1,10 +1,10 @@
 import {describe, expect, test} from '@jest/globals';
 import {queryFactories} from '../test-helpers/query-fixtures';
-import {captureQuery} from '../test-helpers/query-capture-store';
+import {captureRawQuery} from '../test-helpers/query-capture-store';
 import {desugarSelectQuery, DesugaredSelectionPath} from '../queries/IRDesugar';
 import {buildCanonicalProjection} from '../queries/IRProjection';
 
-const capture = (runner: () => Promise<unknown>) => captureQuery(runner);
+const capture = (runner: () => Promise<unknown>) => captureRawQuery(runner);
 
 describe('IR projection canonicalization (Phase 7)', () => {
   test('builds flat projection items from selections', async () => {
