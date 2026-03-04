@@ -433,6 +433,53 @@ FieldSet.summary(PersonShape)
 
 This is the insight you were getting at: shapes themselves *can* define the field set, and `FieldSet.all(AddressShape)` is effectively the `address.all()` you were imagining. The difference is that `FieldSet` is *detached* from the shape — it's a value you can store, pass around, merge, extend, and serialize.
 
+### Scoped filters in FieldSets
+
+A FieldSet entry can carry a **scoped filter** — a condition that applies to a specific traversal, not to the root query. This is the difference between "only active friends" (scoped to the `friends` traversal) and "only people over 30" (top-level query filter).
+
+```ts
+// ── FieldSet with scoped filters ────────────────────────────────
+
+// "Active friends" — the filter is part of the reusable field definition
+const activeFriends = FieldSet.for(PersonShape, [
+  { path: 'friends.name', where: { 'friends.isActive': true } },
+  'friends.email',
+]);
+
+// Equivalently, using the fluent path builder
+const activeFriends2 = FieldSet.for(PersonShape, (p) => [
+  p.path('friends').where('isActive', '=', true).fields([
+    'name',
+    'email',
+  ]),
+]);
+
+// Using it — the scoped filter travels with the FieldSet
+const results = await QueryBuilder
+  .from(PersonShape)
+  .include(activeFriends)             // friends are filtered to active
+  .where('age', '>', 30)              // top-level: only people over 30
+  .exec();
+```
+
+This maps naturally to the existing IR — `IRTraversePattern` already has an optional `filter` field. The scoped filter gets lowered into that, while the top-level `.where()` becomes the query-level `IRExpression`.
+
+**The rule:** Scoped filters on FieldSet entries attach to the traversal they scope. Top-level `.where()` on QueryBuilder attaches to the query root. When FieldSets are merged, scoped filters on the same traversal are AND-combined.
+
+```ts
+// Merging scoped filters
+const set1 = FieldSet.for(PersonShape, [
+  { path: 'friends.name', where: { 'friends.isActive': true } },
+]);
+const set2 = FieldSet.for(PersonShape, [
+  { path: 'friends.email', where: { 'friends.age': { '>': 18 } } },
+]);
+
+const merged = FieldSet.merge([set1, set2]);
+// merged friends traversal has: isActive = true AND age > 18
+// merged selections: friends.name + friends.email
+```
+
 ### FieldSet design
 
 ```ts
@@ -442,6 +489,7 @@ class FieldSet {
 
   // ── Construction ──
   static for(shape: NodeShape | string, fields: FieldSetInput[]): FieldSet;
+  static for(shape: NodeShape | string, fn: (p: FieldSetPathBuilder) => FieldSetInput[]): FieldSet;
   static all(shape: NodeShape | string, opts?: { depth?: number }): FieldSet;
   static summary(shape: NodeShape | string): FieldSet;
 
@@ -449,7 +497,7 @@ class FieldSet {
   extend(fields: FieldSetInput[]): FieldSet;     // returns new FieldSet with added fields
   omit(fields: string[]): FieldSet;              // returns new FieldSet without named fields
   pick(fields: string[]): FieldSet;              // returns new FieldSet with only named fields
-  static merge(sets: FieldSet[]): FieldSet;      // union of multiple FieldSets (deduped)
+  static merge(sets: FieldSet[]): FieldSet;      // union of multiple FieldSets (deduped, filters AND-combined)
 
   // ── Introspection ──
   paths(): PropertyPath[];                        // resolved PropertyPath objects
@@ -466,11 +514,18 @@ type FieldSetInput =
   | PropertyShape                             // direct reference
   | PropertyPath                              // pre-built path
   | FieldSet                                  // include another FieldSet
+  | ScopedFieldEntry                          // path + scoped filter
   | Record<string, FieldSetInput | FieldSet>; // nested: { address: fullAddress }
+
+type ScopedFieldEntry = {
+  path: string | PropertyPath;
+  where: WhereConditionInput;                 // scoped to the traversal in this path
+};
 
 type FieldSetEntry = {
   path: PropertyPath;
-  alias?: string;          // custom result key name
+  alias?: string;                             // custom result key name
+  scopedFilter?: WhereCondition;              // filter on the deepest traversal
 };
 ```
 
@@ -487,6 +542,304 @@ type FieldSetEntry = {
 | "Form with all editable fields" | Yes — `FieldSet.all(shape)` | Derives from shape, but FieldSet is the API |
 
 The pattern: **shapes suffice when you want everything. FieldSet is needed when you want a subset, a union, or an evolving view.**
+
+---
+
+## Query Derivation, Extension, and Shape Remapping
+
+Queries need to be **derived** from other queries — not just FieldSets from FieldSets. A QueryBuilder should be a value you can fork, extend, narrow, and remap.
+
+### Query extension (fork + modify)
+
+QueryBuilder is immutable-by-default: every modifier returns a new builder. This makes forking natural.
+
+```ts
+// Base query — reusable template
+const allPeople = QueryBuilder
+  .from(PersonShape)
+  .include(personSummary);
+
+// Fork for different pages
+const peoplePage = allPeople
+  .limit(20)
+  .offset(0);
+
+const activePeople = allPeople
+  .where('isActive', '=', true);
+
+const peopleInAmsterdam = allPeople
+  .where('address.city', '=', 'Amsterdam');
+
+// Further fork
+const youngPeopleInAmsterdam = peopleInAmsterdam
+  .where('age', '<', 30)
+  .include(personDetail);    // switch to a richer field set
+
+// All of these are independent builders — allPeople is unchanged
+```
+
+This is like a query "prototype chain." Each `.where()`, `.include()`, `.limit()` returns a new builder that inherits from the parent. Cheap to create (just clone the config), no side effects.
+
+### Query narrowing (`.one()` / `.for()`)
+
+```ts
+// From a list query to a single-entity query
+const personQuery = allPeople;
+
+// Narrow to a specific person (returns singleResult: true)
+const alice = await personQuery.one(aliceId).exec();
+
+// Or: narrow to a set of IDs
+const subset = await personQuery.for([aliceId, bobId]).exec();
+```
+
+### Shape remapping — same component, different graph
+
+This is the big one. A component is built to display data from `PersonShape`. But in a different deployment, the data uses `schema:Person` (Schema.org) instead of your custom `ex:Person`. The property names differ. The graph structure differs. But the component's *intent* is the same: show a person's name, avatar, and friends.
+
+**Option 1: Shape mapping at the FieldSet level**
+
+Map from one shape's property labels to another's. The FieldSet stays the same, the underlying resolution changes.
+
+```ts
+// Original component expects PersonShape with properties: name, avatar, friends
+const personCard = FieldSet.for(PersonShape, ['name', 'avatar', 'friends.name']);
+
+// In a different graph environment, data uses SchemaPersonShape
+// with properties: givenName, image, knows
+const mapping = FieldSet.mapShape(personCard, SchemaPersonShape, {
+  'name': 'givenName',        // PersonShape.name → SchemaPersonShape.givenName
+  'avatar': 'image',          // PersonShape.avatar → SchemaPersonShape.image
+  'friends': 'knows',         // PersonShape.friends → SchemaPersonShape.knows
+});
+// mapping is a new FieldSet rooted at SchemaPersonShape,
+// selecting [givenName, image, knows.givenName]
+
+// The query uses SchemaPersonShape but returns results with the ORIGINAL keys
+const results = await QueryBuilder
+  .from(SchemaPersonShape)
+  .include(mapping)
+  .exec();
+
+// results[0] = { id: '...', name: 'Alice', avatar: 'http://...', friends: [{ name: 'Bob' }] }
+//                            ↑ original key names preserved!
+```
+
+The key insight: the **result keys** stay as the original shape's labels, so the component doesn't need to know about the remapping. Only the SPARQL changes.
+
+**Option 2: Shape mapping at the QueryBuilder level**
+
+```ts
+// A component exports its query template
+const personCardQuery = QueryBuilder
+  .from(PersonShape)
+  .include(personCard)
+  .limit(10);
+
+// Remap the entire query to a different shape
+const remapped = personCardQuery.remapShape(SchemaPersonShape, {
+  'name': 'givenName',
+  'avatar': 'image',
+  'friends': 'knows',
+});
+
+// remapped is a new QueryBuilder targeting SchemaPersonShape
+// with the same structure but different property traversals
+const results = await remapped.exec();
+```
+
+**Option 3: Shape adapter — declarative, reusable mapping object**
+
+For larger-scale interop, define a `ShapeAdapter` that maps between two shapes. Use it across all queries.
+
+```ts
+// Defined once, used everywhere
+const schemaPersonAdapter = ShapeAdapter.create({
+  from: PersonShape,
+  to: SchemaPersonShape,
+  properties: {
+    'name': 'givenName',
+    'email': 'email',            // same label, different PropertyShape IDs
+    'avatar': 'image',
+    'friends': 'knows',
+    'age': 'birthDate',          // can also provide a transform function for values
+    'address.city': 'address.addressLocality',
+    'address.country': 'address.addressCountry',
+  },
+});
+
+// Use anywhere
+const remapped = personCardQuery.adapt(schemaPersonAdapter);
+const remappedFields = personCard.adapt(schemaPersonAdapter);
+
+// Or: register globally so all queries auto-resolve
+QueryBuilder.registerAdapter(schemaPersonAdapter);
+// Now any query using PersonShape properties will auto-resolve
+// if the target store's data uses SchemaPersonShape
+```
+
+### Where remapping fits
+
+Shape remapping happens at the **FieldSet/QueryBuilder level** — before IR construction. The remapper walks each `PropertyPath`, swaps out the PropertyShapes using the mapping, and produces a new FieldSet/QueryBuilder rooted at the target shape. Everything downstream (desugar → canonicalize → lower → SPARQL) works unchanged.
+
+```
+Original FieldSet (PersonShape)
+    ↓  remapShape / adapt
+Remapped FieldSet (SchemaPersonShape)  ← result keys still use original labels
+    ↓  QueryBuilder.include()
+    ↓  toRawInput()
+    ↓  buildSelectQuery()
+    ↓  irToAlgebra → algebraToString
+    ↓  SPARQL (uses SchemaPersonShape's actual property IRIs)
+```
+
+---
+
+## End-to-End Example: Everything Combined
+
+A CMS page builder scenario showing FieldSet + QueryBuilder + scoped filters + query derivation + shape remapping all working together.
+
+```ts
+import { FieldSet, QueryBuilder, ShapeAdapter } from 'lincd/queries';
+
+// ═══════════════════════════════════════════════════════
+// 1. Define reusable FieldSets
+// ═══════════════════════════════════════════════════════
+
+const personSummary = FieldSet.for(PersonShape, ['name', 'email', 'avatar']);
+
+const fullAddress = FieldSet.for(AddressShape, ['street', 'city', 'postalCode', 'country']);
+
+const personCard = FieldSet.for(PersonShape, [
+  personSummary,
+  'address.city',
+]);
+
+const personDetail = FieldSet.for(PersonShape, [
+  personCard,
+  'bio', 'age',
+  { friends: personSummary },
+  'hobbies.label',
+]);
+
+// With scoped filter: only active friends
+const activeFriendsList = FieldSet.for(PersonShape, (p) => [
+  p.path('friends').where('isActive', '=', true).fields([
+    personSummary,
+  ]),
+]);
+
+// ═══════════════════════════════════════════════════════
+// 2. Base query template — shared across pages
+// ═══════════════════════════════════════════════════════
+
+const allPeople = QueryBuilder
+  .from(PersonShape)
+  .include(personSummary);
+
+// ═══════════════════════════════════════════════════════
+// 3. Table overview page
+// ═══════════════════════════════════════════════════════
+
+const tableQuery = allPeople
+  .include(FieldSet.for(PersonShape, ['address.city', 'age']))
+  .orderBy('name')
+  .limit(50);
+
+const tableRows = await tableQuery.exec();
+
+// User adds a column → extend
+const withPhone = tableQuery
+  .include(tableQuery.fields().extend(['phone']));
+
+// User filters → narrow
+const filtered = tableQuery
+  .where('address.city', '=', 'Amsterdam');
+
+// ═══════════════════════════════════════════════════════
+// 4. Detail page — fork from table query
+// ═══════════════════════════════════════════════════════
+
+const detailQuery = allPeople
+  .include(personDetail)
+  .include(activeFriendsList);   // merge: scoped filter on friends
+
+const alice = await detailQuery.one(aliceId).exec();
+
+// ═══════════════════════════════════════════════════════
+// 5. Drag-and-drop builder — merge component requirements
+// ═══════════════════════════════════════════════════════
+
+// Each component declares what it needs
+const components = [
+  { type: 'PersonCard', fields: personCard },
+  { type: 'HobbyList', fields: FieldSet.for(PersonShape, ['hobbies.label', 'hobbies.description']) },
+  { type: 'FriendGraph', fields: activeFriendsList },
+];
+
+// Builder merges all component FieldSets into one query
+const pageFields = FieldSet.merge(components.map(c => c.fields));
+const pageQuery = QueryBuilder
+  .from(PersonShape)
+  .include(pageFields)
+  .limit(20);
+
+const pageData = await pageQuery.exec();
+
+// ═══════════════════════════════════════════════════════
+// 6. NL chat — incremental building
+// ═══════════════════════════════════════════════════════
+
+// "Show me people in Amsterdam"
+let chatQuery = QueryBuilder
+  .from(PersonShape)
+  .include(personSummary)
+  .where('address.city', '=', 'Amsterdam');
+
+// "Also show their hobbies"
+chatQuery = chatQuery
+  .include(chatQuery.fields().extend(['hobbies.label']));
+
+// "Only people over 30 who have active friends"
+chatQuery = chatQuery
+  .where('age', '>', 30)
+  .include(activeFriendsList);
+
+// "Show as detail view" — swap the field set entirely
+chatQuery = chatQuery
+  .include(personDetail);
+
+// ═══════════════════════════════════════════════════════
+// 7. Shape remapping — same component, different data
+// ═══════════════════════════════════════════════════════
+
+// Client A uses PersonShape (custom ontology)
+// Client B uses SchemaPersonShape (schema.org)
+
+const adapter = ShapeAdapter.create({
+  from: PersonShape,
+  to: SchemaPersonShape,
+  properties: {
+    'name': 'givenName',
+    'email': 'email',
+    'avatar': 'image',
+    'friends': 'knows',
+    'address': 'address',
+    'address.city': 'address.addressLocality',
+    'hobbies': 'interestIn',
+    'hobbies.label': 'interestIn.name',
+  },
+});
+
+// The SAME page query, remapped to Schema.org
+const schemaPageQuery = pageQuery.adapt(adapter);
+const schemaPageData = await schemaPageQuery.exec();
+// → results use original keys (name, email, ...) but SPARQL uses schema.org IRIs
+// → components render identically, no code changes
+
+// Or: register globally for auto-resolution
+QueryBuilder.registerAdapter(adapter);
+```
 
 ---
 
@@ -660,6 +1013,14 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 
 5. **Path reuse across queries:** If paths are first-class (Option E influence), they could be defined once in a CMS schema config and reused across list views, detail views, filters, etc.
 
+6. **Scoped filter merging strategy:** When two FieldSets have scoped filters on the same traversal and are merged, AND is the safe default. But should we support OR? What about conflicting filters (one says `isActive = true`, another says `isActive = false`)? Detect and warn?
+
+7. **QueryBuilder immutability:** If every `.where()` / `.include()` returns a new builder, do we shallow-clone or use structural sharing? For typical CMS queries (< 20 paths, < 5 where clauses) shallow clone is fine. But for NL chat where queries evolve over many turns, structural sharing could matter.
+
+8. **Shape adapter scope:** Should adapters map just property labels, or also handle value transforms (e.g. `age` → compute from `birthDate`)? Value transforms require post-processing results, which is a different layer. Probably keep adapters as pure structural mapping and handle value transforms separately.
+
+9. **FieldSet serialization format:** What does `toJSON()` look like? Likely `{ shape: "PersonShape", fields: ["name", "email", { path: "friends.name", where: { "friends.isActive": true } }] }`. Should it serialize by shape label or shape IRI? Label is human-friendly but ambiguous; IRI is stable but verbose. Probably allow both.
+
 ---
 
 ## Implementation Plan
@@ -668,26 +1029,37 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 - [ ] `PropertyPath` value object with `.prop()` chaining and comparison methods
 - [ ] `walkPropertyPath(shape, 'friends.name')` — string path → `PropertyPath` resolution using `NodeShape.getPropertyShape(label)` + `PropertyShape.valueShape` walking
 - [ ] `FieldSet` with `.for()`, `.all()`, `.extend()`, `.omit()`, `.pick()`, `.merge()`
+- [ ] `FieldSet` scoped filters: `ScopedFieldEntry` type, filter attachment to entries
 - [ ] `FieldSet.toJSON()` / `FieldSet.fromJSON()` serialization
-- [ ] Tests: FieldSet composition (extend, merge, omit, pick), path resolution
+- [ ] Tests: FieldSet composition (extend, merge, omit, pick), path resolution, scoped filter merging
 
 ### Phase 2: QueryBuilder (Option B)
-- [ ] `QueryBuilder` with `.from()`, `.select()`, `.include(fieldSet)`, `.where()`, `.limit()`, `.offset()`, `.one()`, `.build()`, `.exec()`
+- [ ] `QueryBuilder` with `.from()`, `.select()`, `.include(fieldSet)`, `.where()`, `.limit()`, `.offset()`, `.one()`, `.for()`, `.orderBy()`, `.build()`, `.exec()`
+- [ ] Immutable builder pattern — every modifier returns a new builder
 - [ ] `PathBuilder` callback for `.select(p => [...])` and `.where(p => ...)`
-- [ ] Internal `toRawInput()` bridge — produce `RawSelectInput` from PropertyPaths
+- [ ] Internal `toRawInput()` bridge — produce `RawSelectInput` from PropertyPaths, lower scoped filters into `QueryStep.where`
+- [ ] `.fields()` accessor — returns the current FieldSet for introspection/extension
 - [ ] Tests: verify builder-produced IR matches DSL-produced IR for equivalent queries
+- [ ] Tests: query forking — verify parent query is unchanged after derivation
 
 ### Phase 3: String convenience layer (Option C)
 - [ ] String overloads on `QueryBuilder`: `.select(['name', 'friends.name'])`, `.where('age', '>=', 18)`
 - [ ] Shape resolution by string label: `.from('Person')`
 - [ ] Tests: string-based queries produce correct IR
 
-### Phase 4: Raw IR helpers (Option A)
+### Phase 4: Shape remapping
+- [ ] `ShapeAdapter.create({ from, to, properties })` — declarative property mapping
+- [ ] `FieldSet.adapt(adapter)` — remap a FieldSet to a different shape, preserving result key aliases
+- [ ] `QueryBuilder.adapt(adapter)` — remap an entire query (selections + where + orderBy)
+- [ ] `QueryBuilder.registerAdapter()` — global adapter registry for auto-resolution
+- [ ] Tests: remapped query produces correct SPARQL with target shape's IRIs, result keys match source shape labels
+
+### Phase 5: Raw IR helpers (Option A)
 - [ ] `ir.select()`, `ir.shapeScan()`, `ir.traverse()`, `ir.project()`, `ir.prop()` helpers
 - [ ] Export from `lincd/queries`
 - [ ] Tests: hand-built IR passes through pipeline correctly
 
-### Phase 5: Mutation builders
+### Phase 6: Mutation builders
 - [ ] `MutationBuilder.create(shape).set(prop, value).exec()`
 - [ ] `MutationBuilder.update(shape, id).set(prop, value).exec()`
 - [ ] `MutationBuilder.delete(shape, ids).exec()`
