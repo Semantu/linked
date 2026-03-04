@@ -9,7 +9,6 @@
 import {describe, expect, test} from '@jest/globals';
 import {queryFactories} from '../test-helpers/query-fixtures';
 import {captureQuery} from '../test-helpers/query-capture-store';
-import {buildSelectQuery} from '../queries/IRPipeline';
 import {selectToSparql} from '../sparql/irToAlgebra';
 import {setQueryContext} from '../queries/QueryContext';
 import {Person} from '../test-helpers/query-fixtures';
@@ -35,8 +34,7 @@ const S = 'https://data.lincd.org/module/lincd/shape/shape';
 const goldenSelect = async (
   factory: () => Promise<unknown>,
 ): Promise<string> => {
-  const raw = await captureQuery(factory);
-  const ir = buildSelectQuery(raw);
+  const ir = await captureQuery(factory);
   return selectToSparql(ir);
 };
 

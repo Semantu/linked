@@ -9,6 +9,7 @@ import {
 } from "../test-helpers/query-fixtures";
 import {
   captureQuery,
+  captureRawQuery,
 } from "../test-helpers/query-capture-store";
 import { buildSelectQuery } from "../queries/IRPipeline";
 import type { SelectQuery } from "../queries/SelectQuery";
@@ -34,7 +35,7 @@ const captureIR = async (
   runner: () => Promise<unknown>
 ): Promise<SelectQuery> => {
   const query = await captureQuery(runner);
-  return sanitize(buildSelectQuery(query)) as SelectQuery;
+  return sanitize(query) as SelectQuery;
 };
 
 type SelectCase = {
@@ -625,7 +626,7 @@ describe("select IR parity coverage (Phase 3)", () => {
 
 describe("IR pipeline behavior", () => {
   test("buildSelectQuery lowers raw select input to IR", async () => {
-    const query = await captureQuery(() => queryFactories.sortByDesc());
+    const query = await captureRawQuery(() => queryFactories.sortByDesc());
     const ir = buildSelectQuery(query);
 
     expect(ir.kind).toBe("select");
@@ -655,7 +656,7 @@ describe("IR pipeline behavior", () => {
   });
 
   test("build preserves nested sub-select projections inside array selections", async () => {
-    const query = await captureQuery(() =>
+    const query = await captureRawQuery(() =>
       queryFactories.pluralFilteredNestedSubSelect()
     );
     const ir = buildSelectQuery(query);

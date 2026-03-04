@@ -10,7 +10,6 @@
 import {describe, expect, test, beforeAll, afterAll} from '@jest/globals';
 import {queryFactories, Person, tmpEntityBase} from '../test-helpers/query-fixtures';
 import {captureQuery} from '../test-helpers/query-capture-store';
-import {buildSelectQuery} from '../queries/IRPipeline';
 import {
   selectToSparql,
   createToSparql,
@@ -140,8 +139,7 @@ afterAll(async () => {
 async function runSelect(
   factoryName: keyof typeof queryFactories,
 ): Promise<{sparql: string; ir: IRSelectQuery; results: SparqlJsonResults}> {
-  const raw = await captureQuery(queryFactories[factoryName]);
-  const ir = buildSelectQuery(raw);
+  const ir = await captureQuery(queryFactories[factoryName]) as IRSelectQuery;
   const sparql = selectToSparql(ir);
   const results = await executeSparqlQuery(sparql);
   return {sparql, ir, results};
@@ -1558,8 +1556,7 @@ describe('SparqlStore (via FusekiStore)', () => {
   test('selectQuery — returns mapped result rows', async () => {
     if (!fusekiAvailable) return;
 
-    const raw = await captureQuery(queryFactories.selectName);
-    const ir = buildSelectQuery(raw);
+    const ir = await captureQuery(queryFactories.selectName) as IRSelectQuery;
     const result = await store.selectQuery(ir);
 
     expect(Array.isArray(result)).toBe(true);
@@ -1574,8 +1571,7 @@ describe('SparqlStore (via FusekiStore)', () => {
   test('selectQuery — nested traversals', async () => {
     if (!fusekiAvailable) return;
 
-    const raw = await captureQuery(queryFactories.selectFriendsName);
-    const ir = buildSelectQuery(raw);
+    const ir = await captureQuery(queryFactories.selectFriendsName) as IRSelectQuery;
     const result = await store.selectQuery(ir);
 
     expect(Array.isArray(result)).toBe(true);
