@@ -15,7 +15,7 @@ import type {
  * (SPARQL endpoint, SQL database, in-memory store, etc.).
  *
  * Each method receives a canonical IR query object and returns the result.
- * The calling layer (LinkedStorage / QueryParser) threads the precise
+ * The calling layer (LinkedStorage via queryDispatch) threads the precise
  * DSL-level TypeScript result type back to the caller — the store only
  * needs to produce data that matches the structural result types.
  */

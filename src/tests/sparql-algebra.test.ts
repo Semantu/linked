@@ -6,7 +6,6 @@ import {
   tmpEntityBase,
 } from '../test-helpers/query-fixtures';
 import {captureQuery} from '../test-helpers/query-capture-store';
-import {buildSelectQuery} from '../queries/IRPipeline';
 import {selectToAlgebra} from '../sparql/irToAlgebra';
 import {setQueryContext} from '../queries/QueryContext';
 import type {IRSelectQuery} from '../queries/IntermediateRepresentation';
@@ -37,8 +36,7 @@ setQueryContext('user', {id: 'user-1'}, Person);
 const captureIR = async (
   runner: () => Promise<unknown>,
 ): Promise<IRSelectQuery> => {
-  const query = await captureQuery(runner);
-  return buildSelectQuery(query);
+  return await captureQuery(runner) as IRSelectQuery;
 };
 
 const capturePlan = async (

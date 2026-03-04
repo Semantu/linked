@@ -212,7 +212,7 @@ export type IRFieldValue =
 // Store result types
 // ---------------------------------------------------------------------------
 // These types describe what an IQuadStore implementation should return.
-// The calling layer (LinkedStorage / QueryParser) threads the precise
+// The calling layer (LinkedStorage via queryDispatch) threads the precise
 // DSL-level TypeScript result type back to the caller, so the store
 // only needs to produce data that satisfies these structural contracts.
 // ---------------------------------------------------------------------------

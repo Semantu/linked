@@ -1,6 +1,6 @@
 import {describe, expect, test} from '@jest/globals';
 import {queryFactories} from '../test-helpers/query-fixtures';
-import {captureQuery} from '../test-helpers/query-capture-store';
+import {captureRawQuery} from '../test-helpers/query-capture-store';
 import {setQueryContext} from '../queries/QueryContext';
 import {
   desugarSelectQuery,
@@ -14,7 +14,7 @@ import {Person} from '../test-helpers/query-fixtures';
 
 setQueryContext('user', {id: 'user-1'}, Person);
 
-const capture = (runner: () => Promise<unknown>) => captureQuery(runner);
+const capture = (runner: () => Promise<unknown>) => captureRawQuery(runner);
 
 const asPath = (s: unknown): DesugaredSelectionPath => {
   expect((s as any).kind).toBe('selection_path');

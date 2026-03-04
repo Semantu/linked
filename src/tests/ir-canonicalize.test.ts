@@ -1,11 +1,11 @@
 import {describe, expect, test} from '@jest/globals';
 import {queryFactories} from '../test-helpers/query-fixtures';
-import {captureQuery} from '../test-helpers/query-capture-store';
+import {captureRawQuery} from '../test-helpers/query-capture-store';
 import {DesugaredWhereBoolean, desugarSelectQuery} from '../queries/IRDesugar';
 import {canonicalizeDesugaredSelectQuery} from '../queries/IRCanonicalize';
 import {WhereMethods} from '../queries/SelectQuery';
 
-const capture = (runner: () => Promise<unknown>) => captureQuery(runner);
+const capture = (runner: () => Promise<unknown>) => captureRawQuery(runner);
 
 describe('IR canonicalization (Phase 4)', () => {
   test('canonicalizes where comparison into expression form', async () => {
