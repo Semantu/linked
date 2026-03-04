@@ -234,22 +234,263 @@ const otherQuery = select(PersonShape)
 
 ## Recommendation for CMS
 
-For a CMS, **Option C (Dynamic DSL)** is the fastest path to productivity:
-- You already have `NodeShape` / `PropertyShape` metadata at runtime
-- String paths like `'friends.name'` map naturally to CMS field configs
-- The implementation can resolve strings via existing `getPropertyShapeByLabel()`
-- Feeds directly into the existing pipeline — minimal new code
+**Suggested approach: B + C layered, with E-style composability baked into the core `FieldSet` primitive.**
 
-**Option B (Fluent Builder)** is the best long-term investment:
-- Clean separation of concerns
-- Works well as the backbone that Option C delegates to
-- Can be extended for mutations (create/update builders)
+Build the fluent builder (B) as the core engine. Layer the string-resolving convenience API (C) on top. But instead of treating composability as a separate concern (Option E), make it a first-class feature of the builder via **`FieldSet`** — a named, reusable, composable collection of selections that any query can `.include()`.
 
-**Suggested approach: B + C layered.** Build the fluent builder (B) first as the core engine. Then add the string-resolving convenience layer (C) on top. Option A (raw IR helpers) is useful too but can come later as a power-user escape hatch.
+Option A (raw IR helpers) can come later as a power-user escape hatch.
 
 ---
 
-## Detailed Design Sketch: Option B + C
+## Composability: Why, When, and How
+
+### Shapes define structure. Selections define views.
+
+SHACL shapes already give you composability of *structure* — `AddressShape` knows its properties, `PersonShape.address` points to `AddressShape`, and `NodeShape.getPropertyShapes(true)` walks the inheritance chain. But your CMS doesn't always want *all* properties of a shape. Different surfaces need different **views** of the same shape:
+
+| CMS Surface | What it needs from PersonShape |
+|---|---|
+| **Table overview** | `name`, `email`, `address.city` (summary columns) |
+| **Edit form** | All direct properties + nested address fields |
+| **Person card component** | `name`, `avatar`, `address.city` (compact display) |
+| **Person detail page** | Everything the card needs + `bio`, `age`, `friends.name`, `hobbies.label` |
+| **NL chat: "people in Amsterdam"** | `name`, `email` + filter on `address.city` |
+| **Drag-drop builder** | Union of whatever each dropped component needs |
+
+The static DSL handles this fine — each component writes its own `Person.select(p => [...])`. But in a dynamic CMS, those selections aren't hardcoded. They come from:
+- **Table column configs** (stored as data: `["name", "email", "address.city"]`)
+- **Form field definitions** (derived from shape metadata at runtime)
+- **Component data requirements** (each component declares what fields it needs)
+- **LLM output** (the chat generates a field list + filter from a prompt)
+- **User customization** (user adds/removes columns, reorders fields)
+
+### The composability problem
+
+Without a composable primitive, every surface builds its own flat field list. This leads to:
+
+1. **Duplication** — The PersonCard needs `name + avatar + address.city`. The PersonDetail also needs those, plus more. If you change the card's fields, you have to remember to update the detail page too.
+
+2. **No query merging** — In the drag-drop builder, a user drops a PersonCard and a HobbyList onto a page. Each component has its own query. Ideally the system merges them into one SPARQL query that fetches everything needed for both. Without a composable selection type, merging is ad-hoc.
+
+3. **No incremental building** — The NL chat wants to start with "show people" (basic fields), then the user says "also show their hobbies" — you need to extend the selection, not rebuild it from scratch.
+
+### Solution: `FieldSet` — a composable, reusable selection set
+
+A `FieldSet` is a named collection of property paths rooted at a shape. It's the E-style path object idea, but designed as a *set of paths* rather than individual paths, because in practice you almost always want a group.
+
+```ts
+import { FieldSet } from 'lincd/queries';
+
+// ── Define reusable field sets ──────────────────────────────────
+
+// A concise summary of a person — used in cards, table rows, autocompletes
+const personSummary = FieldSet.for(PersonShape, [
+  'name',
+  'email',
+  'avatar',
+]);
+
+// Full address — used in forms, detail pages, map components
+const fullAddress = FieldSet.for(AddressShape, [
+  'street',
+  'city',
+  'postalCode',
+  'country',
+]);
+
+// Person's address, using a nested FieldSet
+const personAddress = FieldSet.for(PersonShape, {
+  address: fullAddress,        // nest: person.address.{street, city, ...}
+});
+
+// Person card = summary + address city only
+const personCard = FieldSet.for(PersonShape, [
+  personSummary,               // include another FieldSet
+  'address.city',              // plus one extra path
+]);
+
+// Person detail = card + more
+const personDetail = FieldSet.for(PersonShape, [
+  personCard,                  // everything the card needs
+  'bio',
+  'age',
+  { friends: personSummary },  // friends, using the same summary view
+  'hobbies.label',
+]);
+```
+
+### CMS surface examples
+
+#### 1. Table overview — columns as FieldSet
+
+```ts
+// Table config (could be stored as JSON, loaded from DB, or user-customized)
+const tableColumns = FieldSet.for(PersonShape, [
+  'name', 'email', 'address.city', 'friends.size',
+]);
+
+// Query is one line
+const rows = await QueryBuilder
+  .from(PersonShape)
+  .include(tableColumns)
+  .limit(50)
+  .exec();
+
+// User adds a column in the UI → extend the FieldSet
+const extendedColumns = tableColumns.extend(['age']);
+```
+
+#### 2. Edit form — shape-derived FieldSet with `all()`
+
+```ts
+// Select ALL properties of the shape (walks getPropertyShapes(true))
+const formFields = FieldSet.all(PersonShape);
+
+// Or: all direct + expand nested shapes one level
+const formFieldsExpanded = FieldSet.all(PersonShape, { depth: 2 });
+
+// Use in an update query
+const person = await QueryBuilder
+  .from(PersonShape)
+  .include(formFields)
+  .one(personId)
+  .exec();
+```
+
+#### 3. Drag-and-drop builder — merging component requirements
+
+Each component declares its data requirements as a `FieldSet`. When the user drops components onto a page, the builder merges them.
+
+```ts
+// Component declarations (could be decorators, static props, or metadata)
+const personCardFields = FieldSet.for(PersonShape, ['name', 'avatar', 'address.city']);
+const hobbyListFields = FieldSet.for(PersonShape, ['hobbies.label', 'hobbies.description']);
+const friendGraphFields = FieldSet.for(PersonShape, [
+  'name',
+  { friends: FieldSet.for(PersonShape, ['name', 'avatar']) },
+]);
+
+// User drops PersonCard + HobbyList onto a page
+// Builder merges their field sets into one query
+const merged = FieldSet.merge([personCardFields, hobbyListFields]);
+// merged = ['name', 'avatar', 'address.city', 'hobbies.label', 'hobbies.description']
+
+const results = await QueryBuilder
+  .from(PersonShape)
+  .include(merged)
+  .exec();
+
+// Each component receives the full result and picks what it needs —
+// no over-fetching because we only selected the union of what's needed
+```
+
+#### 4. NL chat — incremental query building
+
+```ts
+// LLM generates initial query spec from "show me people in Amsterdam"
+let fields = FieldSet.for(PersonShape, ['name', 'email']);
+let query = QueryBuilder
+  .from(PersonShape)
+  .include(fields)
+  .where('address.city', '=', 'Amsterdam');
+
+let results = await query.exec();
+
+// User: "also show their hobbies"
+// LLM extends the existing field set
+fields = fields.extend(['hobbies.label']);
+results = await query.include(fields).exec();
+
+// User: "only people over 30"
+results = await query.where('age', '>', 30).exec();
+
+// User: "show this as a detail view"
+// Switch to a pre-defined field set
+results = await query.include(personDetail).exec();
+```
+
+#### 5. Shape-level defaults — `shape.all()` / `shape.summary()`
+
+Since shapes already know their properties, `FieldSet` can derive selections from shape metadata:
+
+```ts
+// All properties of a shape (direct + inherited)
+FieldSet.all(PersonShape)
+// → ['name', 'email', 'age', 'bio', 'avatar', 'address', 'friends', 'hobbies']
+
+// All properties, expanding nested shapes to a given depth
+FieldSet.all(PersonShape, { depth: 2 })
+// → ['name', 'email', 'age', 'bio', 'avatar',
+//    'address.street', 'address.city', 'address.postalCode', 'address.country',
+//    'friends.name', 'friends.email', ...,
+//    'hobbies.label', 'hobbies.description']
+
+// "Summary" — properties marked with a specific group or order, or a convention
+// e.g. properties with order < 5, or a custom 'summary' group
+FieldSet.summary(PersonShape)
+// → ['name', 'email'] (only the first few ordered properties)
+```
+
+This is the insight you were getting at: shapes themselves *can* define the field set, and `FieldSet.all(AddressShape)` is effectively the `address.all()` you were imagining. The difference is that `FieldSet` is *detached* from the shape — it's a value you can store, pass around, merge, extend, and serialize.
+
+### FieldSet design
+
+```ts
+class FieldSet {
+  readonly shape: NodeShape;
+  readonly entries: FieldSetEntry[];
+
+  // ── Construction ──
+  static for(shape: NodeShape | string, fields: FieldSetInput[]): FieldSet;
+  static all(shape: NodeShape | string, opts?: { depth?: number }): FieldSet;
+  static summary(shape: NodeShape | string): FieldSet;
+
+  // ── Composition ──
+  extend(fields: FieldSetInput[]): FieldSet;     // returns new FieldSet with added fields
+  omit(fields: string[]): FieldSet;              // returns new FieldSet without named fields
+  pick(fields: string[]): FieldSet;              // returns new FieldSet with only named fields
+  static merge(sets: FieldSet[]): FieldSet;      // union of multiple FieldSets (deduped)
+
+  // ── Introspection ──
+  paths(): PropertyPath[];                        // resolved PropertyPath objects
+  labels(): string[];                             // flat list of dot-paths: ['name', 'address.city']
+  toJSON(): FieldSetJSON;                         // serializable form (for storage/transport)
+  static fromJSON(json: FieldSetJSON): FieldSet;  // deserialize
+
+  // ── Query integration ──
+  // QueryBuilder.include() accepts FieldSet directly
+}
+
+type FieldSetInput =
+  | string                                    // 'name' or 'address.city'
+  | PropertyShape                             // direct reference
+  | PropertyPath                              // pre-built path
+  | FieldSet                                  // include another FieldSet
+  | Record<string, FieldSetInput | FieldSet>; // nested: { address: fullAddress }
+
+type FieldSetEntry = {
+  path: PropertyPath;
+  alias?: string;          // custom result key name
+};
+```
+
+### When composability matters vs when shapes suffice
+
+| Situation | Shapes suffice? | FieldSet needed? |
+|---|---|---|
+| "Show all fields of Address" | Yes — `FieldSet.all(AddressShape)` | Technically uses FieldSet but derives from shape |
+| "Table with name, email, city" | No — partial selection across shapes | Yes |
+| "Card = summary; Detail = card + more" | No — incremental/layered views | Yes — `extend()` |
+| "Merge two component requirements" | No — union of partial views | Yes — `merge()` |
+| "NL chat adds fields incrementally" | No — runtime extension | Yes — `extend()` |
+| "Store column config as JSON" | No — need serialization | Yes — `toJSON()`/`fromJSON()` |
+| "Form with all editable fields" | Yes — `FieldSet.all(shape)` | Derives from shape, but FieldSet is the API |
+
+The pattern: **shapes suffice when you want everything. FieldSet is needed when you want a subset, a union, or an evolving view.**
+
+---
+
+## Detailed Design Sketch: Option B + C + FieldSet composability
 
 ### Core: `QueryBuilder` class
 
@@ -423,25 +664,30 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 
 ## Implementation Plan
 
-### Phase 1: Core builder (Option B)
-- [ ] `PropertyPath` value object
-- [ ] `PathBuilder` with `.prop()` and comparison methods
-- [ ] `QueryBuilder` with `.from()`, `.select()`, `.where()`, `.limit()`, `.offset()`, `.build()`, `.exec()`
-- [ ] Internal `toRawInput()` bridge to existing pipeline
+### Phase 1: Core primitives
+- [ ] `PropertyPath` value object with `.prop()` chaining and comparison methods
+- [ ] `walkPropertyPath(shape, 'friends.name')` — string path → `PropertyPath` resolution using `NodeShape.getPropertyShape(label)` + `PropertyShape.valueShape` walking
+- [ ] `FieldSet` with `.for()`, `.all()`, `.extend()`, `.omit()`, `.pick()`, `.merge()`
+- [ ] `FieldSet.toJSON()` / `FieldSet.fromJSON()` serialization
+- [ ] Tests: FieldSet composition (extend, merge, omit, pick), path resolution
+
+### Phase 2: QueryBuilder (Option B)
+- [ ] `QueryBuilder` with `.from()`, `.select()`, `.include(fieldSet)`, `.where()`, `.limit()`, `.offset()`, `.one()`, `.build()`, `.exec()`
+- [ ] `PathBuilder` callback for `.select(p => [...])` and `.where(p => ...)`
+- [ ] Internal `toRawInput()` bridge — produce `RawSelectInput` from PropertyPaths
 - [ ] Tests: verify builder-produced IR matches DSL-produced IR for equivalent queries
 
-### Phase 2: String resolution (Option C)
-- [ ] `DynamicQuery` wrapper with string path resolution
-- [ ] `walkPropertyPath(shape, 'friends.name')` utility
-- [ ] Error handling for missing/ambiguous property names
+### Phase 3: String convenience layer (Option C)
+- [ ] String overloads on `QueryBuilder`: `.select(['name', 'friends.name'])`, `.where('age', '>=', 18)`
+- [ ] Shape resolution by string label: `.from('Person')`
 - [ ] Tests: string-based queries produce correct IR
 
-### Phase 3: Raw IR helpers (Option A)
+### Phase 4: Raw IR helpers (Option A)
 - [ ] `ir.select()`, `ir.shapeScan()`, `ir.traverse()`, `ir.project()`, `ir.prop()` helpers
 - [ ] Export from `lincd/queries`
 - [ ] Tests: hand-built IR passes through pipeline correctly
 
-### Phase 4: Mutation builders
+### Phase 5: Mutation builders
 - [ ] `MutationBuilder.create(shape).set(prop, value).exec()`
 - [ ] `MutationBuilder.update(shape, id).set(prop, value).exec()`
 - [ ] `MutationBuilder.delete(shape, ids).exec()`
