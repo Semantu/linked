@@ -92,6 +92,7 @@ Currently the DSL has `Person.delete(id)` which deletes a specific entity by ID.
 ```ts
 // Delete all temporary records
 TempRecord.deleteAll()
+// or: TempRecord.delete()  — no args, no .where()
 
 // Generated SPARQL:
 // DELETE WHERE {
@@ -102,7 +103,8 @@ TempRecord.deleteAll()
 
 ```ts
 // Delete entities matching a condition — uses existing .equals() evaluation
-Person.deleteWhere(p => p.status.equals('inactive'))
+Person.delete().where(p => p.status.equals('inactive'))
+// or filter-first: Person.where(p => p.status.equals('inactive')).delete()
 
 // Generated SPARQL:
 // DELETE {
@@ -118,10 +120,10 @@ Person.deleteWhere(p => p.status.equals('inactive'))
 
 ```ts
 // With idea 006 expressions (later phase), richer filters become available:
-Person.deleteWhere(p => p.lastLogin.lt('2024-01-01'))
+Person.delete().where(p => p.lastLogin.lt('2024-01-01'))
 ```
 
-Note: `.deleteWhere()` with a filter falls back to `DELETE { } WHERE { }` (not pure `DELETE WHERE`) since SPARQL's `DELETE WHERE` shorthand doesn't support FILTER. The DSL handles this transparently.
+Note: Filtered delete falls back to `DELETE { } WHERE { }` (not pure `DELETE WHERE`) since SPARQL's `DELETE WHERE` shorthand doesn't support FILTER. The DSL handles this transparently.
 
 ### Algebra mapping
 
@@ -157,90 +159,120 @@ Currently `.update(id, data)` updates a single entity by ID. There's no way to u
 
 Note: Removing a property from entities is just an update that sets the value to null — no special `deleteProperty` method is needed.
 
-### API alternatives
+### API design (recommended: E + D)
 
-There are several possible API shapes for updateWhere. Each has tradeoffs around readability, consistency with the existing DSL, and how naturally it extends to computed values (idea 006).
-
-#### Alternative A: Static method — `updateWhere(predicate).set(data)` (recommended)
+The key insight is that `.select()` already returns a `Promise & PatchedQueryPromise` — the promise is patched with `.where()`, `.limit()`, `.sortBy()` methods that mutate the underlying factory before execution. The same pattern applies naturally to `.update()` and `.delete()`:
 
 ```ts
-Person.updateWhere(p => p.status.equals('inactive')).set({ status: 'archived' })
+// Existing pattern — .select() returns promise with .where() patched on
+Person.select(p => p.name).where(p => p.age.equals(30))
+
+// Same pattern — .update() returns promise with .where() patched on
+Person.update({ status: 'archived' }).where(p => p.status.equals('inactive'))
+
+// Same pattern — .delete() returns promise with .where() patched on
+Person.delete().where(p => p.status.equals('inactive'))
 ```
 
-Pros:
-- Reads naturally: "update persons where status=inactive, set status=archived"
-- The `.set()` chaining mirrors how `.select()` chains with `.where()` — consistent pattern
-- Clean separation: filter logic in `updateWhere()`, data in `.set()`
-- Extends naturally to computed values: `.set(p => ({ price: p.price.times(0.9) }))`
+This is **Alternative E**: chain `.where()` off `.update(data)` and `.delete()`, using the same `PatchedQueryPromise` mechanism that `.select()` already uses.
 
-Cons:
-- Two-step call (but this matches the existing `.select().where()` pattern)
-
-#### Alternative B: Static method — `updateWhere(data, predicate)`
-
-```ts
-Person.updateWhere({ status: 'archived' }, p => p.status.equals('inactive'))
-```
-
-Pros:
-- Single call, concise
-- Data first feels natural for simple cases
-
-Cons:
-- Argument order is debatable — "update what? where?" vs "update where? to what?"
-- When data becomes a callback (idea 006), both args are callbacks — confusing
-- Doesn't match any existing DSL pattern
-
-#### Alternative C: Static method — `updateWhere(predicate, data)`
-
-```ts
-Person.updateWhere(p => p.status.equals('inactive'), { status: 'archived' })
-```
-
-Pros:
-- More SQL-like: `UPDATE ... WHERE ... SET ...`
-- Filter first means you always know what you're scoping
-
-Cons:
-- Same two-callback confusion when data becomes computed
-- The "important part" (what changes) is buried as second arg
-
-#### Alternative D: Chained from `.where()` — `where(predicate).update(data)`
+Additionally, **Alternative D** adds `Person.where(pred)` as a shared entry point:
 
 ```ts
 Person.where(p => p.status.equals('inactive')).update({ status: 'archived' })
 Person.where(p => p.status.equals('inactive')).delete()
+Person.where(p => p.status.equals('inactive')).select(p => p.name)
+```
+
+Both approaches work together. Convenience shortcuts like `deleteWhere()` can be sugar on top.
+
+#### Alternative E: `.update(data).where(pred)` / `.delete().where(pred)` (recommended)
+
+```ts
+Person.update({ status: 'archived' }).where(p => p.status.equals('inactive'))
+Person.delete().where(p => p.status.equals('inactive'))
 ```
 
 Pros:
-- Very consistent: `.where()` becomes a shared entry point for filtered operations
-- `.where().select()`, `.where().update()`, `.where().delete()` — unified pattern
-- Naturally extends: `.where().update(p => ({ price: p.price.times(0.9) }))`
+- **Directly mirrors `.select().where()`** — identical chaining pattern
+- Uses the same `PatchedQueryPromise` mechanism already implemented for `.select()`
+- `.update()` and `.delete()` without `.where()` maintain current by-ID behavior
+- Natural reading order: "update status to archived, where status is inactive"
+- Extends cleanly to 006: `.update(p => ({ price: p.price.times(0.9) })).where(p => p.price.gt(100))`
 
 Cons:
-- Requires adding `.where()` as a static method on Shape (currently only on query result)
-- Changes the existing API surface more significantly
-- `.where()` alone returns an intermediate object — what type is it?
+- `.update(data)` without an `id` is a new overload (currently requires `id` as first arg)
+- `.delete()` without args is a new overload (currently requires `id`)
 
-#### Comparison table
+Overload design:
+```ts
+// Existing — single entity by ID
+Person.update(id, { status: 'archived' })     // → Promise<UpdateResult>
+Person.delete(id)                              // → Promise<DeleteResponse>
 
-| | A: `updateWhere().set()` | B: `(data, pred)` | C: `(pred, data)` | D: `where().update()` |
+// New — bulk with .where()
+Person.update({ status: 'archived' })          // → PatchedMutationPromise (must chain .where())
+  .where(p => p.status.equals('inactive'))
+
+Person.delete()                                // → PatchedMutationPromise (must chain .where() or becomes deleteAll)
+  .where(p => p.status.equals('inactive'))
+```
+
+TypeScript can distinguish overloads: if the first arg to `.update()` is a string/NodeRef, it's the existing by-ID path. If it's a plain object, it's the bulk path. `.delete()` with no args returns a bulk-capable promise.
+
+#### Alternative D: `Person.where(pred).update(data)` / `.delete()` / `.select()`
+
+```ts
+Person.where(p => p.status.equals('inactive')).update({ status: 'archived' })
+Person.where(p => p.status.equals('inactive')).delete()
+Person.where(p => p.status.equals('inactive')).select(p => p.name)
+```
+
+Pros:
+- Unified entry point — `.where()` becomes the start of any filtered operation
+- Very readable: "persons where X → do Y"
+- Makes the scope explicit before the action
+
+Cons:
+- `.where()` returns an intermediate `FilteredShape<T>` object, not a promise
+- Adds a new static method to Shape
+- Slightly more implementation work
+
+#### How they work together
+
+E and D are complementary, not competing. Both should be supported:
+
+```ts
+// E: action-first (mirrors .select().where())
+Person.update({ status: 'archived' }).where(p => p.status.equals('inactive'))
+Person.delete().where(p => p.status.equals('inactive'))
+
+// D: filter-first (unified entry point)
+Person.where(p => p.status.equals('inactive')).update({ status: 'archived' })
+Person.where(p => p.status.equals('inactive')).delete()
+Person.where(p => p.status.equals('inactive')).select(p => p.name)
+
+// Convenience shortcuts (sugar over E)
+Person.deleteAll()  // = Person.delete() with no .where() — deletes all of type
+```
+
+#### Comparison with previous alternatives
+
+| | E: `.update(data).where()` | D: `.where().update()` | A: `updateWhere().set()` | B/C: two-arg |
 |---|---|---|---|---|
-| Readability | Good | OK | OK | Great |
-| Consistency with DSL | Good (chains) | Low | Low | Great (unified) |
-| Extends to 006 | Clean | Confusing | Confusing | Clean |
-| Implementation cost | Medium | Low | Low | Higher |
-| deleteWhere parallel | `deleteWhere(pred)` | `deleteWhere(pred)` | `deleteWhere(pred)` | `where(pred).delete()` |
+| Readability | Great | Great | Good | OK |
+| Mirrors `.select().where()` | Identical | Different direction | Different | No |
+| Implementation via PatchedQueryPromise | Direct reuse | New intermediate type | New intermediate type | N/A |
+| Extends to 006 | Clean | Clean | Clean | Confusing |
+| New API surface | Overloads on existing methods | New static `.where()` | New methods | New methods |
 
-**Recommendation:** Alternative A (`updateWhere().set()`) — it reads well, chains naturally, and when idea 006 lands, `.set()` can accept a callback cleanly. Alternative D is the most elegant long-term design but requires more upfront API changes.
-
-### Full examples (using Alternative A)
+### Full examples (using E and D)
 
 #### Basic literal updates (pre-006, works with `.equals()`)
 
 ```ts
 // Set all inactive users to archived
-Person.updateWhere(p => p.status.equals('inactive')).set({ status: 'archived' })
+Person.update({ status: 'archived' }).where(p => p.status.equals('inactive'))
 
 // Generated SPARQL:
 // DELETE { ?s ex:status ?old_status . }
@@ -253,11 +285,17 @@ Person.updateWhere(p => p.status.equals('inactive')).set({ status: 'archived' })
 ```
 
 ```ts
+// Same thing, filter-first style
+Person.where(p => p.status.equals('inactive')).update({ status: 'archived' })
+// Generates identical SPARQL
+```
+
+```ts
 // Update multiple fields at once
-Person.updateWhere(p => p.role.equals('intern')).set({
+Person.update({
   role: 'employee',
   probation: true,
-})
+}).where(p => p.role.equals('intern'))
 
 // Generated SPARQL:
 // DELETE { ?s ex:role ?old_role . }
@@ -271,9 +309,9 @@ Person.updateWhere(p => p.role.equals('intern')).set({
 
 ```ts
 // Compound filter with AND
-Person.updateWhere(
+Person.update({ status: 'archived' }).where(
   p => p.status.equals('inactive').and(p.role.equals('guest'))
-).set({ status: 'archived' })
+)
 
 // Generated SPARQL:
 // DELETE { ?s ex:status ?old_status . }
@@ -288,9 +326,9 @@ Person.updateWhere(
 
 ```ts
 // Compound filter with OR
-Order.updateWhere(
+Order.update({ archived: true }).where(
   o => o.status.equals('cancelled').or(o.status.equals('expired'))
-).set({ archived: true })
+)
 
 // Generated SPARQL:
 // INSERT { ?s ex:archived true . }
@@ -303,7 +341,7 @@ Order.updateWhere(
 
 ```ts
 // Remove a property (set to null = delete the triple)
-Person.updateWhere(p => p.temporaryFlag.equals(true)).set({ temporaryFlag: null })
+Person.update({ temporaryFlag: null }).where(p => p.temporaryFlag.equals(true))
 
 // Generated SPARQL:
 // DELETE { ?s ex:temporaryFlag ?old_val . }
@@ -316,9 +354,9 @@ Person.updateWhere(p => p.temporaryFlag.equals(true)).set({ temporaryFlag: null 
 
 ```ts
 // Set relations — replace a reference
-Task.updateWhere(t => t.assignee.equals(entity('user-old'))).set({
-  assignee: entity('user-new'),
-})
+Task.update({ assignee: entity('user-new') }).where(
+  t => t.assignee.equals(entity('user-old'))
+)
 
 // Generated SPARQL:
 // DELETE { ?s ex:assignee ?old_assignee . }
@@ -332,9 +370,9 @@ Task.updateWhere(t => t.assignee.equals(entity('user-old'))).set({
 
 ```ts
 // Modify sets — add/remove from multi-value properties
-Person.updateWhere(p => p.role.equals('employee')).set({
+Person.update({
   tags: { add: ['veteran'], remove: ['newbie'] },
-})
+}).where(p => p.role.equals('employee'))
 
 // Generated SPARQL:
 // DELETE { ?s ex:tags "newbie" . }
@@ -346,13 +384,45 @@ Person.updateWhere(p => p.role.equals('employee')).set({
 // }
 ```
 
+#### Bulk delete examples
+
+```ts
+// Delete all temporary records
+TempRecord.deleteAll()
+// or equivalently:
+TempRecord.delete()  // no args, no .where() = delete all
+
+// Generated SPARQL:
+// DELETE WHERE {
+//   ?s rdf:type ex:TempRecord .
+//   ?s ?p ?o .
+// }
+```
+
+```ts
+// Delete entities matching a condition
+Person.delete().where(p => p.status.equals('inactive'))
+
+// or filter-first:
+Person.where(p => p.status.equals('inactive')).delete()
+
+// Generated SPARQL:
+// DELETE {
+//   ?s ?p ?o .
+// }
+// WHERE {
+//   ?s rdf:type ex:Person .
+//   ?s ex:status ?status .
+//   FILTER(?status = "inactive")
+//   ?s ?p ?o .
+// }
+```
+
 #### With idea 006 expressions (later phase)
 
 ```ts
 // Apply 10% discount to expensive products
-Product.updateWhere(p => p.price.gt(100)).set(
-  p => ({ price: p.price.times(0.9) })
-)
+Product.update(p => ({ price: p.price.times(0.9) })).where(p => p.price.gt(100))
 
 // Generated SPARQL:
 // DELETE { ?s ex:price ?old_price . }
@@ -367,10 +437,10 @@ Product.updateWhere(p => p.price.gt(100)).set(
 
 ```ts
 // Increment login count and set timestamp
-Person.updateWhere(p => p.status.equals('active')).set(p => ({
+Person.update(p => ({
   loginCount: p.loginCount.plus(1),
   lastSeen: L.now(),
-}))
+})).where(p => p.status.equals('active'))
 
 // Generated SPARQL:
 // DELETE { ?s ex:loginCount ?old_count . ?s ex:lastSeen ?old_seen . }
@@ -386,20 +456,35 @@ Person.updateWhere(p => p.status.equals('active')).set(p => ({
 ```
 
 ```ts
-// Combine computed filter + computed value
-Employee.updateWhere(
-  e => L.gt(L.minus(L.now(), e.hireDate), 365)  // hired > 1 year ago
-).set(e => ({
-  salary: e.salary.times(1.05),
-  seniorityLevel: e.seniorityLevel.plus(1),
+// Conditional computed value
+Product.where(p => p.category.equals('seasonal')).update(p => ({
+  price: L.ifThen(p.stock.gt(100), p.price.times(0.7), p.price.times(0.9)),
 }))
 ```
 
 ```ts
-// Conditional computed value
-Product.updateWhere(p => p.category.equals('seasonal')).set(p => ({
-  price: L.ifThen(p.stock.gt(100), p.price.times(0.7), p.price.times(0.9)),
-}))
+// Delete old records
+Person.delete().where(p => p.lastLogin.lt('2024-01-01'))
+```
+
+#### Full API summary
+
+```ts
+// === Existing (unchanged) ===
+Person.select(p => p.name)                          // select all
+Person.select(p => p.name).where(p => ...)          // select with filter
+Person.update(id, { name: 'Alice' })                // update by ID
+Person.delete(id)                                   // delete by ID
+
+// === New: Alternative E (action-first) ===
+Person.update({ status: 'archived' }).where(p => ...)  // bulk update
+Person.delete().where(p => ...)                         // bulk delete
+Person.deleteAll()                                      // delete all of type (sugar)
+
+// === New: Alternative D (filter-first) ===
+Person.where(p => ...).update({ status: 'archived' })  // bulk update
+Person.where(p => ...).delete()                         // bulk delete
+Person.where(p => ...).select(p => p.name)              // select (alternative to .select().where())
 ```
 
 ### Algebra mapping
@@ -431,14 +516,15 @@ This means **`deleteWhere` and `updateWhere` can ship before idea 006** with bas
 What works immediately (pre-006):
 - `p.status.equals('inactive')` — equality check
 - `p.name.equals('Alice').and(p.role.equals('admin'))` — chained AND/OR
-- `.set({ field: literal })` — literal update values
-- `.set({ field: null })` — property removal
-- `.set({ field: entity('id') })` — reference updates
-- `.set({ field: { add: [...], remove: [...] } })` — set modifications
+- `.update({ field: literal }).where(...)` — literal update values
+- `.update({ field: null }).where(...)` — property removal
+- `.update({ field: entity('id') }).where(...)` — reference updates
+- `.update({ field: { add: [...], remove: [...] } }).where(...)` — set modifications
+- `.delete().where(...)` — filtered bulk delete
 
 What requires idea 006:
 - `p.age.gt(18)` — comparison operators beyond equality
-- `.set(p => ({ price: p.price.times(0.9) }))` — computed update values
+- `.update(p => ({ price: p.price.times(0.9) })).where(...)` — computed update values
 - `L.now()`, `L.concat(...)` — function expressions
 
 ---
@@ -452,21 +538,16 @@ What requires idea 006:
 - IR needs a new `IRMinusPattern` graph pattern kind
 - `irToAlgebra.ts` converts to `SparqlMinus` algebra node
 
-### DELETE WHERE
-- Add `.deleteAll()` and `.deleteWhere()` methods to the Shape class
-- `.deleteAll()` is unconditional — deletes all entities of the type
-- `.deleteWhere(predicate)` accepts the same evaluation callbacks as `.where()`
-- IR needs to distinguish between targeted delete (by ID) and pattern delete
-- `irToAlgebra.ts` generates `SparqlDeleteWherePlan` for unconditional, `SparqlDeleteInsertPlan` (no insert) for filtered
-- Result type for bulk deletes may differ from single-entity deletes (count only, no IDs)
-
-### UPDATE WHERE
-- `updateWhere(predicate)` returns an intermediate object with `.set(data)` method
-- `.set()` accepts an object (literal values) or — with idea 006 — a callback `p => ({...})`
+### DELETE WHERE / UPDATE WHERE
+- Add `.where()` to the promise returned by `.update(data)` (no id) and `.delete()` (no args), using the same `PatchedQueryPromise` pattern as `.select()`
+- Add `.deleteAll()` as sugar for `.delete()` with no `.where()` — deletes all entities of the type
+- Add static `.where()` on Shape returning a `FilteredShape<T>` intermediate with `.update()`, `.delete()`, `.select()` methods
+- TypeScript overloads on `.update()`: first arg is string/NodeRef → by-ID (existing); first arg is object → bulk (new)
+- TypeScript overloads on `.delete()`: has args → by-ID (existing); no args → bulk (new)
+- IR needs new `IRUpdateWhereMutation` and `IRDeleteWhereMutation` kinds with filter + data/patterns
+- `irToAlgebra.ts` generates `SparqlDeleteWherePlan` for unconditional delete, `SparqlDeleteInsertPlan` for filtered delete and all updates
+- Setting a property to `null` in update data means "delete this triple" (no INSERT for that property)
 - Reuses the existing proxy + Evaluation mechanism from SelectQuery's `.where()`
-- IR needs a new `IRUpdateWhereMutation` kind with pattern + filter + data
-- `irToAlgebra.ts` generates `SparqlDeleteInsertPlan` with filter in WHERE clause
-- Setting a property to `null` in the data means "delete this triple" (no INSERT for that property)
 
 ---
 
@@ -480,28 +561,29 @@ This idea is part of a broader implementation plan alongside idea 006:
    - Wire through `irToAlgebra.ts` → `SparqlMinus`
    - Self-contained, no dependencies
 
-2. **Phase 2: deleteWhere / deleteAll / updateWhere** (~4-5 days)
-   - Add `.deleteAll()`, `.deleteWhere()`, `.updateWhere().set()` to Shape class
+2. **Phase 2: `.update(data).where()` / `.delete().where()` / `.where()`** (~4-5 days)
+   - Add `.where()` to update/delete promises via `PatchedQueryPromise` (same pattern as select)
+   - Add `.deleteAll()`, overloads on `.update()` and `.delete()`
+   - Add static `.where()` on Shape → `FilteredShape<T>` with `.update()`, `.delete()`, `.select()`
    - New `IRDeleteWhereMutation` and `IRUpdateWhereMutation` IR types
    - Wire to `SparqlDeleteWherePlan` and `SparqlDeleteInsertPlan`
    - Uses existing `.equals()` evaluation — no dependency on idea 006
-   - `.set()` accepts plain objects only in this phase
 
 3. **Phase 3: Expression builder** (idea 006, ~5-7 days)
    - Chained methods (`.gt()`, `.times()`, etc.) on proxied properties
    - `L` module for complex expressions
    - Computed fields in SELECT
-   - Enriches `updateWhere` / `deleteWhere` filters with comparison operators
+   - Enriches `.where()` filters on update/delete with comparison operators beyond `.equals()`
 
 4. **Phase 4: Computed mutations** (idea 006, ~3-4 days)
-   - `.set()` accepts callback form: `.set(p => ({ price: p.price.times(0.9) }))`
+   - `.update()` accepts callback form: `.update(p => ({ price: p.price.times(0.9) })).where(...)`
    - Resolves `MutationQuery.ts:33` TODO
-   - Enriches `updateWhere` from phase 2 with computed values
+   - Enriches bulk updates from phase 2 with computed values
 
 ## Open questions
 
 - Should `.minus()` accept multiple arguments (multiple MINUS clauses)?
 - Should `.deleteAll()` require explicit confirmation / be marked as dangerous?
-- How should `.deleteWhere()` and `.updateWhere()` interact with named graphs?
+- How should bulk `.update().where()` and `.delete().where()` interact with named graphs?
 - Should bulk operations return a count of affected triples, or is fire-and-forget acceptable?
-- Should we pursue Alternative D (`where().update()` / `where().delete()`) as a longer-term unified pattern?
+- Should `.delete()` with no args and no `.where()` be equivalent to `.deleteAll()`, or should it require the explicit `.deleteAll()` call to prevent accidents?
