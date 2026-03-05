@@ -584,501 +584,47 @@ This works because the existing pipeline already handles variable deduplication:
 - `VariableRegistry` in `irToAlgebra.ts` maps `(alias, property)` → SPARQL variable name, reusing variables automatically
 - A `property_expr` in the projection and a `property_expr` in a where clause that refer to the same `(sourceAlias, property)` resolve to the same `?variable`
 
-### Variable reuse and shared bindings — future-proofing
+### Variable reuse and shared bindings — forward-compatibility
 
-#### The problem
+> Full design: [008-shared-variable-bindings.md](./008-shared-variable-bindings.md)
 
-Some queries need **two different property paths to end at the same node**. Consider: "people whose hobbies include their best friend's favorite hobby." In SPARQL:
+Some SPARQL queries need two property paths to end at the same node (shared variable). Example: "people whose hobbies include their best friend's favorite hobby" — both `bestFriend.favoriteHobby` and `hobbies` must resolve to the same `?hobby` variable.
 
-```sparql
-SELECT ?person ?name ?hobby WHERE {
-  ?person a ex:Person .
-  ?person ex:name ?name .
-  ?person ex:bestFriend ?bf .
-  ?bf ex:favoriteHobby ?hobby .      ←─┐
-  ?person ex:hobbies ?hobby .         ←─┘ same ?hobby = same node
-}
-```
+The agreed API is **`.as('name')`** — label a path endpoint. If multiple paths use the same name, they share a SPARQL variable. `.matches('name')` is sugar for `.as('name')` (reads better when referencing an existing name). No type checking, no declare/consume distinction, no shape compatibility enforcement. Same name = same variable, period.
 
-`?hobby` appears in two triple patterns. Path A (`person → bestFriend → favoriteHobby`) and path B (`person → hobbies`) both end at the **same variable**. The SPARQL engine only returns results where both paths reach the same node — that's the "join." No `FILTER` needed — it's a structural constraint in the graph pattern itself.
+**What v1 must do to prepare:**
 
-Why does this matter?
-- **More efficient** than `FILTER(?x = ?y)` — SPARQL engines can use index lookups instead of post-filtering
-- **Enables patterns** that filters can't express (e.g. joins across OPTIONAL branches)
-- **Common in real CMS queries**: "articles by my friends", "products in the same category as my wishlist", "people who share hobbies"
-
-#### How it differs from what we have today
-
-The current DSL's `.equals()` compares two path endpoints with a FILTER:
-
-```ts
-// Today: generates FILTER(?bestFriend_favoriteHobby = ?hobbies)
-Person.select(p => [p.name, p.bestFriend.favoriteHobby])
-  .where(p => p.bestFriend.favoriteHobby.equals(p.hobbies));
-```
-
-```sparql
--- Generated SPARQL (today) — two separate variables, post-compared:
-SELECT ?name ?favHobby ?hobbies WHERE {
-  ?person ex:name ?name .
-  ?person ex:bestFriend/ex:favoriteHobby ?favHobby .
-  ?person ex:hobbies ?hobbies .
-  FILTER(?favHobby = ?hobbies)       ← post-filter, less efficient
-}
-```
-
-With a shared variable binding, both paths would use **one variable**:
-
-```sparql
--- Desired SPARQL (with shared variable) — one variable, structural join:
-SELECT ?name ?hobby WHERE {
-  ?person ex:name ?name .
-  ?person ex:bestFriend/ex:favoriteHobby ?hobby .
-  ?person ex:hobbies ?hobby .          ← same ?hobby, no FILTER needed
-}
-```
-
-Fewer variables, no `FILTER`, better performance.
-
-#### What `.as()` and `.joins()` actually do
-
-These are two complementary operations on a property path:
-
-- **`.as('name')`** — "I'm traversing this path. Label the node I arrive at `name`. Other paths can reference this label."
-- **`.joins('name')`** — "I'm traversing this path. The node I arrive at must be the **same node** as the one labelled `name`."
-
-Think of it like assigning a variable name (`.as()`) and then reusing that variable (`.joins()`). At the SPARQL level, both paths simply use the same `?variable`.
-
-**Important**: `.joins()` is NOT an SQL-style join. It's simpler — it just means "these two paths end at the same node."
-
-#### API design options for bindings
-
-There are several ways to express this. Here are the main options:
-
-**Option 1: Inline `.as()` / `.joins()` on paths (reference-based)**
-
-```ts
-Person.select(p => {
-  // .as() returns a binding handle AND still selects the path
-  const hobby = p.bestFriend.favoriteHobby.as('hobby');
-  return [
-    p.name,
-    hobby,                        // selects bestFriend → favoriteHobby, labels endpoint 'hobby'
-    p.hobbies.joins(hobby),       // selects hobbies, constrains endpoint to same node as 'hobby'
-  ];
-});
-```
-
-What `.joins(hobby)` means here: "traverse `person → hobbies` and the node I arrive at must be the same node that path A (`bestFriend → favoriteHobby`) arrived at." The `hobby` variable is a reference returned by `.as()`.
-
-Generated SPARQL:
-```sparql
-SELECT ?person ?name ?hobby WHERE {
-  ?person ex:name ?name .
-  ?person ex:bestFriend/ex:favoriteHobby ?hobby .
-  ?person ex:hobbies ?hobby .                       ← same ?hobby
-}
-```
-
-**Option 2: Inline `.as()` / `.joins()` on paths (string-based)**
-
-Same concept but string names instead of reference objects:
-
-```ts
-Person.select(p => [
-  p.name,
-  p.bestFriend.favoriteHobby.as('hobby'),   // label the endpoint 'hobby'
-  p.hobbies.joins('hobby'),                  // reference by string name
-]);
-```
-
-Simpler API but no compile-time safety that the binding exists.
-
-**Option 3: Separate `.bind()` / `.constrain()` methods on QueryBuilder**
-
-Bindings declared outside the select — more explicit, better for dynamic/string-based queries:
-
-```ts
-QueryBuilder
-  .from(PersonShape)
-  .select(['name', 'bestFriend.favoriteHobby', 'hobbies'])
-  .bind('hobby', 'bestFriend.favoriteHobby')   // label endpoint of this path 'hobby'
-  .constrain('hobbies', 'hobby')                // endpoint of this path = same node as 'hobby'
-  .exec();
-```
-
-More verbose but clearer for dynamic queries. Good for CMS builders where bindings are stored as JSON config.
-
-**Option 4: Implicit path intersection (no explicit API)**
-
-The system auto-detects when two paths end at overlapping types and suggests shared variables. Too magical, hard to reason about. Mentioned for completeness.
-
-**Recommendation**: Option 1 or 2 for the static DSL (ergonomic), Option 3 for the dynamic QueryBuilder (explicit, serializable). Both produce the same IR.
-
-#### Full worked example with generated SPARQL
-
-```ts
-// ── Callback style (Option 1) ───────────────────────────────────
-const query = QueryBuilder
-  .from(PersonShape)
-  .select(p => {
-    const hobby = p.path('bestFriend.favoriteHobby').as('hobby');
-    return [
-      p.path('name'),
-      hobby,                              // path A: person → bestFriend → favoriteHobby → ?hobby
-      p.path('hobbies').joins(hobby),     // path B: person → hobbies → ?hobby (same node!)
-    ];
-  });
-
-// ── String style (Option 3) ─────────────────────────────────────
-const query2 = QueryBuilder
-  .from(PersonShape)
-  .select(['name', 'bestFriend.favoriteHobby', 'hobbies.label'])
-  .bind('hobby', 'bestFriend.favoriteHobby')  // label the endpoint
-  .constrain('hobbies', 'hobby')               // this path shares that endpoint
-  .exec();
-```
-
-Both produce the same SPARQL:
-```sparql
-SELECT ?name ?hobby ?hobbyLabel WHERE {
-  ?person a ex:Person .
-  ?person ex:name ?name .
-  ?person ex:bestFriend ?bf .
-  ?bf ex:favoriteHobby ?hobby .          ← path A ends at ?hobby
-  ?hobby ex:label ?hobbyLabel .
-  ?person ex:hobbies ?hobby .            ← path B ends at ?hobby (same node)
-}
-```
-
-The key: both `ex:favoriteHobby ?hobby` and `ex:hobbies ?hobby` use the same `?hobby`. Only people whose hobbies list includes their best friend's favorite are returned.
-
-#### How bindings compose with FieldSets
-
-A FieldSet can **export** a binding (label an endpoint with `.as()`) or **consume** a binding (constrain a path with `.joins()`). When FieldSets are merged into one query, exports and consumers connect automatically.
-
-```ts
-// FieldSet A: traverses to bestFriend's hobby and labels the endpoint 'hobby'
-const bestFriendHobby = FieldSet.for(PersonShape, (p) => [
-  p.path('bestFriend.favoriteHobby').as('hobby'),
-]);
-// This FieldSet says: "I select bestFriend.favoriteHobby and I call that endpoint 'hobby'"
-
-// FieldSet B: traverses to hobbies and constrains to the 'hobby' endpoint
-const matchingHobbies = FieldSet.for(PersonShape, (p) => [
-  p.path('hobbies').joins('hobby'),
-]);
-// This FieldSet says: "I select hobbies, but only those that are the same node as 'hobby'"
-
-// When included together, the binding connects them:
-const query = QueryBuilder
-  .from(PersonShape)
-  .include(bestFriendHobby)    // exports 'hobby' binding
-  .include(matchingHobbies)    // consumes 'hobby' binding
-  .exec();
-```
-
-Generated SPARQL:
-```sparql
-SELECT ?person ?hobby WHERE {
-  ?person a ex:Person .
-  ?person ex:bestFriend/ex:favoriteHobby ?hobby .    ← exported as 'hobby'
-  ?person ex:hobbies ?hobby .                         ← joined to 'hobby'
-}
-```
-
-The merge collects binding declarations across all FieldSets. A `.joins('hobby')` in one FieldSet matches `.as('hobby')` from another. At the IR level, both paths get the same alias → same SPARQL variable.
-
-#### More realistic CMS examples
-
-```ts
-// ── "Products in the same category as the user's wishlist" ──────
-//
-// Two shapes involved: UserShape and ProductShape
-// The binding connects them: user's wishlist category = product's category
-
-const wishlistCategory = FieldSet.for(UserShape, (p) => [
-  p.path('wishlist.category').as('cat'),   // label: the category node
-]);
-// Traverses: user → wishlist → category → ?cat
-
-const productsInCategory = FieldSet.for(ProductShape, (p) => [
-  p.path('category').joins('cat'),         // must be the same category node
-  p.path('name'),
-  p.path('price'),
-]);
-// Traverses: product → category → ?cat (same node!)
-
-// Generated SPARQL:
-// SELECT ?cat ?productName ?productPrice WHERE {
-//   ?user ex:wishlist/ex:category ?cat .      ← path A ends at ?cat
-//   ?product ex:category ?cat .               ← path B ends at ?cat (same node)
-//   ?product ex:name ?productName .
-//   ?product ex:price ?productPrice .
-// }
-// Note: multi-shape queries are a separate feature, but bindings compose with it.
-
-
-// ── "Articles written by friends of the current user" ───────────
-//
-// Binding: the friend node = the article's author
-
-const userFriends = FieldSet.for(UserShape, (p) => [
-  p.path('friends').as('friend'),          // label: the friend node
-]);
-// Traverses: user → friends → ?friend
-
-const articlesByFriends = FieldSet.for(ArticleShape, (p) => [
-  p.path('author').joins('friend'),        // author must be the friend node
-  p.path('title'),
-  p.path('publishedAt'),
-]);
-// Traverses: article → author → ?friend (same node as user's friend!)
-
-// Generated SPARQL:
-// SELECT ?friend ?title ?publishedAt WHERE {
-//   ?user ex:friends ?friend .                ← path A ends at ?friend
-//   ?article ex:author ?friend .              ← path B ends at ?friend
-//   ?article ex:title ?title .
-//   ?article ex:publishedAt ?publishedAt .
-// }
-
-
-// ── NL chat: incrementally adding a binding ─────────────────────
-// Step 1: "Show me people and their hobbies"
-let chatQuery = QueryBuilder.from(PersonShape)
-  .select(['name', 'hobbies.label']);
-
-// Step 2: "Now show which of their friends share the same hobbies"
-// The LLM generates code that:
-//   1. Labels the hobby endpoint with .bind()
-//   2. Selects friends' hobbies
-//   3. Constrains friends' hobbies to match with .constrain()
-chatQuery = chatQuery
-  .bind('hobby', 'hobbies')               // label the hobbies endpoint 'hobby'
-  .select([
-    ...chatQuery.selections(),             // keep existing: name, hobbies.label
-    'friends.name',
-    'friends.hobbies',                     // also select friends' hobbies
-  ])
-  .constrain('friends.hobbies', 'hobby');  // friends' hobbies = same node as our hobbies
-
-// Generated SPARQL:
-// SELECT ?name ?hobbyLabel ?friendName WHERE {
-//   ?person ex:name ?name .
-//   ?person ex:hobbies ?hobby .             ← labelled 'hobby'
-//   ?hobby ex:label ?hobbyLabel .
-//   ?person ex:friends ?friend .
-//   ?friend ex:name ?friendName .
-//   ?friend ex:hobbies ?hobby .             ← same ?hobby (friends who share hobbies)
-// }
-
-
-// ── Drag-drop builder: component-declared bindings ──────────────
-// A "CategoryFilter" component exports a binding
-const categoryFilter = FieldSet.for(ProductShape, (p) => [
-  p.path('category').as('selectedCat'),
-  p.path('category.name'),
-]);
-
-// A "RelatedProducts" component consumes it
-const relatedProducts = FieldSet.for(ProductShape, (p) => [
-  p.path('relatedTo.category').joins('selectedCat'),
-  p.path('relatedTo.name'),
-]);
-
-// When both components are on the same page, merge connects them automatically:
-const pageFields = FieldSet.merge([categoryFilter, relatedProducts]);
-const pageQuery = QueryBuilder.from(ProductShape).include(pageFields).exec();
-// → one SPARQL query where ?selectedCat is shared between the two patterns
-```
-
-#### FieldSet immutability with bindings
-
-Because FieldSets are immutable, bindings are safe to share across forks:
-
-```ts
-const base = FieldSet.for(PersonShape, (p) => [
-  p.path('bestFriend.favoriteHobby').as('hobby'),  // exports 'hobby'
-]);
-
-// Extending creates a new FieldSet — base is unchanged
-const extended = base.extend(['age', 'email']);
-// extended still carries the 'hobby' binding from base
-
-// A separate FieldSet that consumes the binding
-const matcher = FieldSet.for(PersonShape, (p) => [
-  p.path('hobbies').joins('hobby'),                 // consumes 'hobby'
-]);
-
-// Compose them
-const query = QueryBuilder.from(PersonShape)
-  .include(extended)   // has 'hobby' binding
-  .include(matcher)    // references 'hobby' binding
-  .exec();
-
-// base, extended, matcher are all unchanged after this
-```
-
-#### QueryBuilder immutability with bindings
-
-Bindings are part of the builder state that gets cloned on fork:
-
-```ts
-const base = QueryBuilder
-  .from(PersonShape)
-  .select(['name', 'bestFriend.favoriteHobby'])
-  .bind('hobby', 'bestFriend.favoriteHobby');
-
-// Fork A: adds a structural constraint (shared variable)
-const withJoin = base.constrain('hobbies', 'hobby');
-// base unchanged — still has binding, no constraint
-// withJoin has binding + constraint
-
-// Fork B: filters on the named endpoint's properties
-const withFilter = base.where('bestFriend.favoriteHobby.label', '=', 'chess');
-// base unchanged
-```
-
-#### Open design questions for bindings
-
-1. **Binding scope**: Where do binding names live?
-   - **Per-query** (simplest): all FieldSets included in a query share one namespace. Risk: name collisions when merging independently authored FieldSets.
-   - **Per-FieldSet with export**: each FieldSet has its own namespace. `.as()` is local; an explicit `.export('name')` publishes it to the query scope. More safe but more verbose.
-   - **Hierarchical**: FieldSets inherit parent scope. A sub-FieldSet (nested under a traversal) can see parent bindings but not vice versa.
-   - **Recommendation**: Start with per-query (simple), add namespacing later if collision becomes a real problem.
-
-2. **Binding validation**: When should we error on an unresolved `.joins()` reference?
-   - **Eagerly** (at FieldSet creation): impossible — the exporting FieldSet might not be included yet.
-   - **At query build time** (when `toRawInput()` or `build()` is called): best option. All FieldSets have been included, so we can check that every `.joins('x')` has a matching `.as('x')`.
-   - **At SPARQL generation**: too late, confusing error messages.
-   - **Recommendation**: Validate at `build()` time. Clear error: "Binding 'hobby' is referenced by `.joins('hobby')` but no path declares `.as('hobby')`. Did you forget to include a FieldSet?"
-
-3. **Multiple exporters**: What if two FieldSets both declare `.as('hobby')`?
-   - **Error**: strictest, prevents confusion.
-   - **Last-wins**: simple but fragile.
-   - **Merge if compatible**: if both paths end at the same shape/type, allow it (they agree on the semantic). If they disagree, error.
-   - **Recommendation**: Error by default. Users should use one FieldSet for one binding name.
-
-4. **Cross-shape bindings**: The examples above show bindings connecting two different shapes (UserShape + ProductShape). This requires multi-shape queries — a separate feature. Should bindings be designed now to handle this, or scoped to single-shape queries first?
-   - **Recommendation**: Design the binding types to be shape-agnostic (just string labels + path references). Multi-shape query support can land later; bindings "just work" with it because they're resolved at the IR level where shapes are already flattened to aliases.
-
-5. **Binding + OPTIONAL**: If a path with `.joins()` is inside an OPTIONAL block, the semantics change — the join only applies when the OPTIONAL matches. Is that intended? Should we warn?
-
-6. **Serialization**: How do bindings serialize in `FieldSet.toJSON()`?
-   ```json
-   {
-     "shape": "PersonShape",
-     "fields": [
-       { "path": "bestFriend.favoriteHobby", "as": "hobby" },
-       { "path": "hobbies", "joins": "hobby" }
-     ]
-   }
-   ```
-   Simple and JSON-friendly — good for CMS builders that store field configs.
-
-7. **Naming convention**: `.joins()` might be confused with SQL joins. Alternatives:
-   - `.sameAs('hobby')` — clear but overloaded (owl:sameAs in RDF)
-   - `.sharesWith('hobby')` — descriptive but verbose
-   - `.bindsTo('hobby')` — neutral
-   - `.constrainTo('hobby')` — explicit about what it does
-   - `.joins('hobby')` — short and technically accurate for graph joins
-   - **Open**: which reads best to CMS developers who may not know SPARQL?
-
-#### What this means for v1 design
-
-The v1 types should **reserve space** for bindings even if the implementation is deferred:
+Reserve optional fields in the v1 types. These cost nothing — they're ignored by `toRawInput()` until binding support is implemented. But they ensure FieldSets and QueryBuilders created now can carry `.as()` declarations that activate later.
 
 ```ts
 class PropertyPath {
-  readonly steps: PropertyShape[];
-  readonly rootShape: NodeShape;
-  readonly bindingName?: string;       // ← reserved for .as()
-
-  as(name: string): PropertyPath {
-    return new PropertyPath(this.steps, this.rootShape, name);
-  }
+  readonly bindingName?: string;       // reserved for .as()
+  as(name: string): PropertyPath { ... }
+  matches(name: string): PropertyPath { return this.as(name); }  // sugar
 }
 
 type FieldSetEntry = {
   path: PropertyPath;
   alias?: string;
   scopedFilter?: WhereCondition;
-  bindingName?: string;                // ← reserved: exported binding
-  joinBinding?: string;                // ← reserved: consumed binding
+  bindingName?: string;                // reserved: .as() on this entry
 };
 
 type WhereConditionValue =
   | string | number | boolean | Date
   | NodeReferenceValue
-  | { $ref: string };                  // ← reserved: binding reference
+  | { $ref: string };                  // reserved: binding reference
 
-// QueryBuilder internal state
 class QueryBuilder {
-  private _bindings: Map<string, PropertyPath>;  // ← reserved
-  // ...
+  private _bindings: Map<string, PropertyPath>;  // reserved
 }
 ```
 
-This costs nothing in v1 — the fields are optional, ignored by `toRawInput()` until binding support is implemented. But it means FieldSets created now can carry `.as()` declarations that "just work" when bindings land.
+**QueryBuilder string API** (also reserved for later):
+- `.bind('name', 'path')` — label the endpoint of a path
+- `.constrain('path', 'name')` — constrain a path's endpoint to match a named binding
 
-#### What needs to change in the IR for bindings
-
-Not much. The core idea: when two paths declare the same binding name, `LoweringContext` gives them the same alias → same SPARQL variable.
-
-```
-Today (no bindings):
-  person → bestFriend → a1 → favoriteHobby → a2    ?a2 = ?hobby1
-  person → hobbies → a3                              ?a3 = ?hobby2 (different!)
-
-With bindings:
-  person → bestFriend → a1 → favoriteHobby → a2     a2 is named 'hobby'
-  person → hobbies → a2                              reuses a2 → same ?variable!
-```
-
-The change to `LoweringContext` is one new map:
-
-```ts
-class LoweringContext {
-  private namedBindings = new Map<string, string>();  // bindingName → alias
-
-  getOrCreateTraversal(from: string, property: string, bindingName?: string): string {
-    // If this traversal endpoint has a binding name, register or reuse it
-    if (bindingName) {
-      if (this.namedBindings.has(bindingName)) {
-        // Another path already claimed this name → reuse the same alias
-        return this.namedBindings.get(bindingName);
-      }
-      const alias = this.nextAlias();
-      this.namedBindings.set(bindingName, alias);
-      // ... create traverse pattern as normal
-      return alias;
-    }
-    // ... existing dedup logic unchanged
-  }
-
-  resolveBinding(name: string): string {
-    const alias = this.namedBindings.get(name);
-    if (!alias) throw new Error(`Unknown binding: ${name}`);
-    return alias;
-  }
-}
-```
-
-The change to `IRTraversePattern` is one optional field:
-
-```ts
-type IRTraversePattern = {
-  kind: 'traverse';
-  from: IRAlias;
-  to: IRAlias;
-  property: string;
-  filter?: IRExpression;
-  bindingName?: string;    // ← new: names this endpoint for reuse
-};
-```
-
-Everything downstream (`irToAlgebra`, `algebraToString`) already works with aliases. If two traverse patterns share the same `to` alias, they naturally produce the same `?variable`. The binding system just makes that intentional instead of accidental.
+**IR change** (when activated): one optional `bindingName?: string` on `IRTraversePattern`, one `Map<string, string>` on `LoweringContext`. Everything downstream already works with aliases.
 
 ---
 
@@ -1585,7 +1131,7 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 
 10. **Immutability implementation for FieldSet:** FieldSet entries are an array of `FieldSetEntry`. Extend/omit/pick create new arrays. But the entries themselves reference PropertyShapes (which are mutable objects in the current codebase). Should FieldSet deep-freeze its entries? Or is it sufficient that the FieldSet *array* is new (so you can't accidentally mutate the list), while PropertyShape references are shared? Probably the latter — PropertyShapes are effectively singletons registered on NodeShapes.
 
-11. **Shared variable bindings — see dedicated section above** ("Variable reuse and shared bindings") for detailed API options, open questions (scope, validation, multiple exporters, cross-shape, OPTIONAL semantics, serialization, naming), and IR changes.
+11. **Shared variable bindings** — moved to [008-shared-variable-bindings.md](./008-shared-variable-bindings.md). For 003, just reserve optional `bindingName` fields in v1 types (see "forward-compatibility" section above).
 
 12. **ShapeAdapter property format — string vs reference resolution:** When the adapter `properties` map uses strings, the string is resolved as a property label on the respective shape (`from` shape for keys, `to` shape for values). When the adapter uses `{id: someIRI}` references, those are used directly. But what about dotted paths like `'address.city'`? These imply chained resolution: first resolve `address` on the `from` shape, then `city` on `address`'s valueShape. The target side similarly resolves `'address.addressLocality'` step by step. This makes dotted path mapping work, but should the adapter also support structural differences where one shape has a flat property and the other has a nested path? (e.g. `'city'` → `'address.addressLocality'`). Probably yes, but that's a later extension.
 
