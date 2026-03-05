@@ -28,11 +28,76 @@ Person.select(p => ({ ageInMonths: p.age * 12 }))
 Person.select(p => p.name).where(p => p.age > 18)
 ```
 
-All computed expressions must use **function-call syntax** through an expression builder module.
+However, proxies **can** intercept method calls. This gives us two complementary approaches.
 
-## Expression builder module design
+## Two expression syntaxes
 
-A short-named module (e.g., `L` for Linked expressions) that provides typed builder functions:
+### 1. Chained method syntax (preferred for simple expressions)
+
+Since proxy objects can intercept method calls, we can add expression methods directly to the proxied property objects. This gives the most natural, readable DSL:
+
+```ts
+// Comparison — clean and readable
+p.age.gt(18)           // FILTER(?age > 18)
+p.age.gte(18)          // FILTER(?age >= 18)
+p.age.lt(5)            // FILTER(?age < 5)
+p.age.lte(5)           // FILTER(?age <= 5)
+p.name.eq('Alice')     // FILTER(?name = "Alice")
+p.name.neq('Bob')      // FILTER(?name != "Bob")
+
+// Arithmetic — works well for single operations
+p.age.times(12)        // (?age * 12)
+p.age.plus(1)          // (?age + 1)
+p.price.minus(10)      // (?price - 10)
+p.total.divide(2)      // (?total / 2)
+
+// String
+p.name.contains('foo') // CONTAINS(?name, "foo")
+p.name.strlen()        // STRLEN(?name)
+```
+
+Each method returns an expression node, so results can be used anywhere an expression is expected (projections, filters, mutation values).
+
+### 2. `L` module syntax (needed for complex expressions)
+
+Chained arithmetic has a **precedence problem**: `p.age.plus(5).times(12)` always evaluates left-to-right as `(age + 5) * 12`. There's no way to express `age + (5 * 12)` or combine values from multiple properties. The `L` module handles these cases:
+
+```ts
+import { L } from '@_linked/core';
+
+// Multi-property expressions
+L.concat(p.firstName, " ", p.lastName)    // CONCAT(?firstName, " ", ?lastName)
+L.plus(p.basePrice, p.tax)               // (?basePrice + ?tax)
+
+// Explicit precedence control
+L.plus(p.age, L.times(5, 12))            // (?age + (5 * 12))
+
+// Functions with no property context
+L.now()                                   // NOW()
+L.coalesce(p.nickname, p.name)           // COALESCE(?nickname, ?name)
+L.ifThen(p.age.gt(18), 'adult', 'minor') // IF(?age > 18, "adult", "minor")
+```
+
+### When to use which
+
+| Scenario | Syntax | Example |
+|---|---|---|
+| Simple comparison | Chained | `p.age.gt(18)` |
+| Single arithmetic op | Chained | `p.age.times(12)` |
+| Multi-property math | `L` module | `L.plus(p.basePrice, p.tax)` |
+| Nested precedence | `L` module | `L.plus(p.age, L.times(5, 12))` |
+| String concat (multi) | `L` module | `L.concat(p.first, " ", p.last)` |
+| No-arg functions | `L` module | `L.now()` |
+| Conditionals | `L` module | `L.ifThen(cond, a, b)` |
+
+Both syntaxes produce the same `IRExpression` nodes internally, so they're fully interchangeable and composable:
+
+```ts
+// Mix and match — chained result used inside L
+L.ifThen(p.age.gte(18), p.salary.times(1.1), p.salary)
+```
+
+## `L` module reference
 
 ```ts
 import { L } from '@_linked/core';
@@ -42,14 +107,6 @@ L.plus(a, b)       // a + b
 L.minus(a, b)      // a - b
 L.times(a, b)      // a * b
 L.divide(a, b)     // a / b
-
-// Comparison (for WHERE/FILTER)
-L.eq(a, b)         // a = b
-L.neq(a, b)        // a != b
-L.gt(a, b)         // a > b
-L.gte(a, b)        // a >= b
-L.lt(a, b)         // a < b
-L.lte(a, b)        // a <= b
 
 // String
 L.concat(a, b, c)  // CONCAT(a, b, c)
@@ -74,13 +131,15 @@ Each function returns an `IRExpression` node that the IR pipeline can process.
 
 ### Type safety
 
-The `L` module functions should be generically typed to preserve type information:
+Both syntaxes should be generically typed to preserve type information:
 
 ```ts
-// L.times knows it returns a numeric expression
-L.times(p.age, 12)  // type: NumericExpression
+// Chained — return type matches operation
+p.age.times(12)                  // type: NumericExpression
+p.name.contains('foo')           // type: BooleanExpression
 
-// L.concat knows it returns a string expression
+// L module — return type inferred from function
+L.times(p.age, 12)              // type: NumericExpression
 L.concat(p.firstName, " ", p.lastName)  // type: StringExpression
 ```
 
@@ -89,11 +148,11 @@ L.concat(p.firstName, " ", p.lastName)  // type: StringExpression
 ### Computed fields in SELECT
 
 ```ts
-// Derived field using BIND
+// Derived fields using both syntaxes
 Person.select(p => ({
   name: p.name,
   fullName: L.concat(p.firstName, " ", p.lastName),
-  ageInMonths: L.times(p.age, 12),
+  ageInMonths: p.age.times(12),
 }))
 
 // Generated SPARQL:
@@ -111,10 +170,15 @@ Person.select(p => ({
 ### Computed filters in WHERE
 
 ```ts
-// Filter with expression function
-Person.select(p => p.name).where(p => L.gt(p.age, 18))
+// Chained syntax — preferred for simple filters
+Person.select(p => p.name).where(p => p.age.gt(18))
 
-// Generated SPARQL:
+// L module — for complex filters
+Person.select(p => p.name).where(p =>
+  L.ifThen(p.age.gte(18), p.salary.gt(0), L.bound(p.allowance))
+)
+
+// Generated SPARQL (simple):
 // SELECT ?name WHERE {
 //   ?s rdf:type ex:Person .
 //   OPTIONAL { ?s ex:name ?name . }
@@ -128,7 +192,7 @@ Person.select(p => p.name).where(p => L.gt(p.age, 18))
 ```ts
 // Increment age and set lastModified to now
 Person.update(p1, p => ({
-  age: L.plus(p.age, 1),
+  age: p.age.plus(1),
   lastModified: L.now(),
 }))
 
@@ -145,10 +209,10 @@ Person.update(p1, p => ({
 ```
 
 ```ts
-// Apply 10% discount to products over $100
-Product.updateAll(p => ({
-  price: L.times(p.price, 0.9),
-})).where(p => L.gt(p.price, 100))
+// Apply 10% discount to products over $100 (uses updateWhere from idea 007)
+Product.updateWhere(p => ({
+  price: p.price.times(0.9),
+}), p => p.price.gt(100))
 
 // Generated SPARQL:
 // DELETE { ?s ex:price ?old_price . }
@@ -178,6 +242,8 @@ Already serialized by `algebraToString.ts` as `BIND(expr AS ?var)`.
 
 ## Implementation considerations
 
+- Chained methods (`.gt()`, `.times()`, etc.) are added to the proxied `QueryPrimitive` / `QueryBuilderObject` classes
+- Both chained and `L` module produce the same `IRExpression` nodes — they're just two entry points
 - The `L` module needs to produce `IRExpression` nodes that flow through the existing IR pipeline
 - `irToAlgebra.ts` needs to convert `IRExpression` in projection items to `SparqlExtend` nodes
 - For mutations: `IRUpdateMutation` currently expects `IRFieldValue` (literal data); needs to also accept `IRExpression` for computed values
@@ -185,9 +251,20 @@ Already serialized by `algebraToString.ts` as `BIND(expr AS ?var)`.
 - `MutationQuery.ts:33` TODO can be resolved by this feature
 - Expression builder functions should validate argument types at build time where possible
 
+## Implementation phases
+
+This idea is part of a broader implementation plan alongside idea 007. See the phased approach:
+
+1. **Phase 1** — MINUS support (idea 007, no dependency on this idea)
+2. **Phase 2** — `deleteWhere` / `deleteAll` / `updateWhere` (idea 007, uses existing `.equals()` evaluation — no dependency on this idea)
+3. **Phase 3** — Expression builder: chained methods + `L` module, computed fields in SELECT (~5-7 days)
+4. **Phase 4** — Update functions / computed mutations via expressions (~3-4 days)
+
+Phases 3-4 are this idea. Phases 1-2 (idea 007) can proceed first without any expression infrastructure.
+
 ## Open questions
 
 - Should `L` be the module name, or something more descriptive? (`Expr`, `Fn`, `Q`?)
 - Should comparison functions be usable both in `.where()` and in HAVING clauses?
 - How should null/undefined handling work for computed expressions (COALESCE automatically)?
-- Should there be a `.updateAll()` method for bulk expression-based updates, separate from `.update(id, ...)`?
+- Should chained arithmetic methods return an object that supports further chaining? (e.g., `p.age.plus(5).times(12)` — always left-to-right, documented as such)
