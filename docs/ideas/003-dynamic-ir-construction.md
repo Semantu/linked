@@ -68,15 +68,39 @@ This means:
 - Every DSL feature (`.select()` for sub-selection, `.where()` for scoped filters, `.as()` for bindings) works in QueryBuilder callbacks too
 - String forms on QueryBuilder (`.setFields(['name'])`, `.where('age', '>', 18)`) are convenience shortcuts that produce the same internal structures
 
-### Current DSL: `.select()` vs `.query()`
+### Current DSL: `.select()` vs `.query()` — and the execution model
 
 The DSL currently has two entry points:
-- **`Person.select(p => ...)`** — executes immediately, returns `PatchedQueryPromise` (a Promise with chainable `.where()`, `.limit()`, `.sortBy()`, `.one()`)
-- **`Person.query(p => ...)`** — returns a `SelectQueryFactory` (deferred, not executed until `.build()` or `.exec()` is called)
+- **`Person.select(p => ...)`** — executes immediately via `nextTick`, returns `PatchedQueryPromise` (a Promise with chainable `.where()`, `.limit()`, `.sortBy()`, `.one()` that mutate the underlying factory before the tick fires)
+- **`Person.query(p => ...)`** — returns a `SelectQueryFactory` (deferred, not executed until `.build()` is called)
 
-This maps to QueryBuilder as follows:
-- `Person.select(p => ...)` ≈ `QueryBuilder.from(PersonShape).setFields(p => ...).exec()`
-- `Person.query(p => ...)` ≈ `QueryBuilder.from(PersonShape).setFields(p => ...)` (returns builder, not executed)
+**Decided: PromiseLike execution model.** QueryBuilder implements `PromiseLike`. No more `nextTick` hack. The chain is evaluated synchronously (each method returns a new immutable builder), and execution happens only when `.then()` is called (which `await` does automatically):
+
+```ts
+class QueryBuilder implements PromiseLike<ResultRow[]> {
+  then<T>(onFulfilled?, onRejected?): Promise<T> {
+    return this.exec().then(onFulfilled, onRejected);
+  }
+}
+
+// Await triggers execution (PromiseLike)
+const result = await QueryBuilder.from(PersonShape).setFields(p => [p.name]).where(p => p.age.gt(18));
+
+// Same thing via DSL sugar
+const result = await Person.select(p => [p.name]).where(p => p.age.gt(18));
+
+// Deferred — no await, just a builder
+const builder = Person.query(p => [p.name]).where(p => p.age.gt(18));
+const result = await builder;        // execute when ready
+const result = await builder.exec(); // explicit alternative
+```
+
+This means:
+- `Person.select(...)` returns a QueryBuilder (PromiseLike). Backward compatible — existing `await Person.select(...)` still works.
+- `Person.query(...)` also returns a QueryBuilder. Both return the same type. `.query()` is just a signal of intent ("I'll execute this later").
+- `.where()`, `.limit()`, etc. are immutable (return new builder), not mutable. Chaining works because JS evaluates the full chain before `await`.
+- No more `nextTick`. No more mutable `PatchedQueryPromise`. Cleaner internals.
+- `.exec()` is available for explicit execution without `await`.
 
 **Open for discussion**: Should the DSL adopt the `.for(id)` chainable pattern instead of passing subjects as arguments?
 
