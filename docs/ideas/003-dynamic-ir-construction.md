@@ -600,40 +600,302 @@ SELECT ?person ?name ?hobby WHERE {
 
 Here, `?hobby` appears in two different triple patterns. The first path (`bestFriend.favoriteHobby`) produces a value, and the second path (`hobbies`) is constrained to match that same value. This is a **shared variable** — the SPARQL engine joins on it.
 
-The current DSL doesn't expose this. Neither would the initial QueryBuilder. But the IR *can* represent it: if two `IRTraversePattern`s share the same `to` alias, they'll generate the same `?variable`, creating the join. The question is how to express this in the builder API.
+The current DSL's `.equals()` already supports comparing the *value* at the end of one path against another path (via `ArgPath`), which generates `FILTER(?x = ?y)`. But a shared variable join is different — it's a structural constraint in the graph pattern itself, not a filter. It's more efficient in SPARQL engines and enables patterns that filters can't express (like graph-level joins across optional branches).
 
-**Design direction for shared bindings (not in v1, but architected for):**
+#### How it would look in the static DSL
 
 ```ts
-// Future API: explicit variable binding
+// ── Static DSL: today ──────────────────────────────────────────
+// This already works — comparing two path endpoints with FILTER
+Person.select(p => [p.name, p.bestFriend.favoriteHobby])
+  .where(p => p.bestFriend.favoriteHobby.equals(p.hobbies));
+// → FILTER(?bestFriend_favoriteHobby = ?hobbies)
+// Works, but generates a FILTER comparison, not a variable join.
+// And each path creates its own ?variable.
+
+// ── Static DSL: with .as() binding ──────────────────────────────
+// The same query, but with a shared variable join
+Person.select(p => {
+  const hobby = p.bestFriend.favoriteHobby.as('sharedHobby');
+  return [
+    p.name,
+    hobby,
+    p.hobbies.joins(hobby),   // structural join, not a filter
+  ];
+});
+// → SELECT ?person ?name ?sharedHobby WHERE {
+//     ?person ex:name ?name ;
+//             ex:bestFriend/ex:favoriteHobby ?sharedHobby .
+//     ?person ex:hobbies ?sharedHobby .
+//   }
+// No FILTER — the join happens via shared ?sharedHobby variable
+```
+
+The `.as('name')` call on a query path endpoint names the SPARQL variable. The `.joins(binding)` call on another path constrains it to use the same variable. This is different from `.equals()` which generates `FILTER(?a = ?b)`.
+
+#### How it would look in the dynamic QueryBuilder
+
+```ts
+// ── QueryBuilder: callback style ────────────────────────────────
 const query = QueryBuilder
   .from(PersonShape)
   .select(p => {
-    // .as() names a binding point — a variable that can be referenced elsewhere
-    const hobby = p.prop('bestFriend').prop('favoriteHobby').as('hobby');
+    const hobby = p.prop(favoriteHobbyProp).as('sharedHobby');
     return [
-      p.prop('name'),
-      hobby,                                       // select the hobby
-      p.prop('hobbies').equals(hobby),             // join: hobbies must match
+      p.prop(nameProp),
+      p.prop(bestFriendProp).prop(favoriteHobbyProp).as('sharedHobby'),
+      p.prop(hobbiesProp).joins('sharedHobby'),
     ];
   });
 
-// Or: more explicit for complex patterns
+// ── QueryBuilder: string-based ──────────────────────────────────
 const query2 = QueryBuilder
   .from(PersonShape)
   .select(['name', 'bestFriend.favoriteHobby'])
-  .bind('hobby', 'bestFriend.favoriteHobby')        // name the endpoint
-  .where('hobbies', '=', { $ref: 'hobby' });        // reference the binding
+  .bind('sharedHobby', 'bestFriend.favoriteHobby')
+  .join('hobbies', 'sharedHobby')
+  .exec();
 ```
 
-**What this means for v1 design:**
+#### How bindings compose with FieldSets
 
-- `PropertyPath` should carry an optional `bindingName` field (defaults to auto-generated alias)
-- `WhereCondition` values should accept `{ $ref: string }` for referencing named bindings
-- The `toRawInput()` bridge needs to propagate binding names down so `LoweringContext` can reuse aliases intentionally
-- None of this needs to be *implemented* in Phase 1-3, but the types should have slots for it
+This is the interesting part. A FieldSet can **export** a binding — declaring "I traverse to this endpoint and name it, so other FieldSets or where clauses can reference it."
 
-The `IRAliasScope` is already designed with scoping and parent chains. `IRAliasBinding` has `alias` + `source` + `scopeDepth`. This can support named bindings without structural changes — a named binding is just a registered alias that other expressions can reference.
+```ts
+// ── FieldSet with an exported binding ───────────────────────────
+
+// "Best friend's hobby" — traverses deep and names the endpoint
+const bestFriendHobby = FieldSet.for(PersonShape, (p) => [
+  p.path('bestFriend.favoriteHobby').as('sharedHobby'),
+]);
+
+// "Hobbies that match" — joins on the named binding
+const matchingHobbies = FieldSet.for(PersonShape, (p) => [
+  p.path('hobbies').joins('sharedHobby'),
+]);
+
+// Compose them — the binding connects the two FieldSets
+const query = QueryBuilder
+  .from(PersonShape)
+  .include(bestFriendHobby)
+  .include(matchingHobbies)
+  .exec();
+// → the merge sees that 'sharedHobby' is exported by bestFriendHobby
+//   and consumed by matchingHobbies — they share a ?variable
+```
+
+This works because:
+1. `FieldSet.merge()` collects all binding declarations across included FieldSets
+2. When producing `RawSelectInput`, bindings are tracked in a namespace
+3. `LoweringContext` receives binding name hints and reuses aliases accordingly
+4. The SPARQL output has a shared `?sharedHobby` variable
+
+#### More realistic CMS examples with bindings
+
+```ts
+// ── Example 1: "Products in the same category as the user's wishlist" ──
+const wishlistCategory = FieldSet.for(UserShape, (p) => [
+  p.path('wishlist.category').as('cat'),
+]);
+
+const productsInCategory = FieldSet.for(ProductShape, (p) => [
+  p.path('category').joins('cat'),
+  p.path('name'),
+  p.path('price'),
+]);
+
+// Two different shapes, but the binding connects them
+// The QueryBuilder needs to handle multi-shape queries for this
+// (which maps to SPARQL with multiple type patterns)
+
+// ── Example 2: "Articles written by friends of the current user" ──
+const userFriends = FieldSet.for(UserShape, (p) => [
+  p.path('friends').as('friendNode'),
+]);
+
+const articlesByFriends = FieldSet.for(ArticleShape, (p) => [
+  p.path('author').joins('friendNode'),
+  p.path('title'),
+  p.path('publishedAt'),
+]);
+
+// ── Example 3: NL chat builds a binding incrementally ──
+// "Show me people and their hobbies"
+let chatFields = FieldSet.for(PersonShape, ['name', 'hobbies.label']);
+let chatQuery = QueryBuilder.from(PersonShape).include(chatFields);
+
+// "Now show which of their friends share the same hobbies"
+// LLM generates: bind the hobby endpoint, then join friends' hobbies to it
+chatFields = chatFields.extend([(p) =>
+  p.path('hobbies').as('hobby'),
+]);
+const friendsWithSameHobby = FieldSet.for(PersonShape, (p) => [
+  p.path('friends').fields([
+    'name',
+    p.path('hobbies').joins('hobby'),  // friends who share the hobby
+  ]),
+]);
+chatQuery = chatQuery
+  .include(chatFields)
+  .include(friendsWithSameHobby);
+
+// ── Example 4: Drag-drop builder with component-declared bindings ──
+// A "CategoryFilter" component exports a binding
+const categoryFilterFields = FieldSet.for(ProductShape, (p) => [
+  p.path('category').as('selectedCategory'),
+  p.path('category.name'),
+]);
+
+// A "RelatedProducts" component consumes it
+const relatedProductsFields = FieldSet.for(ProductShape, (p) => [
+  p.path('relatedTo.category').joins('selectedCategory'),
+  p.path('relatedTo.name'),
+]);
+
+// When both are on the same page, the binding connects them
+const pageFields = FieldSet.merge([categoryFilterFields, relatedProductsFields]);
+// → one SPARQL query where ?selectedCategory is shared
+```
+
+#### FieldSet with immutable bindings compose naturally
+
+Because FieldSets are immutable, bindings are safe to share:
+
+```ts
+const base = FieldSet.for(PersonShape, (p) => [
+  p.path('bestFriend.favoriteHobby').as('hobby'),
+]);
+
+// Extending doesn't affect the original binding
+const extended = base.extend(['age', 'email']);
+// extended still has the 'hobby' binding from base
+
+// A new FieldSet that references the binding
+const matcher = FieldSet.for(PersonShape, (p) => [
+  p.path('hobbies').joins('hobby'),
+]);
+
+// All compose cleanly
+const query = QueryBuilder.from(PersonShape)
+  .include(extended)   // has 'hobby' binding
+  .include(matcher)    // references 'hobby' binding
+  .exec();
+
+// The original `base` is unchanged, `extended` is unchanged
+// Each .include() merges bindings into the query's namespace
+```
+
+#### QueryBuilder immutability with bindings
+
+Bindings are part of the query state that gets cloned on fork:
+
+```ts
+const base = QueryBuilder
+  .from(PersonShape)
+  .select(['name'])
+  .bind('hobby', 'bestFriend.favoriteHobby');
+
+// Fork: adds a join constraint using the binding
+const withJoin = base.join('hobbies', 'hobby');
+// base still has the binding but no join
+// withJoin has both
+
+// Fork differently: uses the same binding for a filter
+const withFilter = base.where('hobby', '=', 'http://example.org/chess');
+// base unchanged, withFilter filters on the named binding
+```
+
+#### What this means for v1 design
+
+The v1 types should **reserve space** for bindings even if the implementation is deferred:
+
+```ts
+class PropertyPath {
+  readonly steps: PropertyShape[];
+  readonly rootShape: NodeShape;
+  readonly bindingName?: string;       // ← reserved for .as()
+
+  as(name: string): PropertyPath {
+    return new PropertyPath(this.steps, this.rootShape, name);
+  }
+}
+
+type FieldSetEntry = {
+  path: PropertyPath;
+  alias?: string;
+  scopedFilter?: WhereCondition;
+  bindingName?: string;                // ← reserved: exported binding
+  joinBinding?: string;                // ← reserved: consumed binding
+};
+
+type WhereConditionValue =
+  | string | number | boolean | Date
+  | NodeReferenceValue
+  | { $ref: string };                  // ← reserved: binding reference
+
+// QueryBuilder internal state
+class QueryBuilder {
+  private _bindings: Map<string, PropertyPath>;  // ← reserved
+  // ...
+}
+```
+
+This costs nothing in v1 — the fields are optional, ignored by `toRawInput()` until binding support is implemented. But it means FieldSets created now can carry `.as()` declarations that "just work" when bindings land.
+
+#### What needs to change in the IR for bindings
+
+Not much. The IR already supports the pattern — it just needs a way to express "these two traversal endpoints share an alias":
+
+```ts
+// Today: LoweringContext.getOrCreateTraversal() auto-assigns aliases
+// a0 → friends → a1
+// a0 → hobbies → a2     ← different alias, different ?variable
+
+// With bindings: LoweringContext gets a hint to reuse an alias
+// a0 → bestFriend → a1 → favoriteHobby → a2 (named 'hobby')
+// a0 → hobbies → a2     ← SAME alias as 'hobby', same ?variable
+
+// This requires one addition to LoweringContext:
+class LoweringContext {
+  private namedBindings = new Map<string, string>();  // bindingName → alias
+
+  getOrCreateTraversal(from: string, property: string, bindingName?: string): string {
+    // If this traversal has a binding name, register/reuse it
+    if (bindingName) {
+      if (this.namedBindings.has(bindingName)) {
+        return this.namedBindings.get(bindingName);
+      }
+      const alias = this.nextAlias();
+      this.namedBindings.set(bindingName, alias);
+      // ... create traverse pattern as normal
+      return alias;
+    }
+    // ... existing dedup logic
+  }
+
+  resolveBinding(name: string): string {
+    const alias = this.namedBindings.get(name);
+    if (!alias) throw new Error(`Unknown binding: ${name}`);
+    return alias;
+  }
+}
+```
+
+The change to `LoweringContext` is small. The change to `IRTraversePattern` is one optional field:
+
+```ts
+type IRTraversePattern = {
+  kind: 'traverse';
+  from: IRAlias;
+  to: IRAlias;
+  property: string;
+  filter?: IRExpression;
+  bindingName?: string;    // ← new: names this endpoint for reuse
+  joinBinding?: string;    // ← new: reuse another endpoint's alias
+};
+```
+
+Everything downstream (irToAlgebra, algebraToString) already works with aliases. If two traverse patterns have the same `to` alias, they produce the same `?variable`. The binding system just makes that intentional instead of accidental.
 
 ---
 
