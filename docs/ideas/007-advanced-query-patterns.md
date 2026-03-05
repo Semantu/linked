@@ -157,14 +157,90 @@ Currently `.update(id, data)` updates a single entity by ID. There's no way to u
 
 Note: Removing a property from entities is just an update that sets the value to null — no special `deleteProperty` method is needed.
 
-### DSL examples
+### API alternatives
+
+There are several possible API shapes for updateWhere. Each has tradeoffs around readability, consistency with the existing DSL, and how naturally it extends to computed values (idea 006).
+
+#### Alternative A: Static method — `updateWhere(predicate).set(data)` (recommended)
 
 ```ts
-// Set all inactive users to archived — works with current .equals() evaluation
-Person.updateWhere(
-  { status: 'archived' },
-  p => p.status.equals('inactive')
-)
+Person.updateWhere(p => p.status.equals('inactive')).set({ status: 'archived' })
+```
+
+Pros:
+- Reads naturally: "update persons where status=inactive, set status=archived"
+- The `.set()` chaining mirrors how `.select()` chains with `.where()` — consistent pattern
+- Clean separation: filter logic in `updateWhere()`, data in `.set()`
+- Extends naturally to computed values: `.set(p => ({ price: p.price.times(0.9) }))`
+
+Cons:
+- Two-step call (but this matches the existing `.select().where()` pattern)
+
+#### Alternative B: Static method — `updateWhere(data, predicate)`
+
+```ts
+Person.updateWhere({ status: 'archived' }, p => p.status.equals('inactive'))
+```
+
+Pros:
+- Single call, concise
+- Data first feels natural for simple cases
+
+Cons:
+- Argument order is debatable — "update what? where?" vs "update where? to what?"
+- When data becomes a callback (idea 006), both args are callbacks — confusing
+- Doesn't match any existing DSL pattern
+
+#### Alternative C: Static method — `updateWhere(predicate, data)`
+
+```ts
+Person.updateWhere(p => p.status.equals('inactive'), { status: 'archived' })
+```
+
+Pros:
+- More SQL-like: `UPDATE ... WHERE ... SET ...`
+- Filter first means you always know what you're scoping
+
+Cons:
+- Same two-callback confusion when data becomes computed
+- The "important part" (what changes) is buried as second arg
+
+#### Alternative D: Chained from `.where()` — `where(predicate).update(data)`
+
+```ts
+Person.where(p => p.status.equals('inactive')).update({ status: 'archived' })
+Person.where(p => p.status.equals('inactive')).delete()
+```
+
+Pros:
+- Very consistent: `.where()` becomes a shared entry point for filtered operations
+- `.where().select()`, `.where().update()`, `.where().delete()` — unified pattern
+- Naturally extends: `.where().update(p => ({ price: p.price.times(0.9) }))`
+
+Cons:
+- Requires adding `.where()` as a static method on Shape (currently only on query result)
+- Changes the existing API surface more significantly
+- `.where()` alone returns an intermediate object — what type is it?
+
+#### Comparison table
+
+| | A: `updateWhere().set()` | B: `(data, pred)` | C: `(pred, data)` | D: `where().update()` |
+|---|---|---|---|---|
+| Readability | Good | OK | OK | Great |
+| Consistency with DSL | Good (chains) | Low | Low | Great (unified) |
+| Extends to 006 | Clean | Confusing | Confusing | Clean |
+| Implementation cost | Medium | Low | Low | Higher |
+| deleteWhere parallel | `deleteWhere(pred)` | `deleteWhere(pred)` | `deleteWhere(pred)` | `where(pred).delete()` |
+
+**Recommendation:** Alternative A (`updateWhere().set()`) — it reads well, chains naturally, and when idea 006 lands, `.set()` can accept a callback cleanly. Alternative D is the most elegant long-term design but requires more upfront API changes.
+
+### Full examples (using Alternative A)
+
+#### Basic literal updates (pre-006, works with `.equals()`)
+
+```ts
+// Set all inactive users to archived
+Person.updateWhere(p => p.status.equals('inactive')).set({ status: 'archived' })
 
 // Generated SPARQL:
 // DELETE { ?s ex:status ?old_status . }
@@ -177,11 +253,57 @@ Person.updateWhere(
 ```
 
 ```ts
-// Remove a property from all entities (set to null = delete the triple)
+// Update multiple fields at once
+Person.updateWhere(p => p.role.equals('intern')).set({
+  role: 'employee',
+  probation: true,
+})
+
+// Generated SPARQL:
+// DELETE { ?s ex:role ?old_role . }
+// INSERT { ?s ex:role "employee" . ?s ex:probation true . }
+// WHERE {
+//   ?s rdf:type ex:Person .
+//   ?s ex:role ?old_role .
+//   FILTER(?old_role = "intern")
+// }
+```
+
+```ts
+// Compound filter with AND
 Person.updateWhere(
-  { temporaryFlag: null },
-  p => p.temporaryFlag.equals(true)
-)
+  p => p.status.equals('inactive').and(p.role.equals('guest'))
+).set({ status: 'archived' })
+
+// Generated SPARQL:
+// DELETE { ?s ex:status ?old_status . }
+// INSERT { ?s ex:status "archived" . }
+// WHERE {
+//   ?s rdf:type ex:Person .
+//   ?s ex:status ?old_status .
+//   ?s ex:role ?role .
+//   FILTER(?old_status = "inactive" && ?role = "guest")
+// }
+```
+
+```ts
+// Compound filter with OR
+Order.updateWhere(
+  o => o.status.equals('cancelled').or(o.status.equals('expired'))
+).set({ archived: true })
+
+// Generated SPARQL:
+// INSERT { ?s ex:archived true . }
+// WHERE {
+//   ?s rdf:type ex:Order .
+//   ?s ex:status ?status .
+//   FILTER(?status = "cancelled" || ?status = "expired")
+// }
+```
+
+```ts
+// Remove a property (set to null = delete the triple)
+Person.updateWhere(p => p.temporaryFlag.equals(true)).set({ temporaryFlag: null })
 
 // Generated SPARQL:
 // DELETE { ?s ex:temporaryFlag ?old_val . }
@@ -193,11 +315,91 @@ Person.updateWhere(
 ```
 
 ```ts
-// With idea 006 expressions (later phase), computed updates become available:
-Product.updateWhere(
-  p => ({ price: p.price.times(0.9) }),
-  p => p.price.gt(100)
+// Set relations — replace a reference
+Task.updateWhere(t => t.assignee.equals(entity('user-old'))).set({
+  assignee: entity('user-new'),
+})
+
+// Generated SPARQL:
+// DELETE { ?s ex:assignee ?old_assignee . }
+// INSERT { ?s ex:assignee <user-new> . }
+// WHERE {
+//   ?s rdf:type ex:Task .
+//   ?s ex:assignee ?old_assignee .
+//   FILTER(?old_assignee = <user-old>)
+// }
+```
+
+```ts
+// Modify sets — add/remove from multi-value properties
+Person.updateWhere(p => p.role.equals('employee')).set({
+  tags: { add: ['veteran'], remove: ['newbie'] },
+})
+
+// Generated SPARQL:
+// DELETE { ?s ex:tags "newbie" . }
+// INSERT { ?s ex:tags "veteran" . }
+// WHERE {
+//   ?s rdf:type ex:Person .
+//   ?s ex:role ?role .
+//   FILTER(?role = "employee")
+// }
+```
+
+#### With idea 006 expressions (later phase)
+
+```ts
+// Apply 10% discount to expensive products
+Product.updateWhere(p => p.price.gt(100)).set(
+  p => ({ price: p.price.times(0.9) })
 )
+
+// Generated SPARQL:
+// DELETE { ?s ex:price ?old_price . }
+// INSERT { ?s ex:price ?new_price . }
+// WHERE {
+//   ?s rdf:type ex:Product .
+//   ?s ex:price ?old_price .
+//   FILTER(?old_price > 100)
+//   BIND((?old_price * 0.9) AS ?new_price)
+// }
+```
+
+```ts
+// Increment login count and set timestamp
+Person.updateWhere(p => p.status.equals('active')).set(p => ({
+  loginCount: p.loginCount.plus(1),
+  lastSeen: L.now(),
+}))
+
+// Generated SPARQL:
+// DELETE { ?s ex:loginCount ?old_count . ?s ex:lastSeen ?old_seen . }
+// INSERT { ?s ex:loginCount ?new_count . ?s ex:lastSeen ?now . }
+// WHERE {
+//   ?s rdf:type ex:Person .
+//   ?s ex:status ?status . FILTER(?status = "active")
+//   OPTIONAL { ?s ex:loginCount ?old_count . }
+//   OPTIONAL { ?s ex:lastSeen ?old_seen . }
+//   BIND((?old_count + 1) AS ?new_count)
+//   BIND(NOW() AS ?now)
+// }
+```
+
+```ts
+// Combine computed filter + computed value
+Employee.updateWhere(
+  e => L.gt(L.minus(L.now(), e.hireDate), 365)  // hired > 1 year ago
+).set(e => ({
+  salary: e.salary.times(1.05),
+  seniorityLevel: e.seniorityLevel.plus(1),
+}))
+```
+
+```ts
+// Conditional computed value
+Product.updateWhere(p => p.category.equals('seasonal')).set(p => ({
+  price: L.ifThen(p.stock.gt(100), p.price.times(0.7), p.price.times(0.9)),
+}))
 ```
 
 ### Algebra mapping
@@ -229,10 +431,14 @@ This means **`deleteWhere` and `updateWhere` can ship before idea 006** with bas
 What works immediately (pre-006):
 - `p.status.equals('inactive')` — equality check
 - `p.name.equals('Alice').and(p.role.equals('admin'))` — chained AND/OR
+- `.set({ field: literal })` — literal update values
+- `.set({ field: null })` — property removal
+- `.set({ field: entity('id') })` — reference updates
+- `.set({ field: { add: [...], remove: [...] } })` — set modifications
 
 What requires idea 006:
-- `p.age.gt(18)` — comparison operators
-- `p.price.times(0.9)` — arithmetic in update values
+- `p.age.gt(18)` — comparison operators beyond equality
+- `.set(p => ({ price: p.price.times(0.9) }))` — computed update values
 - `L.now()`, `L.concat(...)` — function expressions
 
 ---
@@ -255,9 +461,9 @@ What requires idea 006:
 - Result type for bulk deletes may differ from single-entity deletes (count only, no IDs)
 
 ### UPDATE WHERE
-- Add `.updateWhere(data, predicate)` method to the Shape class
-- First argument is the update data (same format as `.update()` second arg)
-- Second argument is the filter predicate (same evaluation callbacks as `.where()`)
+- `updateWhere(predicate)` returns an intermediate object with `.set(data)` method
+- `.set()` accepts an object (literal values) or — with idea 006 — a callback `p => ({...})`
+- Reuses the existing proxy + Evaluation mechanism from SelectQuery's `.where()`
 - IR needs a new `IRUpdateWhereMutation` kind with pattern + filter + data
 - `irToAlgebra.ts` generates `SparqlDeleteInsertPlan` with filter in WHERE clause
 - Setting a property to `null` in the data means "delete this triple" (no INSERT for that property)
@@ -275,18 +481,21 @@ This idea is part of a broader implementation plan alongside idea 006:
    - Self-contained, no dependencies
 
 2. **Phase 2: deleteWhere / deleteAll / updateWhere** (~4-5 days)
-   - Add `.deleteAll()`, `.deleteWhere()`, `.updateWhere()` to Shape class
+   - Add `.deleteAll()`, `.deleteWhere()`, `.updateWhere().set()` to Shape class
    - New `IRDeleteWhereMutation` and `IRUpdateWhereMutation` IR types
    - Wire to `SparqlDeleteWherePlan` and `SparqlDeleteInsertPlan`
    - Uses existing `.equals()` evaluation — no dependency on idea 006
+   - `.set()` accepts plain objects only in this phase
 
 3. **Phase 3: Expression builder** (idea 006, ~5-7 days)
    - Chained methods (`.gt()`, `.times()`, etc.) on proxied properties
    - `L` module for complex expressions
    - Computed fields in SELECT
+   - Enriches `updateWhere` / `deleteWhere` filters with comparison operators
 
 4. **Phase 4: Computed mutations** (idea 006, ~3-4 days)
-   - Expression-based update values via `p => ({ price: p.price.times(0.9) })`
+   - `.set()` accepts callback form: `.set(p => ({ price: p.price.times(0.9) }))`
+   - Resolves `MutationQuery.ts:33` TODO
    - Enriches `updateWhere` from phase 2 with computed values
 
 ## Open questions
@@ -295,4 +504,4 @@ This idea is part of a broader implementation plan alongside idea 006:
 - Should `.deleteAll()` require explicit confirmation / be marked as dangerous?
 - How should `.deleteWhere()` and `.updateWhere()` interact with named graphs?
 - Should bulk operations return a count of affected triples, or is fire-and-forget acceptable?
-- For `.updateWhere()`, should the signature be `(data, predicate)` or `(predicate, data)` or chained like `.where(predicate).update(data)`?
+- Should we pursue Alternative D (`where().update()` / `where().delete()`) as a longer-term unified pattern?
