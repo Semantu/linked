@@ -92,15 +92,20 @@ All FieldSets included in a query share one binding namespace. When `.as('x')` a
 
 When `build()` is called, warn if a binding name appears only once (probably a mistake — the user intended a shared variable but forgot the other side). Not an error, since a single `.as()` is valid SPARQL.
 
-### 6. Naming: `.as()` + `.matches()` + `.bind()`/`.constrain()` for QueryBuilder
+### 6. Naming: `.as()` everywhere — DSL and QueryBuilder share the same proxy
+
+Since the DSL and QueryBuilder share the same `ProxiedPathBuilder`, `.as('name')` works the same in both:
 
 | Context | API | Example |
 |---|---|---|
-| Static DSL (inline) | `.as('name')` | `p.hobbies.as('hobby')` |
-| Static DSL (readable) | `.matches('name')` | `p.hobbies.matches('hobby')` |
-| Dynamic QueryBuilder | `.bind('name', 'path')` + `.constrain('path', 'name')` | `.bind('hobby', 'hobbies').constrain('friends.hobbies', 'hobby')` |
+| DSL callback | `.as('name')` | `p.hobbies.as('hobby')` |
+| DSL callback (readable) | `.matches('name')` | `p.hobbies.matches('hobby')` |
+| QueryBuilder callback | `.as('name')` | `p.hobbies.as('hobby')` — same proxy |
+| QueryBuilder callback + `.path()` | `.as('name')` | `p.path('hobbies').as('hobby')` — dynamic escape |
+| FieldSet callback | `.as('name')` | `p.hobbies.as('hobby')` — same proxy |
+| QueryBuilder string form | `{ path, as }` in field entry | `{ path: 'hobbies', as: 'hobby' }` |
 
-All produce the same IR.
+All produce the same IR. The string-form `{ path, as }` is only needed when using string arrays (no proxy).
 
 ---
 
@@ -119,19 +124,28 @@ Person.select(p => {
 });
 ```
 
-### Dynamic QueryBuilder — callback style
+### Dynamic QueryBuilder — callback style (same proxy as DSL)
 
 ```ts
 const query = QueryBuilder
   .from(PersonShape)
-  .select(p => {
-    const hobby = p.path('bestFriend.favoriteHobby').as('hobby');
+  .setFields(p => {
+    const hobby = p.bestFriend.favoriteHobby.as('hobby');
     return [
-      p.path('name'),
+      p.name,
       hobby,
-      p.path('hobbies').matches(hobby),
+      p.hobbies.matches(hobby),
     ];
   });
+
+// Or mixing proxy + .path() for dynamic paths:
+const query2 = QueryBuilder
+  .from(PersonShape)
+  .setFields(p => [
+    p.name,
+    p.path('bestFriend.favoriteHobby').as('hobby'),
+    p.path('hobbies').matches('hobby'),
+  ]);
 ```
 
 ### Dynamic QueryBuilder — string style
@@ -139,9 +153,11 @@ const query = QueryBuilder
 ```ts
 const query = QueryBuilder
   .from(PersonShape)
-  .select(['name', 'bestFriend.favoriteHobby', 'hobbies.label'])
-  .bind('hobby', 'bestFriend.favoriteHobby')
-  .constrain('hobbies', 'hobby')
+  .setFields([
+    'name',
+    { path: 'bestFriend.favoriteHobby', as: 'hobby' },
+    { path: 'hobbies', as: 'hobby' },
+  ])
   .exec();
 ```
 
@@ -177,8 +193,7 @@ const matchingHobbies = FieldSet.for(PersonShape, (p) => [
 // Merge connects them automatically
 const query = QueryBuilder
   .from(PersonShape)
-  .include(bestFriendHobby)
-  .include(matchingHobbies)
+  .setFields(FieldSet.merge([bestFriendHobby, matchingHobbies]))
   .exec();
 // → one ?hobby variable in SPARQL
 ```
@@ -187,11 +202,11 @@ Because FieldSets are immutable, bindings are safe across forks:
 
 ```ts
 const base = FieldSet.for(PersonShape, (p) => [
-  p.path('bestFriend.favoriteHobby').as('hobby'),
+  p.bestFriend.favoriteHobby.as('hobby'),
 ]);
 
-const extended = base.extend(['age', 'email']);
-// extended still carries the 'hobby' binding — base unchanged
+const withMore = base.add(['age', 'email']);
+// withMore still carries the 'hobby' binding — base unchanged
 ```
 
 ---
@@ -239,13 +254,15 @@ const articlesByFriends = FieldSet.for(ArticleShape, (p) => [
 ```ts
 // "Show me people and their hobbies"
 let chatQuery = QueryBuilder.from(PersonShape)
-  .select(['name', 'hobbies.label']);
+  .setFields(['name', 'hobbies.label']);
 
 // "Now show friends who share the same hobbies"
 chatQuery = chatQuery
-  .bind('hobby', 'hobbies')
-  .select([...chatQuery.selections(), 'friends.name', 'friends.hobbies'])
-  .constrain('friends.hobbies', 'hobby');
+  .addFields([
+    'friends.name',
+    { path: 'hobbies', as: 'hobby' },
+    { path: 'friends.hobbies', as: 'hobby' },
+  ]);
 ```
 
 ### Drag-drop builder — component-declared bindings
@@ -367,7 +384,10 @@ These fields are optional and ignored by `toRawInput()` until binding support is
 
 4. **Cross-shape bindings timing**: Design is shape-agnostic, but implementation requires multi-shape queries. Ship binding types now (reserved), implement when multi-shape lands?
 
-5. **`.bind()` / `.constrain()` vs unified `.as()` on QueryBuilder**: The string-based QueryBuilder uses `.bind('name', 'path')` + `.constrain('path', 'name')`. But since we decided `.as()` is the only primitive, should QueryBuilder instead just have `.as('name', 'path')` applied to any path, and auto-unify? e.g. `.select(['hobbies']).as('hobby', 'hobbies').as('hobby', 'friends.hobbies')` — two calls, same name, auto-shared. Or is `.bind()`/`.constrain()` clearer for the string API?
+5. **~~`.bind()` / `.constrain()` vs unified `.as()`~~ — RESOLVED**: Since DSL and QueryBuilder share the same proxy, `.as()` is the only API needed:
+   - **Callback form**: `p.hobbies.as('hobby')` — directly on the proxy path (same as DSL)
+   - **String form**: `{ path: 'hobbies', as: 'hobby' }` — inline in field entry arrays
+   - No separate `.bind()`/`.constrain()` methods needed. The string form's `{ path, as }` is the equivalent.
 
 ---
 
@@ -390,8 +410,8 @@ These fields are optional and ignored by `toRawInput()` until binding support is
 
 ### Phase 3: Activation
 - [ ] Wire `toRawInput()` to pass binding names through to IR
-- [ ] FieldSet merge: collect all `.as()` names across included sets
-- [ ] QueryBuilder `.bind()` / `.constrain()` methods
+- [ ] FieldSet merge: collect all `.as()` names across merged sets
+- [ ] String-form support: `{ path: 'hobbies', as: 'hobby' }` in field entry arrays
 - [ ] Validation at `build()`: warn on solo binding names
 - [ ] Tests: shared variable produces correct SPARQL (no FILTER)
 - [ ] Tests: FieldSet merge auto-connects matching binding names

@@ -35,6 +35,66 @@ irToAlgebra → algebraToString → SPARQL
 
 The `SelectQueryFactory` wraps the proxy-tracing DSL and calls `buildSelectQuery(rawInput)`. But `buildSelectQuery` also accepts a pre-built `IRSelectQuery` directly (pass-through). That's two possible injection points.
 
+### Key architectural decision: DSL and QueryBuilder are the same system
+
+The DSL (`Person.select(p => [p.name])`) is **syntactic sugar over QueryBuilder + FieldSet**. They share the same proxy PathBuilder, the same pipeline, and the same IR. The relationship:
+
+```
+DSL entry point                    Dynamic entry point
+Person.select(p => [p.name])       QueryBuilder.from(PersonShape).setFields(p => [p.name])
+         ↓ internally creates               ↓ same thing
+         QueryBuilder + FieldSet
+         ↓
+         toRawInput() → RawSelectInput
+         ↓
+         buildSelectQuery() → IR → SPARQL
+```
+
+The proxy (`p`) is the **same PathBuilder** in both cases. In DSL callbacks and in QueryBuilder/FieldSet callbacks, you get the same proxy with the same methods. `.path('string')` is an escape hatch on the proxy for when the path comes from runtime data:
+
+```ts
+// These use the same proxy, same PathBuilder, same code:
+Person.select(p => [p.name, p.hobbies.select(h => [h.label])])
+FieldSet.for(PersonShape, p => [p.name, p.hobbies.select(h => [h.label])])
+QueryBuilder.from(PersonShape).setFields(p => [p.name, p.hobbies.select(h => [h.label])])
+
+// .path() is an escape hatch for dynamic strings — available on the same proxy:
+Person.select(p => [p.name, p.path(dynamicField)])
+FieldSet.for(PersonShape, p => [p.name, p.path(dynamicField)])
+```
+
+This means:
+- **One proxy implementation** shared between DSL and dynamic builder
+- Every DSL feature (`.select()` for sub-selection, `.where()` for scoped filters, `.as()` for bindings) works in QueryBuilder callbacks too
+- String forms on QueryBuilder (`.setFields(['name'])`, `.where('age', '>', 18)`) are convenience shortcuts that produce the same internal structures
+
+### Current DSL: `.select()` vs `.query()`
+
+The DSL currently has two entry points:
+- **`Person.select(p => ...)`** — executes immediately, returns `PatchedQueryPromise` (a Promise with chainable `.where()`, `.limit()`, `.sortBy()`, `.one()`)
+- **`Person.query(p => ...)`** — returns a `SelectQueryFactory` (deferred, not executed until `.build()` or `.exec()` is called)
+
+This maps to QueryBuilder as follows:
+- `Person.select(p => ...)` ≈ `QueryBuilder.from(PersonShape).setFields(p => ...).exec()`
+- `Person.query(p => ...)` ≈ `QueryBuilder.from(PersonShape).setFields(p => ...)` (returns builder, not executed)
+
+**Open for discussion**: Should the DSL adopt the `.for(id)` chainable pattern instead of passing subjects as arguments?
+
+```ts
+// Current DSL
+Person.select(id, p => [p.name])              // subject as first arg
+
+// Proposed: chainable .for() — matches QueryBuilder
+Person.select(p => [p.name]).for(id)           // chainable, same as QueryBuilder
+Person.select(p => [p.name]).for([id1, id2])   // array of IDs
+Person.query(p => [p.name]).for(id).exec()     // deferred
+
+// Mutations too
+Person.update({ age: 31 }).for(id)
+Person.delete().for(id)
+Person.delete().for([id1, id2])
+```
+
 ---
 
 ## Proposals
@@ -238,7 +298,7 @@ const otherQuery = select(PersonShape)
 
 Build the fluent builder (B) as the core engine. Layer the string-resolving convenience API (C) on top. But instead of treating composability as a separate concern (Option E), make it a first-class feature of the builder via **`FieldSet`** — a named, reusable, composable collection of selections that any query can use.
 
-> **Note on method names:** Earlier sections use `.include()` as a placeholder for "add fields to a query." The actual naming is being decided — see "Method Naming" section under CMS Surface Examples. The authoritative examples are in the CMS Surface Examples section.
+> **Note on method names:** Earlier conceptual sections (Options A–E) may use `.include()` as a placeholder. The decided naming is `.setFields()` / `.addFields()` / `.removeFields()` on QueryBuilder and `.set()` / `.add()` / `.remove()` / `.pick()` on FieldSet. The authoritative examples are in the CMS Surface Examples section.
 
 Option A (raw IR helpers) can come later as a power-user escape hatch.
 
@@ -491,15 +551,16 @@ class FieldSet {
 
   // ── Construction ──
   static for(shape: NodeShape | string, fields: FieldSetInput[]): FieldSet;
-  static for(shape: NodeShape | string, fn: (p: FieldSetPathBuilder) => FieldSetInput[]): FieldSet;
+  static for(shape: NodeShape | string, fn: (p: ProxiedPathBuilder) => FieldSetInput[]): FieldSet;
   static all(shape: NodeShape | string, opts?: { depth?: number }): FieldSet;
   static summary(shape: NodeShape | string): FieldSet;
 
-  // ── Composition ──
-  extend(fields: FieldSetInput[]): FieldSet;     // returns new FieldSet with added fields
-  omit(fields: string[]): FieldSet;              // returns new FieldSet without named fields
-  pick(fields: string[]): FieldSet;              // returns new FieldSet with only named fields
-  static merge(sets: FieldSet[]): FieldSet;      // union of multiple FieldSets (deduped, filters AND-combined)
+  // ── Composition (all return new FieldSet — immutable) ──
+  add(fields: FieldSetInput[]): FieldSet;         // returns new FieldSet with added fields
+  remove(fields: string[]): FieldSet;             // returns new FieldSet without named fields
+  set(fields: FieldSetInput[]): FieldSet;         // returns new FieldSet with exactly these fields (replaces)
+  pick(fields: string[]): FieldSet;               // returns new FieldSet with only the named fields from existing
+  static merge(sets: FieldSet[]): FieldSet;       // union of multiple FieldSets (deduped, filters AND-combined)
 
   // ── Introspection ──
   paths(): PropertyPath[];                        // resolved PropertyPath objects
@@ -508,7 +569,7 @@ class FieldSet {
   static fromJSON(json: FieldSetJSON): FieldSet;  // deserialize
 
   // ── Query integration ──
-  // QueryBuilder.select() / .with() accept FieldSet directly
+  // QueryBuilder.setFields() / .addFields() accept FieldSet directly
 }
 
 type FieldSetInput =
@@ -553,13 +614,34 @@ FieldSet.for(PersonShape, [
 ]);
 ```
 
-Both flat and nested forms produce identical FieldSets. The nested form is what `toJSON()` could produce for compact serialization. The callback form also supports sub-selection:
+Both flat and nested forms produce identical FieldSets. The nested form is what `toJSON()` could produce for compact serialization.
+
+#### Callback form — uses the same proxy as DSL
+
+The callback form passes a **ProxiedPathBuilder** — the same proxy used in the DSL. Property access (`p.name`) works via proxy. `.path('string')` is an escape hatch for dynamic paths. `.select()` for sub-selection matches the DSL exactly:
 
 ```ts
-// Callback form with sub-selection
+// Callback form — proxy access, same as DSL
 FieldSet.for(PersonShape, (p) => [
-  p.path('name'),
-  p.path('hobbies').fields(['label', 'description', 'category.name']),
+  p.name,
+  p.hobbies.select(h => [h.label, h.description, h.category.name]),
+]);
+
+// Callback form — .path() for dynamic strings, freely mixed with proxy
+FieldSet.for(PersonShape, (p) => [
+  p.name,
+  p.path('hobbies').select(h => [h.label, h.path(dynamicField)]),
+]);
+
+// Scoped filter — same as DSL
+FieldSet.for(PersonShape, (p) => [
+  p.friends.where(f => f.isActive.equals(true)).select(f => [f.name, f.email]),
+]);
+
+// Variable binding
+FieldSet.for(PersonShape, (p) => [
+  p.bestFriend.favoriteHobby.as('hobby'),
+  p.hobbies.as('hobby'),
 ]);
 ```
 
@@ -581,9 +663,9 @@ type FieldSetEntry = {
 |---|---|---|
 | "Show all fields of Address" | Yes — `FieldSet.all(AddressShape)` | Technically uses FieldSet but derives from shape |
 | "Table with name, email, city" | No — partial selection across shapes | Yes |
-| "Card = summary; Detail = card + more" | No — incremental/layered views | Yes — `extend()` |
+| "Card = summary; Detail = card + more" | No — incremental/layered views | Yes — `add()` |
 | "Merge two component requirements" | No — union of partial views | Yes — `merge()` |
-| "NL chat adds fields incrementally" | No — runtime extension | Yes — `extend()` |
+| "NL chat adds fields incrementally" | No — runtime extension | Yes — `add()` |
 | "Store column config as JSON" | No — need serialization | Yes — `toJSON()`/`fromJSON()` |
 | "Form with all editable fields" | Yes — `FieldSet.all(shape)` | Derives from shape, but FieldSet is the API |
 
@@ -591,13 +673,22 @@ The pattern: **shapes suffice when you want everything. FieldSet is needed when 
 
 ### Immutability of FieldSets
 
-Like QueryBuilder, **FieldSets are immutable**. Every `.extend()`, `.omit()`, `.pick()` returns a new FieldSet. The original is never modified.
+Like QueryBuilder, **FieldSets are immutable**. Every `.add()`, `.remove()`, `.set()`, `.pick()` returns a new FieldSet. The original is never modified.
 
 ```ts
 const personSummary = FieldSet.for(PersonShape, ['name', 'email']);
-const withAge = personSummary.extend(['age']);
+const withAge = personSummary.add(['age']);
 // personSummary is still ['name', 'email']
 // withAge is ['name', 'email', 'age']
+
+const noEmail = personSummary.remove(['email']);
+// → ['name']
+
+const replaced = personSummary.set(['avatar', 'bio']);
+// → ['avatar', 'bio'] — completely replaced
+
+const nameOnly = withAge.pick(['name']);
+// → ['name'] — pick from existing entries
 ```
 
 This matters when the same FieldSet is shared across components. A table extends it with a column — that doesn't affect the card component using the original.
@@ -618,8 +709,8 @@ const adults = FieldSet.for(PersonShape, [
 // The top-level .where() can ALSO filter on age — they AND-combine
 const results = await QueryBuilder
   .from(PersonShape)
-  .include(adults)          // has scoped filter: age >= 18
-  .where('age', '<', 65)   // additional top-level filter: age < 65
+  .setFields(adults)          // has scoped filter: age >= 18
+  .where('age', '<', 65)     // additional top-level filter: age < 65
   .exec();
 // → SPARQL: WHERE { ... FILTER(?age >= 18 && ?age < 65) }
 // → the ?age variable is shared between select, scoped filter, and top-level filter
@@ -667,8 +758,8 @@ class QueryBuilder {
 ```
 
 **QueryBuilder string API** (also reserved for later):
-- `.bind('name', 'path')` — label the endpoint of a path
-- `.constrain('path', 'name')` — constrain a path's endpoint to match a named binding
+- `{ path: 'hobbies', as: 'hobby' }` — inline in field entry arrays
+- In callback form: `p.hobbies.as('hobby')` — same proxy as DSL, no separate method needed
 
 **IR change** (when activated): one optional `bindingName?: string` on `IRTraversePattern`, one `Map<string, string>` on `LoweringContext`. Everything downstream already works with aliases.
 
@@ -686,7 +777,7 @@ QueryBuilder is immutable-by-default: every modifier returns a new builder. This
 // Base query — reusable template
 const allPeople = QueryBuilder
   .from(PersonShape)
-  .select(personSummary);
+  .setFields(personSummary);
 
 // Fork for different pages
 const peoplePage = allPeople
@@ -702,12 +793,12 @@ const peopleInAmsterdam = allPeople
 // Further fork
 const youngPeopleInAmsterdam = peopleInAmsterdam
   .where('age', '<', 30)
-  .select(personDetail);     // switch view to detail (replace fields)
+  .setFields(personDetail);     // switch view to detail (replace fields)
 
 // All of these are independent builders — allPeople is unchanged
 ```
 
-This is like a query "prototype chain." Each `.where()`, `.select()`, `.with()`, `.limit()` returns a new builder that inherits from the parent. Cheap to create (just clone the config), no side effects.
+This is like a query "prototype chain." Each `.where()`, `.setFields()`, `.addFields()`, `.limit()` returns a new builder that inherits from the parent. Cheap to create (just clone the config), no side effects.
 
 ### Query narrowing (`.one()` / `.for()`)
 
@@ -734,7 +825,7 @@ Shape remapping lets the same FieldSet/QueryBuilder target a different SHACL sha
 
 ## CMS Surface Examples
 
-Three real CMS surfaces that use QueryBuilder + FieldSet. These examples use placeholder method names — see "Method naming" section below for the ongoing naming discussion.
+Three real CMS surfaces showing QueryBuilder + FieldSet with decided method names.
 
 ```ts
 import { FieldSet, QueryBuilder } from 'lincd/queries';
@@ -749,18 +840,27 @@ import { FieldSet, QueryBuilder } from 'lincd/queries';
 
 const personSummary = FieldSet.for(PersonShape, ['name', 'email', 'avatar']);
 
-const personDetail = FieldSet.for(PersonShape, [
+// Using proxy callback — matches DSL syntax exactly
+const personDetail = FieldSet.for(PersonShape, (p) => [
   personSummary,                                  // includes summary fields
-  'bio', 'age',
-  { 'address': ['city', 'country'] },             // nested selection
-  { 'hobbies': ['label', 'description'] },        // nested selection
-  { 'friends': personSummary },                   // sub-FieldSet under traversal
+  p.bio, p.age,
+  p.address.select(a => [a.city, a.country]),     // sub-selection (same as DSL)
+  p.hobbies.select(h => [h.label, h.description]),
+  p.friends.select(() => personSummary),          // sub-FieldSet under traversal
 ]);
 
+// Scoped filter — same syntax as DSL
 const activeFriendsList = FieldSet.for(PersonShape, (p) => [
-  p.path('friends').where('isActive', '=', true).fields([
-    personSummary,
-  ]),
+  p.friends.where(f => f.isActive.equals(true)).select(f => [f.name, f.email]),
+]);
+
+// String form — equivalent, for dynamic/runtime use
+const personDetailStrings = FieldSet.for(PersonShape, [
+  personSummary,
+  'bio', 'age',
+  { 'address': ['city', 'country'] },             // nested selection
+  { 'hobbies': ['label', 'description'] },
+  { 'friends': personSummary },
 ]);
 ```
 
@@ -771,14 +871,14 @@ const activeFriendsList = FieldSet.for(PersonShape, (p) => [
 
 const gridQuery = QueryBuilder
   .from(PersonShape)
-  .select(personSummary)                  // start with summary columns
+  .setFields(personSummary)               // start with summary columns
   .orderBy('name')
   .limit(50);
 
-// ── User adds a column (hobbies) → MERGE additional fields ──
+// ── User adds a column (hobbies) → ADD fields ──────────
 
 const withHobbies = gridQuery
-  .with({ 'hobbies': ['label'] });        // adds hobbies.label to existing columns
+  .addFields({ 'hobbies': ['label'] });   // adds hobbies.label to existing columns
 // Still: name, email, avatar + now hobbies.label
 // Still: ordered by name, limit 50
 
@@ -786,24 +886,30 @@ const withHobbies = gridQuery
 
 const filtered = withHobbies
   .where('address.city', '=', 'Amsterdam');
+// Or equivalently: .where(p => p.address.city.equals('Amsterdam'))
 // Still: name, email, avatar, hobbies.label
 // Now: WHERE address.city = 'Amsterdam', ordered by name, limit 50
 
 // ── User switches to "detail card" view mode → REPLACE fields ──
-// Key: the user is still browsing the same filtered result SET,
+// The user is still browsing the same filtered result SET,
 // but wants to see each item rendered differently (more fields).
 // Filters, ordering, and pagination are preserved.
 
 const detailView = filtered
-  .select(personDetail);                  // REPLACE: swap summary → detail
+  .setFields(personDetail);               // REPLACE: swap summary → detail
 // Now: name, email, avatar, bio, age, address, hobbies, friends
 // Still: WHERE address.city = 'Amsterdam', ordered by name, limit 50
 
 // ── User switches back to table view → REPLACE again ────
 
 const backToTable = detailView
-  .select(personSummary);                 // back to summary
+  .setFields(personSummary);              // back to summary
 // Filters still intact
+
+// ── User removes the hobbies column ─────────────────────
+
+const noHobbies = withHobbies
+  .removeFields(['hobbies']);
 ```
 
 ### Surface 2: Drag-and-drop page builder — merge component requirements
@@ -821,7 +927,7 @@ const activeComponents = [simplePersonCard, hobbyList, friendGraph];
 
 const pageQuery = QueryBuilder
   .from(PersonShape)
-  .with(FieldSet.merge(activeComponents))
+  .setFields(FieldSet.merge(activeComponents))
   .limit(20);
 
 // One SPARQL query fetches everything all three components need.
@@ -830,7 +936,7 @@ const pageQuery = QueryBuilder
 const updatedComponents = [simplePersonCard, friendGraph, newComponent.fields];
 const updatedPageQuery = QueryBuilder
   .from(PersonShape)
-  .with(FieldSet.merge(updatedComponents))
+  .setFields(FieldSet.merge(updatedComponents))
   .limit(20);
 ```
 
@@ -840,20 +946,21 @@ const updatedPageQuery = QueryBuilder
 // "Show me people in Amsterdam"
 let q = QueryBuilder
   .from(PersonShape)
-  .select(personSummary)
+  .setFields(personSummary)
   .where('address.city', '=', 'Amsterdam');
 
-// "Also show their hobbies"  →  MERGE additional fields
-q = q.with({ 'hobbies': ['label'] });
+// "Also show their hobbies"  →  ADD fields
+q = q.addFields({ 'hobbies': ['label'] });
 
 // "Only people over 30"  →  adds another filter (accumulates)
 q = q.where('age', '>', 30);
+// Or: q = q.where(p => p.age.gt(30));   ← same proxy as DSL
 
-// "Only show me their active friends"  →  MERGE scoped FieldSet
-q = q.with(activeFriendsList);
+// "Only show me their active friends"  →  ADD scoped FieldSet
+q = q.addFields(activeFriendsList);
 
 // "Show the full profile view"  →  REPLACE fields, keep both filters
-q = q.select(personDetail);
+q = q.setFields(personDetail);
 // Still has: WHERE city = 'Amsterdam' AND age > 30
 // But now shows all detail fields instead of summary + hobbies
 
@@ -861,180 +968,163 @@ q = q.select(personDetail);
 // "Show me page 2" → q = q.offset(20)
 ```
 
-### Summary: when to merge vs replace
+### Summary: when to use each method
 
 | Action | Method | What changes | What's preserved |
 |---|---|---|---|
-| Add a column/component | `.with(fields)` | Selection grows | Filters, ordering, pagination |
-| Switch view mode | `.select(fields)` | Selection replaced entirely | Filters, ordering, pagination |
+| Set initial fields | `.setFields(fields)` | Selection set | — |
+| Add a column/component | `.addFields(fields)` | Selection grows | Filters, ordering, pagination |
+| Switch view mode | `.setFields(fields)` | Selection replaced entirely | Filters, ordering, pagination |
 | Add a filter | `.where(...)` | Constraints grow | Selection, ordering, pagination |
-| Remove fields | `.without('hobbies')` | Selection shrinks | Filters, ordering, pagination |
+| Remove fields | `.removeFields('hobbies')` | Selection shrinks | Filters, ordering, pagination |
 
-**`.select()` is mainly for switching view modes** — the user is browsing the same filtered/sorted result set, but wants to see the items rendered differently (table → cards → detail). Filters and pagination stay because the *dataset* hasn't changed, only the *view*.
+**`.setFields()` for switching view modes** — the user is browsing the same filtered/sorted result set, but wants to see the items rendered differently (table → cards → detail). Filters and pagination stay because the *dataset* hasn't changed, only the *view*.
 
 ---
 
-## Method Naming: `.select()` / `.with()` / `.without()` — open ideation
+## Method Naming — decided
 
-The three operations are: **replace fields**, **merge fields**, **remove fields**. We need clear names for all three. `.select()` for replace is mostly agreed. The merge/remove names are still open.
+### Naming pattern: `set` / `add` / `remove` / `pick`
 
-### Option table
+Consistent across FieldSet and QueryBuilder:
 
-| Replace (set fields) | Merge (add fields) | Remove fields | Notes |
+| Operation | FieldSet | QueryBuilder | Description |
 |---|---|---|---|
-| `.select(fs)` | `.with(fs)` | `.without('path')` | Short. with/without pair reads well. "with" slightly ambiguous (condition?) |
-| `.select(fs)` | `.expand(fs)` | `.contract('path')` | Expand/contract pair. "expand" is clear. "contract" is unusual |
-| `.select(fs)` | `.addFields(fs)` | `.removeFields('path')` | Explicit but verbose |
-| `.select(fs)` | `.append(fs)` | `.remove('path')` | "append" implies ordering |
-| `.select(fs)` | `.add(fs)` | `.remove('path')` | Shortest. add/remove is universal. But `.add()` is generic |
-| `.select(fs)` | `.include(fs)` | `.exclude('path')` | include/exclude pair. But "include" has ORM baggage (eager loading) |
-| `.fields(fs)` | `.addFields(fs)` | `.removeFields('path')` | Consistent naming around "fields" |
-| `.setFields(fs)` | `.addFields(fs)` | `.removeFields('path')` | Most explicit. set/add/remove is a standard pattern |
+| Replace all | `.set(fields)` | `.setFields(fields)` | Set to exactly these fields |
+| Add to existing | `.add(fields)` | `.addFields(fields)` | Merge additional fields |
+| Remove from existing | `.remove(fields)` | `.removeFields(fields)` | Remove named fields |
+| Keep only named | `.pick(fields)` | — | Filter existing to subset |
+| Union of multiple | `FieldSet.merge([...])` | — | Deduped union, scoped filters AND-combined |
 
-### Current lean
+QueryBuilder uses the `Fields` suffix because the builder has other methods too (`.where()`, `.orderBy()`, etc.). FieldSet is already about fields, so the short form is clear.
 
-`.select()` (replace) + `.with()` (merge) + `.without()` (remove) — short, reads naturally in the builder chain:
+### Where clauses — proxy form matches DSL, string form is convenience
 
 ```ts
-const q = QueryBuilder
-  .from(PersonShape)
-  .select(personSummary)                  // "I want exactly these fields"
-  .with(hobbyFields)                      // "also with these fields"
-  .without('email')                       // "but without email"
-  .where('age', '>', 30);
+// Proxy form (same as DSL — callback with proxied path builder)
+.where(p => p.age.gt(18))
+.where(p => p.address.city.equals('Amsterdam'))
+.where(p => p.isActive.equals(true))        // type-validated: isActive is boolean, .equals() is valid
+.where(p => L.gt(L.times(p.age, 12), 216))  // L module for computed expressions
+
+// String shorthand (convenience for simple comparisons)
+.where('age', '>', 18)
+.where('address.city', '=', 'Amsterdam')
+
+// Both produce the same WhereCondition internally.
+// Type validation: string form resolves PropertyShape first, then validates operator vs datatype.
 ```
 
-**Open question**: does `.with()` read clearly enough as "merge additional fields"? Or does it sound like a condition/constraint? Alternatives: `.expand()`, `.add()`, `.addFields()`, `.also()`.
-
-> **Shape remapping** (step 7 from old example) → see [009-shape-remapping.md](./009-shape-remapping.md)
+> **Shape remapping** → see [009-shape-remapping.md](./009-shape-remapping.md)
 
 ---
 
-## Detailed Design Sketch: Option B + C + FieldSet composability
+## Detailed Design Sketch
 
-### Core: `QueryBuilder` class
+### Core: `PropertyPath` and `ProxiedPathBuilder`
 
 ```ts
-// New file: src/queries/QueryBuilder.ts
-
+// PropertyPath — immutable value object representing a traversal path
 class PropertyPath {
   constructor(
     public readonly steps: PropertyShape[],
     public readonly rootShape: NodeShape,
+    public readonly bindingName?: string,     // reserved for .as()
   ) {}
 
-  /** Extend this path with another property */
   prop(property: PropertyShape): PropertyPath {
     return new PropertyPath([...this.steps, property], this.rootShape);
   }
 
+  // Variable binding
+  as(name: string): PropertyPath {
+    return new PropertyPath(this.steps, this.rootShape, name);
+  }
+  matches(name: string): PropertyPath { return this.as(name); }  // sugar
+
   // Where clause helpers — return WhereCondition objects
+  // These are type-validated against the PropertyShape's sh:datatype
   equals(value: any): WhereCondition { ... }
   notEquals(value: any): WhereCondition { ... }
-  gt(value: any): WhereCondition { ... }
+  gt(value: any): WhereCondition { ... }    // only for numeric/date types
   gte(value: any): WhereCondition { ... }
   lt(value: any): WhereCondition { ... }
   lte(value: any): WhereCondition { ... }
-  some(predicate: (p: PathBuilder) => WhereCondition): WhereCondition { ... }
+  contains(value: string): WhereCondition { ... }  // only for string types
+
+  // Sub-selection (matching DSL)
+  select(fn: (p: ProxiedPathBuilder) => FieldSetInput[]): FieldSetInput { ... }
+  select(fields: FieldSetInput[]): FieldSetInput { ... }
 }
 
-class PathBuilder {
+// ProxiedPathBuilder — the `p` in callbacks. Uses Proxy to intercept property access.
+// This is the SAME proxy used by the DSL. Property access (p.name) creates PropertyPaths.
+// .path('string') is an escape hatch for dynamic/runtime strings.
+class ProxiedPathBuilder {
   constructor(private rootShape: NodeShape) {}
 
-  prop(property: PropertyShape): PropertyPath {
-    return new PropertyPath([property], this.rootShape);
-  }
+  // Explicit string-based path (escape hatch for dynamic use)
+  path(input: string | PropertyShape): PropertyPath { ... }
+
+  // Property access via Proxy — p.name, p.friends, etc.
+  // Implemented via Proxy handler, same as DSL
 }
+```
 
-type SelectionInput =
-  | PropertyShape                           // single property
-  | PropertyPath                            // chained path
-  | PropertyShape[]                         // chained path (array form)
-  | Record<string, PropertyShape | PropertyPath | PropertyShape[]>; // aliased
+### Core: `QueryBuilder` class
 
+```ts
 class QueryBuilder {
   private _shape: NodeShape;
-  private _selections: SelectionInput[] = [];
+  private _fieldSet: FieldSet;
   private _where: WhereCondition[] = [];
   private _limit?: number;
   private _offset?: number;
   private _orderBy?: { path: PropertyPath; direction: 'ASC' | 'DESC' };
+  private _forIds?: string[];               // narrowed to specific IDs
+  private _bindings: Map<string, PropertyPath> = new Map();  // reserved for variable bindings
 
-  static from(shape: NodeShape): QueryBuilder {
-    const qb = new QueryBuilder();
-    qb._shape = shape;
-    return qb;
-  }
+  // ── Construction ──
+  static from(shape: NodeShape | string): QueryBuilder;  // string = prefixed IRI (my:PersonShape)
 
-  select(fn: (p: PathBuilder) => SelectionInput[]): this;
-  select(selections: SelectionInput[]): this;
-  select(input: any): this {
-    if (typeof input === 'function') {
-      this._selections = input(new PathBuilder(this._shape));
-    } else {
-      this._selections = input;
-    }
-    return this;
-  }
+  // ── Field selection ──
+  setFields(fields: FieldSet | FieldSetInput[] | ((p: ProxiedPathBuilder) => FieldSetInput[])): QueryBuilder;
+  addFields(fields: FieldSet | FieldSetInput[] | ((p: ProxiedPathBuilder) => FieldSetInput[])): QueryBuilder;
+  removeFields(fields: string[]): QueryBuilder;
 
-  where(fn: (p: PathBuilder) => WhereCondition): this;
-  where(condition: WhereCondition): this;
-  where(input: any): this {
-    const condition = typeof input === 'function'
-      ? input(new PathBuilder(this._shape))
-      : input;
-    this._where.push(condition);
-    return this;
-  }
+  // ── Filtering ── (proxy form or string shorthand)
+  where(fn: (p: ProxiedPathBuilder) => WhereCondition): QueryBuilder;  // proxy: p => p.age.gt(18)
+  where(path: string, op: string, value: any): QueryBuilder;          // string: 'age', '>', 18
 
-  limit(n: number): this { this._limit = n; return this; }
-  offset(n: number): this { this._offset = n; return this; }
+  // ── Ordering & pagination ──
+  orderBy(path: string, direction?: 'asc' | 'desc'): QueryBuilder;
+  limit(n: number): QueryBuilder;
+  offset(n: number): QueryBuilder;
 
-  /** Build to IR via the existing pipeline */
-  build(): IRSelectQuery {
-    const rawInput = this.toRawInput(); // convert selections/where to RawSelectInput
-    return buildSelectQuery(rawInput);
-  }
+  // ── Narrowing ──
+  for(id: string | string[]): QueryBuilder;       // single ID or array
+  one(id: string): QueryBuilder;                   // alias: .for(id) + singleResult
 
-  async exec(): Promise<ResultRow[]> {
-    return getQueryDispatch().selectQuery(this.build());
-  }
+  // ── Introspection ──
+  fields(): FieldSet;                              // current FieldSet
+
+  // ── Execution ──
+  build(): IRSelectQuery;
+  exec(): Promise<ResultRow[]>;
+
+  // ── Serialization ──
+  toJSON(): QueryBuilderJSON;
+  static fromJSON(json: QueryBuilderJSON, shapeRegistry: ShapeRegistry): QueryBuilder;
+
+  // ── Reserved for variable bindings ──
+  // String API form of .as() — for when paths are strings
+  // .as('hobby', 'hobbies') → label endpoint of 'hobbies' path as 'hobby'
+  // Not needed in callback form (use p.hobbies.as('hobby') directly)
+  // Future: may add .as(name, path) if needed for string API
 }
 ```
 
-### Convenience layer: string resolution (Option C on top)
-
-```ts
-// Extends QueryBuilder with string-based input
-
-class DynamicQuery {
-  static shape(shape: NodeShape | string): DynamicQueryBuilder { ... }
-}
-
-class DynamicQueryBuilder extends QueryBuilder {
-  select(paths: (string | string[] | Record<string, string>)[]): this {
-    // resolve 'friends.name' → [friendsPropertyShape, namePropertyShape]
-    // via walkPropertyPath(this._shape, 'friends.name')
-    const resolved = paths.map(p => this.resolvePath(p));
-    return super.select(resolved);
-  }
-
-  private resolvePath(input: string): PropertyPath {
-    const parts = input.split('.');
-    let currentShape = this._shape;
-    const steps: PropertyShape[] = [];
-    for (const part of parts) {
-      const prop = getPropertyShapeByLabel(currentShape, part);
-      if (!prop) throw new Error(`Property '${part}' not found on ${currentShape.label}`);
-      steps.push(prop);
-      if (prop.valueShape) {
-        currentShape = prop.valueShape; // walk into nested shape
-      }
-    }
-    return new PropertyPath(steps, this._shape);
-  }
-}
-```
+Every method returns a **new QueryBuilder** (immutable). The proxy `p` in callbacks is the same `ProxiedPathBuilder` used by the DSL.
 
 ### Key internal bridge: `toRawInput()`
 
@@ -1071,19 +1161,19 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 
 2. **Mutation builders:** Should `QueryBuilder` also support `.create()`, `.update()`, `.delete()` methods? The mutation IR (`IRCreateMutation`, etc.) is simpler — it might be easier to just expose the existing `buildCanonicalCreateMutationIR()` etc. directly.
 
-3. **Validation:** Should the builder validate that property shapes actually belong to the root shape (or its traversed shapes)? This catches errors early but adds overhead.
+3. **~~Validation~~ — RESOLVED (yes):** The builder validates property shapes against the root shape (and traversed valueShapes). Any invalid string/path throws an error since the base shape is known. Operator validation against `sh:datatype` too (boolean → only `=`/`!=`, numeric → all comparisons, etc.).
 
-4. **Where clause composition:** The static DSL uses proxy chaining for where clauses (`p.name.equals('John').and(p.age.gte(18))`). The builder needs a different pattern. Options:
-   - Condition objects: `where(age.gte(18))` — simple and explicit
-   - Nested callback: `where(p => p.prop(age).gte(18).and(p.prop(name).equals('John')))` — closer to DSL feel
-   - Plain objects: `where({ property: age, operator: '>=', value: 18 })` — most serializable (good for CMS configs stored as JSON)
-   - **Note:** The QueryBuilder serialization format (see resolved question 9) uses the plain-object form for where clauses in JSON. The tuple form (`.where('age', '>=', 18)`) is sugar for code. Both produce the same internal representation.
+4. **~~Where clause composition~~ — RESOLVED:** QueryBuilder supports two forms:
+   - **Proxy callback** (matches DSL): `.where(p => p.age.gt(18))` — same proxy as DSL, type-validated
+   - **String shorthand** (convenience): `.where('age', '>', 18)` — resolves PropertyShape, validates operator vs datatype
+   - Both produce the same `WhereCondition`. JSON serialization uses plain-object form: `{ path: 'age', op: '>', value: 18 }`.
+   - L module (006) works in callbacks for computed expressions: `.where(p => L.gt(L.times(p.age, 12), 216))`
 
 5. **Path reuse across queries:** If paths are first-class (Option E influence), they could be defined once in a CMS schema config and reused across list views, detail views, filters, etc.
 
 6. **Scoped filter merging strategy:** When two FieldSets have scoped filters on the same traversal and are merged, AND is the safe default. But should we support OR? What about conflicting filters (one says `isActive = true`, another says `isActive = false`)? Detect and warn?
 
-7. **QueryBuilder immutability:** If every `.where()` / `.include()` returns a new builder, do we shallow-clone or use structural sharing? For typical CMS queries (< 20 paths, < 5 where clauses) shallow clone is fine. But for NL chat where queries evolve over many turns, structural sharing could matter.
+7. **QueryBuilder immutability:** If every `.where()` / `.setFields()` / `.addFields()` returns a new builder, do we shallow-clone or use structural sharing? For typical CMS queries (< 20 paths, < 5 where clauses) shallow clone is fine. But for NL chat where queries evolve over many turns, structural sharing could matter.
 
 8. **Shape adapter scope:** Should adapters map just property labels, or also handle value transforms (e.g. `age` → compute from `birthDate`)? Value transforms require post-processing results, which is a different layer. Probably keep adapters as pure structural mapping and handle value transforms separately.
 
@@ -1125,27 +1215,34 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 ## Implementation Plan
 
 ### Phase 1: Core primitives
-- [ ] `PropertyPath` value object with `.prop()` chaining and comparison methods
+- [ ] `PropertyPath` value object with `.prop()` chaining, comparison methods (`.equals()`, `.gt()`, etc.), `.as()`, `.matches()`, `.select()` for sub-selection
 - [ ] `walkPropertyPath(shape, 'friends.name')` — string path → `PropertyPath` resolution using `NodeShape.getPropertyShape(label)` + `PropertyShape.valueShape` walking
-- [ ] `FieldSet` with `.for()`, `.all()`, `.extend()`, `.omit()`, `.pick()`, `.merge()`
+- [ ] `ProxiedPathBuilder` — shared proxy between DSL and dynamic builder. Property access creates PropertyPaths. `.path('string')` escape hatch for dynamic paths.
+- [ ] Type validation: comparison methods validate operator against `sh:datatype` (boolean: only `=`/`!=`, numeric: all comparisons, string: `=`/`!=`/`contains`/`startsWith`)
+- [ ] `FieldSet` with `.for()`, `.all()`, `.add()`, `.remove()`, `.set()`, `.pick()`, `FieldSet.merge()`
 - [ ] `FieldSet` scoped filters: `ScopedFieldEntry` type, filter attachment to entries
 - [ ] `FieldSet.toJSON()` / `FieldSet.fromJSON()` serialization (prefixed IRIs via prefix registry)
 - [ ] `QueryBuilder.toJSON()` / `QueryBuilder.fromJSON(json, shapeRegistry)` — full query serialization (shape, fields, where, orderBy, limit, offset)
-- [ ] Tests: FieldSet composition (extend, merge, omit, pick), path resolution, scoped filter merging
+- [ ] Tests: FieldSet composition (add, merge, remove, pick), path resolution, scoped filter merging
 
-### Phase 2: QueryBuilder (Option B)
-- [ ] `QueryBuilder` with `.from()`, `.select()` (replace), `.with()` (merge), `.without()` (remove), `.where()`, `.limit()`, `.offset()`, `.one()`, `.for()`, `.orderBy()`, `.build()`, `.exec()`
+### Phase 2: QueryBuilder
+- [ ] `QueryBuilder` with `.from()`, `.setFields()`, `.addFields()`, `.removeFields()`, `.where()`, `.limit()`, `.offset()`, `.one()`, `.for()`, `.orderBy()`, `.build()`, `.exec()`
 - [ ] Immutable builder pattern — every modifier returns a new builder
-- [ ] `PathBuilder` callback for `.select(p => [...])` and `.where(p => ...)`
+- [ ] Callback overloads using shared `ProxiedPathBuilder`: `.setFields(p => [...])`, `.where(p => p.age.gt(18))`
+- [ ] String shorthand overloads: `.setFields(['name', 'friends.name'])`, `.where('age', '>=', 18)`
+- [ ] Shape resolution by prefixed IRI: `.from('my:PersonShape')`
 - [ ] Internal `toRawInput()` bridge — produce `RawSelectInput` from PropertyPaths, lower scoped filters into `QueryStep.where`
-- [ ] `.fields()` accessor — returns the current FieldSet for introspection/extension
+- [ ] `.fields()` accessor — returns the current FieldSet for introspection
+- [ ] Reserved: `_bindings` Map, `.as()` string-form (for variable bindings, see 008)
 - [ ] Tests: verify builder-produced IR matches DSL-produced IR for equivalent queries
 - [ ] Tests: query forking — verify parent query is unchanged after derivation
-
-### Phase 3: String convenience layer (Option C)
-- [ ] String overloads on `QueryBuilder`: `.select(['name', 'friends.name'])`, `.where('age', '>=', 18)`
-- [ ] Shape resolution by string label: `.from('Person')`
 - [ ] Tests: string-based queries produce correct IR
+
+### Phase 3: DSL alignment
+- [ ] Refactor DSL to use QueryBuilder internally (DSL becomes sugar over QueryBuilder + FieldSet)
+- [ ] `.for(id)` / `.for([id1, id2])` chainable pattern on DSL (replacing subject-as-first-arg)
+- [ ] `Person.selectAll({ depth: 2 })` — depth-limited all-fields selection
+- [ ] Verify DSL and QueryBuilder produce identical IR for equivalent queries
 
 ### Phase 4: Shape remapping → [009-shape-remapping.md](./009-shape-remapping.md)
 
@@ -1158,3 +1255,4 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 - [ ] `MutationBuilder.create(shape).set(prop, value).exec()`
 - [ ] `MutationBuilder.update(shape, id).set(prop, value).exec()`
 - [ ] `MutationBuilder.delete(shape, ids).exec()`
+- [ ] `.for(id)` pattern on mutations: `Person.update({ age: 31 }).for(id)`
