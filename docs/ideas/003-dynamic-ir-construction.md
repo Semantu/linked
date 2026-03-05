@@ -972,6 +972,7 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
    - Condition objects: `where(age.gte(18))` — simple and explicit
    - Nested callback: `where(p => p.prop(age).gte(18).and(p.prop(name).equals('John')))` — closer to DSL feel
    - Plain objects: `where({ property: age, operator: '>=', value: 18 })` — most serializable (good for CMS configs stored as JSON)
+   - **Note:** The QueryBuilder serialization format (see resolved question 9) uses the plain-object form for where clauses in JSON. The tuple form (`.where('age', '>=', 18)`) is sugar for code. Both produce the same internal representation.
 
 5. **Path reuse across queries:** If paths are first-class (Option E influence), they could be defined once in a CMS schema config and reused across list views, detail views, filters, etc.
 
@@ -981,7 +982,32 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 
 8. **Shape adapter scope:** Should adapters map just property labels, or also handle value transforms (e.g. `age` → compute from `birthDate`)? Value transforms require post-processing results, which is a different layer. Probably keep adapters as pure structural mapping and handle value transforms separately.
 
-9. **FieldSet serialization format:** What does `toJSON()` look like? Likely `{ shape: "PersonShape", fields: ["name", "email", { path: "friends.name", where: { "friends.isActive": true } }] }`. Should it serialize by shape label or shape IRI? Label is human-friendly but ambiguous; IRI is stable but verbose. Probably allow both.
+9. **~~FieldSet serialization format~~ — RESOLVED:** Serialize at the QueryBuilder/FieldSet level (not the IR level). The IR is an internal compilation target, not a storage format.
+
+   **Shape/property identifiers use prefixed IRIs** (e.g. `"my:PersonShape"`, not `"http://data.my-app.com/shapes/Person"`). Prefixes are resolved through the existing prefix registry. Unprefixed strings resolve as property labels on the base shape — any invalid string/path throws an error since the base shape is known.
+
+   **QueryBuilder.toJSON()** format:
+   ```json
+   {
+     "shape": "my:PersonShape",
+     "fields": [
+       { "path": "name" },
+       { "path": "friends.name" },
+       { "path": "hobbies.label", "as": "hobby" }
+     ],
+     "where": [
+       { "path": "address.city", "op": "=", "value": "Amsterdam" },
+       { "path": "age", "op": ">=", "value": 18 }
+     ],
+     "orderBy": [{ "path": "name", "direction": "asc" }],
+     "limit": 20,
+     "offset": 0
+   }
+   ```
+
+   **QueryBuilder.fromJSON(json, shapeRegistry)** resolves prefixed IRIs → NodeShape/PropertyShape references, throws on unknown shapes/properties.
+
+   **FieldSet.toJSON() / FieldSet.fromJSON()** independently serializable with the same format (just `shape` + `fields`).
 
 10. **Immutability implementation for FieldSet:** FieldSet entries are an array of `FieldSetEntry`. Extend/omit/pick create new arrays. But the entries themselves reference PropertyShapes (which are mutable objects in the current codebase). Should FieldSet deep-freeze its entries? Or is it sufficient that the FieldSet *array* is new (so you can't accidentally mutate the list), while PropertyShape references are shared? Probably the latter — PropertyShapes are effectively singletons registered on NodeShapes.
 
@@ -998,7 +1024,8 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 - [ ] `walkPropertyPath(shape, 'friends.name')` — string path → `PropertyPath` resolution using `NodeShape.getPropertyShape(label)` + `PropertyShape.valueShape` walking
 - [ ] `FieldSet` with `.for()`, `.all()`, `.extend()`, `.omit()`, `.pick()`, `.merge()`
 - [ ] `FieldSet` scoped filters: `ScopedFieldEntry` type, filter attachment to entries
-- [ ] `FieldSet.toJSON()` / `FieldSet.fromJSON()` serialization
+- [ ] `FieldSet.toJSON()` / `FieldSet.fromJSON()` serialization (prefixed IRIs via prefix registry)
+- [ ] `QueryBuilder.toJSON()` / `QueryBuilder.fromJSON(json, shapeRegistry)` — full query serialization (shape, fields, where, orderBy, limit, offset)
 - [ ] Tests: FieldSet composition (extend, merge, omit, pick), path resolution, scoped filter merging
 
 ### Phase 2: QueryBuilder (Option B)
