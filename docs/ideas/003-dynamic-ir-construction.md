@@ -543,6 +543,98 @@ type FieldSetEntry = {
 
 The pattern: **shapes suffice when you want everything. FieldSet is needed when you want a subset, a union, or an evolving view.**
 
+### Immutability of FieldSets
+
+Like QueryBuilder, **FieldSets are immutable**. Every `.extend()`, `.omit()`, `.pick()` returns a new FieldSet. The original is never modified.
+
+```ts
+const personSummary = FieldSet.for(PersonShape, ['name', 'email']);
+const withAge = personSummary.extend(['age']);
+// personSummary is still ['name', 'email']
+// withAge is ['name', 'email', 'age']
+```
+
+This matters when the same FieldSet is shared across components. A table extends it with a column — that doesn't affect the card component using the original.
+
+### Filtering on selected paths
+
+A path like `age` can be both **selected** and **filtered** — they're independent concerns that happen to touch the same traversal. Under the hood, the IR reuses the same alias for both (via `LoweringContext.getOrCreateTraversal()` which deduplicates `(fromAlias, propertyShapeId)` pairs). So selecting `age` and filtering `age > 30` naturally share a variable — no extra traversal.
+
+```ts
+// FieldSet with age selected AND filtered
+const adults = FieldSet.for(PersonShape, [
+  'name',
+  'email',
+  { path: 'age', where: { 'age': { '>=': 18 } } },
+  // ↑ selects age AND filters it — same traversal, same ?variable in SPARQL
+]);
+
+// The top-level .where() can ALSO filter on age — they AND-combine
+const results = await QueryBuilder
+  .from(PersonShape)
+  .include(adults)          // has scoped filter: age >= 18
+  .where('age', '<', 65)   // additional top-level filter: age < 65
+  .exec();
+// → SPARQL: WHERE { ... FILTER(?age >= 18 && ?age < 65) }
+// → the ?age variable is shared between select, scoped filter, and top-level filter
+```
+
+This works because the existing pipeline already handles variable deduplication:
+- `LoweringContext.getOrCreateTraversal()` returns the same alias when traversing the same `(from, property)` twice
+- `VariableRegistry` in `irToAlgebra.ts` maps `(alias, property)` → SPARQL variable name, reusing variables automatically
+- A `property_expr` in the projection and a `property_expr` in a where clause that refer to the same `(sourceAlias, property)` resolve to the same `?variable`
+
+### Variable reuse and shared bindings — future-proofing
+
+The current IR already supports implicit variable sharing via alias deduplication. But there are SPARQL patterns that require **explicit** variable sharing — where the *result* of one path is used as an *input* to another:
+
+```sparql
+# "People whose best friend's favorite hobby matches one of their own hobbies"
+SELECT ?person ?name ?hobby WHERE {
+  ?person a ex:Person ;
+          ex:name ?name ;
+          ex:bestFriend/ex:favoriteHobby ?hobby .
+  ?person ex:hobbies ?hobby .    # ← same ?hobby variable, creating a join
+}
+```
+
+Here, `?hobby` appears in two different triple patterns. The first path (`bestFriend.favoriteHobby`) produces a value, and the second path (`hobbies`) is constrained to match that same value. This is a **shared variable** — the SPARQL engine joins on it.
+
+The current DSL doesn't expose this. Neither would the initial QueryBuilder. But the IR *can* represent it: if two `IRTraversePattern`s share the same `to` alias, they'll generate the same `?variable`, creating the join. The question is how to express this in the builder API.
+
+**Design direction for shared bindings (not in v1, but architected for):**
+
+```ts
+// Future API: explicit variable binding
+const query = QueryBuilder
+  .from(PersonShape)
+  .select(p => {
+    // .as() names a binding point — a variable that can be referenced elsewhere
+    const hobby = p.prop('bestFriend').prop('favoriteHobby').as('hobby');
+    return [
+      p.prop('name'),
+      hobby,                                       // select the hobby
+      p.prop('hobbies').equals(hobby),             // join: hobbies must match
+    ];
+  });
+
+// Or: more explicit for complex patterns
+const query2 = QueryBuilder
+  .from(PersonShape)
+  .select(['name', 'bestFriend.favoriteHobby'])
+  .bind('hobby', 'bestFriend.favoriteHobby')        // name the endpoint
+  .where('hobbies', '=', { $ref: 'hobby' });        // reference the binding
+```
+
+**What this means for v1 design:**
+
+- `PropertyPath` should carry an optional `bindingName` field (defaults to auto-generated alias)
+- `WhereCondition` values should accept `{ $ref: string }` for referencing named bindings
+- The `toRawInput()` bridge needs to propagate binding names down so `LoweringContext` can reuse aliases intentionally
+- None of this needs to be *implemented* in Phase 1-3, but the types should have slots for it
+
+The `IRAliasScope` is already designed with scoping and parent chains. `IRAliasBinding` has `alias` + `source` + `scopeDepth`. This can support named bindings without structural changes — a named binding is just a registered alias that other expressions can reference.
+
 ---
 
 ## Query Derivation, Extension, and Shape Remapping
@@ -652,19 +744,42 @@ const results = await remapped.exec();
 
 For larger-scale interop, define a `ShapeAdapter` that maps between two shapes. Use it across all queries.
 
+The `properties` object maps from source → target. Keys and values can be:
+- **Strings** — matched by property label (convenient, human-readable)
+- **PropertyShape references** — matched by `{id: someIRI}` (precise, no ambiguity)
+- **NodeShape references** — for the `from`/`to` shapes themselves
+- Mixed — strings on one side, references on the other
+
 ```ts
 // Defined once, used everywhere
 const schemaPersonAdapter = ShapeAdapter.create({
-  from: PersonShape,
-  to: SchemaPersonShape,
+  // Shape references: can be NodeShape objects or {id: '...'} references
+  from: PersonShape,            // or: { id: 'http://example.org/PersonShape' }
+  to: SchemaPersonShape,        // or: { id: 'http://schema.org/PersonShape' }
+
+  // Properties: string labels for convenience...
   properties: {
     'name': 'givenName',
     'email': 'email',            // same label, different PropertyShape IDs
     'avatar': 'image',
     'friends': 'knows',
-    'age': 'birthDate',          // can also provide a transform function for values
+    'age': 'birthDate',
     'address.city': 'address.addressLocality',
     'address.country': 'address.addressCountry',
+  },
+});
+
+// ...or PropertyShape references for precision
+const schemaPersonAdapterExact = ShapeAdapter.create({
+  from: PersonShape,
+  to: SchemaPersonShape,
+  properties: {
+    // Left side: PropertyShape from source shape
+    // Right side: PropertyShape from target shape
+    [PersonShape.getPropertyShape('name').id]: SchemaPersonShape.getPropertyShape('givenName'),
+    [PersonShape.getPropertyShape('friends').id]: { id: 'http://schema.org/knows' },
+    // Or mixed: string label → PropertyShape reference
+    'avatar': SchemaPersonShape.getPropertyShape('image'),
   },
 });
 
@@ -677,6 +792,8 @@ QueryBuilder.registerAdapter(schemaPersonAdapter);
 // Now any query using PersonShape properties will auto-resolve
 // if the target store's data uses SchemaPersonShape
 ```
+
+Internally, string labels are resolved to PropertyShape references via `NodeShape.getPropertyShape(label)` on the respective `from`/`to` shapes. The adapter stores the mapping as `Map<PropertyShape.id, PropertyShape.id>` after resolution — so at execution time it's just IRI-to-IRI lookup, no string matching.
 
 ### Where remapping fits
 
@@ -1020,6 +1137,12 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 8. **Shape adapter scope:** Should adapters map just property labels, or also handle value transforms (e.g. `age` → compute from `birthDate`)? Value transforms require post-processing results, which is a different layer. Probably keep adapters as pure structural mapping and handle value transforms separately.
 
 9. **FieldSet serialization format:** What does `toJSON()` look like? Likely `{ shape: "PersonShape", fields: ["name", "email", { path: "friends.name", where: { "friends.isActive": true } }] }`. Should it serialize by shape label or shape IRI? Label is human-friendly but ambiguous; IRI is stable but verbose. Probably allow both.
+
+10. **Immutability implementation for FieldSet:** FieldSet entries are an array of `FieldSetEntry`. Extend/omit/pick create new arrays. But the entries themselves reference PropertyShapes (which are mutable objects in the current codebase). Should FieldSet deep-freeze its entries? Or is it sufficient that the FieldSet *array* is new (so you can't accidentally mutate the list), while PropertyShape references are shared? Probably the latter — PropertyShapes are effectively singletons registered on NodeShapes.
+
+11. **Shared variable bindings — API ergonomics:** The `.as('hobby')` / `$ref` pattern for explicit variable sharing (described in "future-proofing" above) needs careful design. The `.as()` call names a binding endpoint. The `$ref` references it. But what scope do binding names live in? Per-query? Per-FieldSet? If a FieldSet defines a binding, can a top-level `.where()` reference it? Likely yes — bindings are query-scoped, and FieldSets contribute to the query's binding namespace when included.
+
+12. **ShapeAdapter property format — string vs reference resolution:** When the adapter `properties` map uses strings, the string is resolved as a property label on the respective shape (`from` shape for keys, `to` shape for values). When the adapter uses `{id: someIRI}` references, those are used directly. But what about dotted paths like `'address.city'`? These imply chained resolution: first resolve `address` on the `from` shape, then `city` on `address`'s valueShape. The target side similarly resolves `'address.addressLocality'` step by step. This makes dotted path mapping work, but should the adapter also support structural differences where one shape has a flat property and the other has a nested path? (e.g. `'city'` → `'address.addressLocality'`). Probably yes, but that's a later extension.
 
 ---
 
