@@ -676,130 +676,13 @@ const alice = await personQuery.one(aliceId).exec();
 const subset = await personQuery.for([aliceId, bobId]).exec();
 ```
 
-### Shape remapping — same component, different graph
+### Shape remapping — forward-compatibility
 
-This is the big one. A component is built to display data from `PersonShape`. But in a different deployment, the data uses `schema:Person` (Schema.org) instead of your custom `ex:Person`. The property names differ. The graph structure differs. But the component's *intent* is the same: show a person's name, avatar, and friends.
+> Full design: [009-shape-remapping.md](./009-shape-remapping.md)
 
-**Option 1: Shape mapping at the FieldSet level**
+Shape remapping lets the same FieldSet/QueryBuilder target a different SHACL shape via declarative `ShapeAdapter` mappings. Components stay portable across ontologies — result keys use original labels, only SPARQL changes.
 
-Map from one shape's property labels to another's. The FieldSet stays the same, the underlying resolution changes.
-
-```ts
-// Original component expects PersonShape with properties: name, avatar, friends
-const personCard = FieldSet.for(PersonShape, ['name', 'avatar', 'friends.name']);
-
-// In a different graph environment, data uses SchemaPersonShape
-// with properties: givenName, image, knows
-const mapping = FieldSet.mapShape(personCard, SchemaPersonShape, {
-  'name': 'givenName',        // PersonShape.name → SchemaPersonShape.givenName
-  'avatar': 'image',          // PersonShape.avatar → SchemaPersonShape.image
-  'friends': 'knows',         // PersonShape.friends → SchemaPersonShape.knows
-});
-// mapping is a new FieldSet rooted at SchemaPersonShape,
-// selecting [givenName, image, knows.givenName]
-
-// The query uses SchemaPersonShape but returns results with the ORIGINAL keys
-const results = await QueryBuilder
-  .from(SchemaPersonShape)
-  .include(mapping)
-  .exec();
-
-// results[0] = { id: '...', name: 'Alice', avatar: 'http://...', friends: [{ name: 'Bob' }] }
-//                            ↑ original key names preserved!
-```
-
-The key insight: the **result keys** stay as the original shape's labels, so the component doesn't need to know about the remapping. Only the SPARQL changes.
-
-**Option 2: Shape mapping at the QueryBuilder level**
-
-```ts
-// A component exports its query template
-const personCardQuery = QueryBuilder
-  .from(PersonShape)
-  .include(personCard)
-  .limit(10);
-
-// Remap the entire query to a different shape
-const remapped = personCardQuery.remapShape(SchemaPersonShape, {
-  'name': 'givenName',
-  'avatar': 'image',
-  'friends': 'knows',
-});
-
-// remapped is a new QueryBuilder targeting SchemaPersonShape
-// with the same structure but different property traversals
-const results = await remapped.exec();
-```
-
-**Option 3: Shape adapter — declarative, reusable mapping object**
-
-For larger-scale interop, define a `ShapeAdapter` that maps between two shapes. Use it across all queries.
-
-The `properties` object maps from source → target. Keys and values can be:
-- **Strings** — matched by property label (convenient, human-readable)
-- **PropertyShape references** — matched by `{id: someIRI}` (precise, no ambiguity)
-- **NodeShape references** — for the `from`/`to` shapes themselves
-- Mixed — strings on one side, references on the other
-
-```ts
-// Defined once, used everywhere
-const schemaPersonAdapter = ShapeAdapter.create({
-  // Shape references: can be NodeShape objects or {id: '...'} references
-  from: PersonShape,            // or: { id: 'http://example.org/PersonShape' }
-  to: SchemaPersonShape,        // or: { id: 'http://schema.org/PersonShape' }
-
-  // Properties: string labels for convenience...
-  properties: {
-    'name': 'givenName',
-    'email': 'email',            // same label, different PropertyShape IDs
-    'avatar': 'image',
-    'friends': 'knows',
-    'age': 'birthDate',
-    'address.city': 'address.addressLocality',
-    'address.country': 'address.addressCountry',
-  },
-});
-
-// ...or PropertyShape references for precision
-const schemaPersonAdapterExact = ShapeAdapter.create({
-  from: PersonShape,
-  to: SchemaPersonShape,
-  properties: {
-    // Left side: PropertyShape from source shape
-    // Right side: PropertyShape from target shape
-    [PersonShape.getPropertyShape('name').id]: SchemaPersonShape.getPropertyShape('givenName'),
-    [PersonShape.getPropertyShape('friends').id]: { id: 'http://schema.org/knows' },
-    // Or mixed: string label → PropertyShape reference
-    'avatar': SchemaPersonShape.getPropertyShape('image'),
-  },
-});
-
-// Use anywhere
-const remapped = personCardQuery.adapt(schemaPersonAdapter);
-const remappedFields = personCard.adapt(schemaPersonAdapter);
-
-// Or: register globally so all queries auto-resolve
-QueryBuilder.registerAdapter(schemaPersonAdapter);
-// Now any query using PersonShape properties will auto-resolve
-// if the target store's data uses SchemaPersonShape
-```
-
-Internally, string labels are resolved to PropertyShape references via `NodeShape.getPropertyShape(label)` on the respective `from`/`to` shapes. The adapter stores the mapping as `Map<PropertyShape.id, PropertyShape.id>` after resolution — so at execution time it's just IRI-to-IRI lookup, no string matching.
-
-### Where remapping fits
-
-Shape remapping happens at the **FieldSet/QueryBuilder level** — before IR construction. The remapper walks each `PropertyPath`, swaps out the PropertyShapes using the mapping, and produces a new FieldSet/QueryBuilder rooted at the target shape. Everything downstream (desugar → canonicalize → lower → SPARQL) works unchanged.
-
-```
-Original FieldSet (PersonShape)
-    ↓  remapShape / adapt
-Remapped FieldSet (SchemaPersonShape)  ← result keys still use original labels
-    ↓  QueryBuilder.include()
-    ↓  toRawInput()
-    ↓  buildSelectQuery()
-    ↓  irToAlgebra → algebraToString
-    ↓  SPARQL (uses SchemaPersonShape's actual property IRIs)
-```
+**v1 requires no special preparation.** Shape remapping operates on the FieldSet/QueryBuilder public API. As long as `PropertyPath` exposes its `steps` and `rootShape`, and types are immutable/cloneable, the adapter can walk and remap them when it's implemented later.
 
 ---
 
@@ -917,36 +800,7 @@ chatQuery = chatQuery
 chatQuery = chatQuery
   .include(personDetail);
 
-// ═══════════════════════════════════════════════════════
-// 7. Shape remapping — same component, different data
-// ═══════════════════════════════════════════════════════
-
-// Client A uses PersonShape (custom ontology)
-// Client B uses SchemaPersonShape (schema.org)
-
-const adapter = ShapeAdapter.create({
-  from: PersonShape,
-  to: SchemaPersonShape,
-  properties: {
-    'name': 'givenName',
-    'email': 'email',
-    'avatar': 'image',
-    'friends': 'knows',
-    'address': 'address',
-    'address.city': 'address.addressLocality',
-    'hobbies': 'interestIn',
-    'hobbies.label': 'interestIn.name',
-  },
-});
-
-// The SAME page query, remapped to Schema.org
-const schemaPageQuery = pageQuery.adapt(adapter);
-const schemaPageData = await schemaPageQuery.exec();
-// → results use original keys (name, email, ...) but SPARQL uses schema.org IRIs
-// → components render identically, no code changes
-
-// Or: register globally for auto-resolution
-QueryBuilder.registerAdapter(adapter);
+// Shape remapping (step 7) → see 009-shape-remapping.md
 ```
 
 ---
@@ -1161,12 +1015,7 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 - [ ] Shape resolution by string label: `.from('Person')`
 - [ ] Tests: string-based queries produce correct IR
 
-### Phase 4: Shape remapping
-- [ ] `ShapeAdapter.create({ from, to, properties })` — declarative property mapping
-- [ ] `FieldSet.adapt(adapter)` — remap a FieldSet to a different shape, preserving result key aliases
-- [ ] `QueryBuilder.adapt(adapter)` — remap an entire query (selections + where + orderBy)
-- [ ] `QueryBuilder.registerAdapter()` — global adapter registry for auto-resolution
-- [ ] Tests: remapped query produces correct SPARQL with target shape's IRIs, result keys match source shape labels
+### Phase 4: Shape remapping → [009-shape-remapping.md](./009-shape-remapping.md)
 
 ### Phase 5: Raw IR helpers (Option A)
 - [ ] `ir.select()`, `ir.shapeScan()`, `ir.traverse()`, `ir.project()`, `ir.prop()` helpers

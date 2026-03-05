@@ -6,7 +6,7 @@ depends_on: [003-dynamic-ir-construction]
 
 # Shared Variable Bindings
 
-## Status: design
+## Status: design (nothing implemented yet — v1 type reservations are part of 003)
 
 ## Problem
 
