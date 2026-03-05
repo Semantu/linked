@@ -236,7 +236,9 @@ const otherQuery = select(PersonShape)
 
 **Suggested approach: B + C layered, with E-style composability baked into the core `FieldSet` primitive.**
 
-Build the fluent builder (B) as the core engine. Layer the string-resolving convenience API (C) on top. But instead of treating composability as a separate concern (Option E), make it a first-class feature of the builder via **`FieldSet`** — a named, reusable, composable collection of selections that any query can `.include()`.
+Build the fluent builder (B) as the core engine. Layer the string-resolving convenience API (C) on top. But instead of treating composability as a separate concern (Option E), make it a first-class feature of the builder via **`FieldSet`** — a named, reusable, composable collection of selections that any query can use.
+
+> **Note on method names:** Earlier sections use `.include()` as a placeholder for "add fields to a query." The actual naming is being decided — see "Method Naming" section under CMS Surface Examples. The authoritative examples are in the CMS Surface Examples section.
 
 Option A (raw IR helpers) can come later as a power-user escape hatch.
 
@@ -506,7 +508,7 @@ class FieldSet {
   static fromJSON(json: FieldSetJSON): FieldSet;  // deserialize
 
   // ── Query integration ──
-  // QueryBuilder.include() accepts FieldSet directly
+  // QueryBuilder.select() / .with() accept FieldSet directly
 }
 
 type FieldSetInput =
@@ -515,7 +517,51 @@ type FieldSetInput =
   | PropertyPath                              // pre-built path
   | FieldSet                                  // include another FieldSet
   | ScopedFieldEntry                          // path + scoped filter
-  | Record<string, FieldSetInput | FieldSet>; // nested: { address: fullAddress }
+  | Record<string, FieldSetInput[]>           // nested: { 'hobbies': ['label', 'description'] }
+  | Record<string, FieldSet>;                 // nested with FieldSet: { 'friends': personSummary }
+```
+
+#### Nested selection (avoiding path repetition)
+
+When selecting multiple properties under a deep path, flat strings repeat the prefix:
+
+```ts
+// Repetitive — 'hobbies' appears 3 times
+FieldSet.for(PersonShape, [
+  'hobbies.label',
+  'hobbies.description',
+  'hobbies.category.name',
+]);
+```
+
+Use the nested object form to avoid this. The key is the traversal, the array value is sub-selections relative to that traversal's shape:
+
+```ts
+// Nested — 'hobbies' appears once
+FieldSet.for(PersonShape, [
+  { 'hobbies': ['label', 'description', 'category.name'] },
+]);
+
+// Deeper nesting composes:
+FieldSet.for(PersonShape, [
+  'name',
+  { 'friends': [
+    'name',
+    'avatar',
+    { 'hobbies': ['label', 'description'] },
+  ]},
+]);
+```
+
+Both flat and nested forms produce identical FieldSets. The nested form is what `toJSON()` could produce for compact serialization. The callback form also supports sub-selection:
+
+```ts
+// Callback form with sub-selection
+FieldSet.for(PersonShape, (p) => [
+  p.path('name'),
+  p.path('hobbies').fields(['label', 'description', 'category.name']),
+]);
+```
 
 type ScopedFieldEntry = {
   path: string | PropertyPath;
@@ -640,7 +686,7 @@ QueryBuilder is immutable-by-default: every modifier returns a new builder. This
 // Base query — reusable template
 const allPeople = QueryBuilder
   .from(PersonShape)
-  .include(personSummary);
+  .select(personSummary);
 
 // Fork for different pages
 const peoplePage = allPeople
@@ -656,12 +702,12 @@ const peopleInAmsterdam = allPeople
 // Further fork
 const youngPeopleInAmsterdam = peopleInAmsterdam
   .where('age', '<', 30)
-  .include(personDetail);    // switch to a richer field set
+  .select(personDetail);     // switch view to detail (replace fields)
 
 // All of these are independent builders — allPeople is unchanged
 ```
 
-This is like a query "prototype chain." Each `.where()`, `.include()`, `.limit()` returns a new builder that inherits from the parent. Cheap to create (just clone the config), no side effects.
+This is like a query "prototype chain." Each `.where()`, `.select()`, `.with()`, `.limit()` returns a new builder that inherits from the parent. Cheap to create (just clone the config), no side effects.
 
 ### Query narrowing (`.one()` / `.for()`)
 
@@ -686,122 +732,181 @@ Shape remapping lets the same FieldSet/QueryBuilder target a different SHACL sha
 
 ---
 
-## End-to-End Example: Everything Combined
+## CMS Surface Examples
 
-A CMS page builder scenario showing FieldSet + QueryBuilder + scoped filters + query derivation + shape remapping all working together.
+Three real CMS surfaces that use QueryBuilder + FieldSet. These examples use placeholder method names — see "Method naming" section below for the ongoing naming discussion.
 
 ```ts
-import { FieldSet, QueryBuilder, ShapeAdapter } from 'lincd/queries';
+import { FieldSet, QueryBuilder } from 'lincd/queries';
 
 // ═══════════════════════════════════════════════════════
-// 1. Define reusable FieldSets
+// Shared FieldSets — defined once, reused across surfaces
 // ═══════════════════════════════════════════════════════
+
+// PersonShape has properties: name, email, avatar, age, bio,
+//   address.city, address.country, hobbies.label, hobbies.description,
+//   friends.name, friends.avatar, friends.email, friends.isActive
 
 const personSummary = FieldSet.for(PersonShape, ['name', 'email', 'avatar']);
 
-const fullAddress = FieldSet.for(AddressShape, ['street', 'city', 'postalCode', 'country']);
-
-const personCard = FieldSet.for(PersonShape, [
-  personSummary,
-  'address.city',
-]);
-
 const personDetail = FieldSet.for(PersonShape, [
-  personCard,
+  personSummary,                                  // includes summary fields
   'bio', 'age',
-  { friends: personSummary },
-  'hobbies.label',
+  { 'address': ['city', 'country'] },             // nested selection
+  { 'hobbies': ['label', 'description'] },        // nested selection
+  { 'friends': personSummary },                   // sub-FieldSet under traversal
 ]);
 
-// With scoped filter: only active friends
 const activeFriendsList = FieldSet.for(PersonShape, (p) => [
   p.path('friends').where('isActive', '=', true).fields([
     personSummary,
   ]),
 ]);
+```
 
-// ═══════════════════════════════════════════════════════
-// 2. Base query template — shared across pages
-// ═══════════════════════════════════════════════════════
+### Surface 1: Grid/table view — add/remove columns, filter, switch view mode
 
-const allPeople = QueryBuilder
+```ts
+// ── Base query: all people, summary columns ─────────────
+
+const gridQuery = QueryBuilder
   .from(PersonShape)
-  .include(personSummary);
-
-// ═══════════════════════════════════════════════════════
-// 3. Table overview page
-// ═══════════════════════════════════════════════════════
-
-const tableQuery = allPeople
-  .include(FieldSet.for(PersonShape, ['address.city', 'age']))
+  .select(personSummary)                  // start with summary columns
   .orderBy('name')
   .limit(50);
 
-const tableRows = await tableQuery.exec();
+// ── User adds a column (hobbies) → MERGE additional fields ──
 
-// User adds a column → extend
-const withPhone = tableQuery
-  .include(tableQuery.fields().extend(['phone']));
+const withHobbies = gridQuery
+  .with({ 'hobbies': ['label'] });        // adds hobbies.label to existing columns
+// Still: name, email, avatar + now hobbies.label
+// Still: ordered by name, limit 50
 
-// User filters → narrow
-const filtered = tableQuery
+// ── User filters to Amsterdam → adds a constraint ───────
+
+const filtered = withHobbies
   .where('address.city', '=', 'Amsterdam');
+// Still: name, email, avatar, hobbies.label
+// Now: WHERE address.city = 'Amsterdam', ordered by name, limit 50
 
-// ═══════════════════════════════════════════════════════
-// 4. Detail page — fork from table query
-// ═══════════════════════════════════════════════════════
+// ── User switches to "detail card" view mode → REPLACE fields ──
+// Key: the user is still browsing the same filtered result SET,
+// but wants to see each item rendered differently (more fields).
+// Filters, ordering, and pagination are preserved.
 
-const detailQuery = allPeople
-  .include(personDetail)
-  .include(activeFriendsList);   // merge: scoped filter on friends
+const detailView = filtered
+  .select(personDetail);                  // REPLACE: swap summary → detail
+// Now: name, email, avatar, bio, age, address, hobbies, friends
+// Still: WHERE address.city = 'Amsterdam', ordered by name, limit 50
 
-const alice = await detailQuery.one(aliceId).exec();
+// ── User switches back to table view → REPLACE again ────
 
-// ═══════════════════════════════════════════════════════
-// 5. Drag-and-drop builder — merge component requirements
-// ═══════════════════════════════════════════════════════
+const backToTable = detailView
+  .select(personSummary);                 // back to summary
+// Filters still intact
+```
 
-// Each component declares what it needs
-const components = [
-  { type: 'PersonCard', fields: personCard },
-  { type: 'HobbyList', fields: FieldSet.for(PersonShape, ['hobbies.label', 'hobbies.description']) },
-  { type: 'FriendGraph', fields: activeFriendsList },
-];
+### Surface 2: Drag-and-drop page builder — merge component requirements
 
-// Builder merges all component FieldSets into one query
-const pageFields = FieldSet.merge(components.map(c => c.fields));
+```ts
+// Each component on the page declares its data needs as a FieldSet
+const simplePersonCard = FieldSet.for(PersonShape, ['name', 'avatar']);
+const hobbyList = FieldSet.for(PersonShape, [
+  { 'hobbies': ['label', 'description'] },
+]);
+const friendGraph = activeFriendsList;
+
+// User drops components onto the page → MERGE all their fields into one query
+const activeComponents = [simplePersonCard, hobbyList, friendGraph];
+
 const pageQuery = QueryBuilder
   .from(PersonShape)
-  .include(pageFields)
+  .with(FieldSet.merge(activeComponents))
   .limit(20);
 
-const pageData = await pageQuery.exec();
-
-// ═══════════════════════════════════════════════════════
-// 6. NL chat — incremental building
-// ═══════════════════════════════════════════════════════
-
-// "Show me people in Amsterdam"
-let chatQuery = QueryBuilder
+// One SPARQL query fetches everything all three components need.
+// If the user removes hobbyList and adds a new component, the page builder
+// rebuilds from the current component list:
+const updatedComponents = [simplePersonCard, friendGraph, newComponent.fields];
+const updatedPageQuery = QueryBuilder
   .from(PersonShape)
-  .include(personSummary)
+  .with(FieldSet.merge(updatedComponents))
+  .limit(20);
+```
+
+### Surface 3: NL chat — incremental query refinement
+
+```ts
+// "Show me people in Amsterdam"
+let q = QueryBuilder
+  .from(PersonShape)
+  .select(personSummary)
   .where('address.city', '=', 'Amsterdam');
 
-// "Also show their hobbies"
-chatQuery = chatQuery
-  .include(chatQuery.fields().extend(['hobbies.label']));
+// "Also show their hobbies"  →  MERGE additional fields
+q = q.with({ 'hobbies': ['label'] });
 
-// "Only people over 30 who have active friends"
-chatQuery = chatQuery
-  .where('age', '>', 30)
-  .include(activeFriendsList);
+// "Only people over 30"  →  adds another filter (accumulates)
+q = q.where('age', '>', 30);
 
-// "Show as detail view" — swap the field set entirely
-chatQuery = chatQuery
-  .include(personDetail);
+// "Only show me their active friends"  →  MERGE scoped FieldSet
+q = q.with(activeFriendsList);
 
-// Shape remapping (step 7) → see 009-shape-remapping.md
+// "Show the full profile view"  →  REPLACE fields, keep both filters
+q = q.select(personDetail);
+// Still has: WHERE city = 'Amsterdam' AND age > 30
+// But now shows all detail fields instead of summary + hobbies
+
+// "Remove the age filter" (future: .removeWhere() or similar)
+// "Show me page 2" → q = q.offset(20)
 ```
+
+### Summary: when to merge vs replace
+
+| Action | Method | What changes | What's preserved |
+|---|---|---|---|
+| Add a column/component | `.with(fields)` | Selection grows | Filters, ordering, pagination |
+| Switch view mode | `.select(fields)` | Selection replaced entirely | Filters, ordering, pagination |
+| Add a filter | `.where(...)` | Constraints grow | Selection, ordering, pagination |
+| Remove fields | `.without('hobbies')` | Selection shrinks | Filters, ordering, pagination |
+
+**`.select()` is mainly for switching view modes** — the user is browsing the same filtered/sorted result set, but wants to see the items rendered differently (table → cards → detail). Filters and pagination stay because the *dataset* hasn't changed, only the *view*.
+
+---
+
+## Method Naming: `.select()` / `.with()` / `.without()` — open ideation
+
+The three operations are: **replace fields**, **merge fields**, **remove fields**. We need clear names for all three. `.select()` for replace is mostly agreed. The merge/remove names are still open.
+
+### Option table
+
+| Replace (set fields) | Merge (add fields) | Remove fields | Notes |
+|---|---|---|---|
+| `.select(fs)` | `.with(fs)` | `.without('path')` | Short. with/without pair reads well. "with" slightly ambiguous (condition?) |
+| `.select(fs)` | `.expand(fs)` | `.contract('path')` | Expand/contract pair. "expand" is clear. "contract" is unusual |
+| `.select(fs)` | `.addFields(fs)` | `.removeFields('path')` | Explicit but verbose |
+| `.select(fs)` | `.append(fs)` | `.remove('path')` | "append" implies ordering |
+| `.select(fs)` | `.add(fs)` | `.remove('path')` | Shortest. add/remove is universal. But `.add()` is generic |
+| `.select(fs)` | `.include(fs)` | `.exclude('path')` | include/exclude pair. But "include" has ORM baggage (eager loading) |
+| `.fields(fs)` | `.addFields(fs)` | `.removeFields('path')` | Consistent naming around "fields" |
+| `.setFields(fs)` | `.addFields(fs)` | `.removeFields('path')` | Most explicit. set/add/remove is a standard pattern |
+
+### Current lean
+
+`.select()` (replace) + `.with()` (merge) + `.without()` (remove) — short, reads naturally in the builder chain:
+
+```ts
+const q = QueryBuilder
+  .from(PersonShape)
+  .select(personSummary)                  // "I want exactly these fields"
+  .with(hobbyFields)                      // "also with these fields"
+  .without('email')                       // "but without email"
+  .where('age', '>', 30);
+```
+
+**Open question**: does `.with()` read clearly enough as "merge additional fields"? Or does it sound like a condition/constraint? Alternatives: `.expand()`, `.add()`, `.addFields()`, `.also()`.
+
+> **Shape remapping** (step 7 from old example) → see [009-shape-remapping.md](./009-shape-remapping.md)
 
 ---
 
@@ -1029,7 +1134,7 @@ This is the key insight: **we don't need to create new pipeline stages.** We pro
 - [ ] Tests: FieldSet composition (extend, merge, omit, pick), path resolution, scoped filter merging
 
 ### Phase 2: QueryBuilder (Option B)
-- [ ] `QueryBuilder` with `.from()`, `.select()`, `.include(fieldSet)`, `.where()`, `.limit()`, `.offset()`, `.one()`, `.for()`, `.orderBy()`, `.build()`, `.exec()`
+- [ ] `QueryBuilder` with `.from()`, `.select()` (replace), `.with()` (merge), `.without()` (remove), `.where()`, `.limit()`, `.offset()`, `.one()`, `.for()`, `.orderBy()`, `.build()`, `.exec()`
 - [ ] Immutable builder pattern — every modifier returns a new builder
 - [ ] `PathBuilder` callback for `.select(p => [...])` and `.where(p => ...)`
 - [ ] Internal `toRawInput()` bridge — produce `RawSelectInput` from PropertyPaths, lower scoped filters into `QueryStep.where`
