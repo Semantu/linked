@@ -6,6 +6,7 @@ import {
   QueryBuildFn,
   WhereClause,
   QResult,
+  QueryResponseToResultType,
 } from './SelectQuery.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
@@ -138,10 +139,10 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   // ---------------------------------------------------------------------------
 
   /** Set the select projection via a callback, labels, or FieldSet. */
-  select<NewR = R>(fn: QueryBuildFn<S, NewR>): QueryBuilder<S, NewR>;
+  select<NewR>(fn: QueryBuildFn<S, NewR>): QueryBuilder<S, NewR, QueryResponseToResultType<NewR, S>[]>;
   select(labels: string[]): QueryBuilder<S>;
   select(fieldSet: FieldSet): QueryBuilder<S>;
-  select<NewR = R>(fnOrLabelsOrFieldSet: QueryBuildFn<S, NewR> | string[] | FieldSet): QueryBuilder<S, NewR> {
+  select<NewR = R>(fnOrLabelsOrFieldSet: QueryBuildFn<S, NewR> | string[] | FieldSet): QueryBuilder<S, NewR, any> {
     if (fnOrLabelsOrFieldSet instanceof FieldSet) {
       const labels = fnOrLabelsOrFieldSet.labels();
       const selectFn = ((p: any) =>
