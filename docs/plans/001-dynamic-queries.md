@@ -774,9 +774,25 @@ private clone<NewR = R, NewResult = Result>(
 **Validation:**
 - `npx tsc --noEmit` passes
 - All existing `query-builder.test.ts` tests pass (IR equivalence unchanged)
-- Add compile-time smoke test: verify `QueryBuilder.from(Person).select(p => p.name)` is assignable to `PromiseLike<string[]>` (or whatever `QueryResponseToResultType` resolves to)
+- Add compile-time type tests for QueryBuilder result types that mirror the patterns in `query.types.test.ts`. These should verify that `Awaited<typeof QueryBuilder.from(Person).select(p => p.name)>` resolves to the same types as the DSL path. Result types must stay **identical** — how types are generated internally is free to change, but the resolved types consumers see must not change.
+- Example smoke tests to add to a new `query-builder.types.test.ts` (compile-only, `describe.skip`):
+  ```ts
+  test('select literal property', () => {
+    const promise = QueryBuilder.from(Person).select(p => p.name);
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.name);
+    expectType<string | undefined>(first.id);
+  });
+  test('select with .one()', () => {
+    const promise = QueryBuilder.from(Person).select(p => p.name).one();
+    type Result = Awaited<typeof promise>;
+    const single = null as unknown as Result;
+    expectType<string | null | undefined>(single.name);
+  });
+  ```
 
-**Risk:** The `QueryResponseToResultType` conditional type is complex and may not resolve cleanly when the `R` generic is still abstract. If this happens, fall back to keeping `Result = any` at the QueryBuilder level and only resolve types when `Shape.select()` provides concrete types. This still unblocks Phase 4.4b.
+**Risk:** The `QueryResponseToResultType` conditional type is complex and may not resolve cleanly when the `R` generic is still abstract. If this happens, fall back to keeping `Result = any` at the QueryBuilder level and only resolve types when `Shape.select()` provides concrete types (in 4.4b). This fallback still means the DSL result types stay identical — only the direct QueryBuilder API would lose types. The DSL types must NEVER regress.
 
 ---
 
@@ -978,7 +994,8 @@ Note: `DeleteBuilder` already has proper `DeleteResponse` typing — no changes 
    - Remove `import nextTick from 'next-tick'`
    - Remove unused imports: `PatchedQueryPromise`, `GetQueryResponseType`, `SelectAllQueryResponse`
    - Remove unused imports: `CreateQueryFactory`, `UpdateQueryFactory`, `DeleteQueryFactory`
-   - If `Shape.query()` still uses `SelectQueryFactory`, keep that import; otherwise remove
+   - **Remove `Shape.query()` method** (lines 95-117) — this returned `SelectQueryFactory` directly as a "template" pattern. With QueryBuilder available, this method is no longer needed. Note: this is a **breaking change** for any code using `Shape.query()`. Document in changelog.
+   - Remove `SelectQueryFactory` import from Shape.ts entirely (no longer used after `query()` removal)
 
 3. **`src/index.ts`:**
    - Remove `import nextTick from 'next-tick'` (line 47)
@@ -1010,6 +1027,14 @@ Note: `DeleteBuilder` already has proper `DeleteResponse` typing — no changes 
 - Verify `nextTick` is not imported anywhere in src/
 
 ---
+
+##### Phase 4.4 type invariant
+
+**Result types must stay identical.** The resolved `Awaited<T>` types that consumers see from `Person.select(...)`, `Person.create(...)`, `Person.update(...)`, `Person.delete(...)` must not change. The existing `query.types.test.ts` (584 lines, 50+ compile-time type assertions) is the source of truth. All tests in that file must continue to compile without modification. If a test needs to change, that indicates a type regression — escalate before proceeding.
+
+Internal type plumbing (how `QueryResponseToResultType` flows through generics) is free to be restructured. Only the external-facing resolved types are contractual.
+
+A new `query-builder.types.test.ts` must be added mirroring key patterns from `query.types.test.ts` but using `QueryBuilder.from(...)` instead of the DSL. This proves both paths resolve to the same types.
 
 ##### Phase 4.4 dependency graph
 
