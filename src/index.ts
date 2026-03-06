@@ -54,7 +54,10 @@ export type {WhereCondition, WhereOperator} from './queries/WhereCondition.js';
 
 // Phase 3a — FieldSet
 export {FieldSet} from './queries/FieldSet.js';
-export type {FieldSetEntry, FieldSetInput} from './queries/FieldSet.js';
+export type {FieldSetEntry, FieldSetInput, FieldSetJSON, FieldSetFieldJSON} from './queries/FieldSet.js';
+
+// Phase 4 — Serialization types
+export type {QueryBuilderJSON} from './queries/QueryBuilder.js';
 
 // Phase 3b — Mutation builders
 export {CreateBuilder} from './queries/CreateBuilder.js';

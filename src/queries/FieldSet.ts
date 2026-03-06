@@ -26,6 +26,18 @@ export type FieldSetInput =
   | FieldSet
   | Record<string, string[] | FieldSet>;
 
+/** JSON representation of a FieldSet field entry. */
+export type FieldSetFieldJSON = {
+  path: string;
+  as?: string;
+};
+
+/** JSON representation of a FieldSet. */
+export type FieldSetJSON = {
+  shape: string;
+  fields: FieldSetFieldJSON[];
+};
+
 /**
  * An immutable, composable collection of property paths for a shape.
  *
@@ -171,6 +183,40 @@ export class FieldSet {
   /** Returns terminal property labels of all entries. */
   labels(): string[] {
     return (this.entries as FieldSetEntry[]).map((e) => e.path.terminal?.label).filter(Boolean) as string[];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Serialization
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Serialize this FieldSet to a plain JSON object.
+   * Shape is identified by its IRI, paths by dot-separated labels.
+   */
+  toJSON(): FieldSetJSON {
+    return {
+      shape: this.shape.id,
+      fields: (this.entries as FieldSetEntry[]).map((entry) => {
+        const field: FieldSetFieldJSON = {path: entry.path.toString()};
+        if (entry.alias) {
+          field.as = entry.alias;
+        }
+        return field;
+      }),
+    };
+  }
+
+  /**
+   * Reconstruct a FieldSet from a JSON object.
+   * Resolves shape IRI via getShapeClass() and paths via walkPropertyPath().
+   */
+  static fromJSON(json: FieldSetJSON): FieldSet {
+    const resolvedShape = FieldSet.resolveShape(json.shape);
+    const entries: FieldSetEntry[] = json.fields.map((field) => ({
+      path: walkPropertyPath(resolvedShape, field.path),
+      alias: field.as,
+    }));
+    return new FieldSet(resolvedShape, entries);
   }
 
   // ---------------------------------------------------------------------------

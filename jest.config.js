@@ -29,6 +29,7 @@ module.exports = {
     '**/query-builder.test.ts',
     '**/field-set.test.ts',
     '**/mutation-builder.test.ts',
+    '**/serialization.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {

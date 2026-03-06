@@ -11,7 +11,18 @@ import type {RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
 import type {NodeReferenceValue} from './QueryFactory.js';
-import {FieldSet} from './FieldSet.js';
+import {FieldSet, FieldSetJSON, FieldSetFieldJSON} from './FieldSet.js';
+
+/** JSON representation of a QueryBuilder. */
+export type QueryBuilderJSON = {
+  shape: string;
+  fields?: FieldSetFieldJSON[];
+  limit?: number;
+  offset?: number;
+  subject?: string;
+  singleResult?: boolean;
+  orderDirection?: 'ASC' | 'DESC';
+};
 
 /** Internal state bag for QueryBuilder. */
 interface QueryBuilderInit<S extends Shape, R> {
@@ -217,6 +228,84 @@ export class QueryBuilder<S extends Shape = Shape, R = any>
       return FieldSet.for((this._shape as any).shape, this._selectAllLabels);
     }
     return undefined;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Serialization
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Serialize this QueryBuilder to a plain JSON object.
+   *
+   * Only label-based selections (from FieldSet, string[], or selectAll) are
+   * serializable. Callback-based selections cannot be serialized and will
+   * result in an empty fields array.
+   *
+   * The `where`, `orderBy`, and other callback-based options are similarly
+   * not serializable in the current phase.
+   */
+  toJSON(): QueryBuilderJSON {
+    const shapeId = (this._shape as any).shape?.id || '';
+    const json: QueryBuilderJSON = {
+      shape: shapeId,
+    };
+
+    // Serialize fields from FieldSet or selectAll labels
+    const fs = this.fields();
+    if (fs) {
+      json.fields = fs.toJSON().fields;
+    } else if (this._selectAllLabels) {
+      json.fields = this._selectAllLabels.map((label) => ({path: label}));
+    }
+
+    if (this._limit !== undefined) {
+      json.limit = this._limit;
+    }
+    if (this._offset !== undefined) {
+      json.offset = this._offset;
+    }
+    if (this._subject && typeof this._subject === 'object' && 'id' in this._subject) {
+      json.subject = (this._subject as any).id;
+    }
+    if (this._singleResult) {
+      json.singleResult = true;
+    }
+    if (this._sortDirection) {
+      json.orderDirection = this._sortDirection as 'ASC' | 'DESC';
+    }
+
+    return json;
+  }
+
+  /**
+   * Reconstruct a QueryBuilder from a JSON object.
+   * Resolves shape IRI via getShapeClass() and field paths as label selections.
+   */
+  static fromJSON<S extends Shape = Shape>(json: QueryBuilderJSON): QueryBuilder<S> {
+    let builder = QueryBuilder.from<S>(json.shape as any);
+
+    if (json.fields && json.fields.length > 0) {
+      const fieldSet = FieldSet.fromJSON({
+        shape: json.shape,
+        fields: json.fields,
+      });
+      builder = builder.select(fieldSet) as QueryBuilder<S>;
+    }
+
+    if (json.limit !== undefined) {
+      builder = builder.limit(json.limit) as QueryBuilder<S>;
+    }
+    if (json.offset !== undefined) {
+      builder = builder.offset(json.offset) as QueryBuilder<S>;
+    }
+    if (json.subject) {
+      builder = builder.for(json.subject) as QueryBuilder<S>;
+    }
+    if (json.singleResult && !json.subject) {
+      builder = builder.one() as QueryBuilder<S>;
+    }
+
+    return builder;
   }
 
   // ---------------------------------------------------------------------------
