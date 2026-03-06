@@ -1102,46 +1102,26 @@ static delete<ShapeType extends Shape>(
 
 **Goal:** `await CreateBuilder.from(Person).set(data)` resolves to `CreateResponse<U>` instead of `any`.
 
-**Files:** `src/queries/CreateBuilder.ts`, `src/queries/UpdateBuilder.ts`
+**Sub-steps:**
 
-**Changes for CreateBuilder:**
-```ts
-export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> = UpdatePartial<S>>
-  implements PromiseLike<CreateResponse<U>>, Promise<CreateResponse<U>>
-{
-  set<NewU extends UpdatePartial<S>>(data: NewU): CreateBuilder<S, NewU> {
-    return this.clone({data}) as unknown as CreateBuilder<S, NewU>;
-  }
-  exec(): Promise<CreateResponse<U>> {
-    return getQueryDispatch().createQuery(this.build()) as Promise<CreateResponse<U>>;
-  }
-  then<T1 = CreateResponse<U>, T2 = never>(
-    onfulfilled?: ((value: CreateResponse<U>) => T1 | PromiseLike<T1>) | null,
-    onrejected?: ((reason: any) => T2 | PromiseLike<T2>) | null,
-  ): Promise<T1 | T2> { ... }
-  catch<T = never>(
-    onrejected?: ((reason: any) => T | PromiseLike<T>) | null,
-  ): Promise<CreateResponse<U> | T> { ... }
-  finally(onfinally?: (() => void) | null): Promise<CreateResponse<U>> { ... }
-}
-```
+**Step 4.4d.1 — CreateBuilder:**
+- Add `U extends UpdatePartial<S> = UpdatePartial<S>` generic to class
+- Wire `set<NewU>()` to return `CreateBuilder<S, NewU>`
+- Wire `exec/then/catch/finally` to use `CreateResponse<U>` instead of `any`
+- Update `implements` clause to `PromiseLike<CreateResponse<U>>`
+- Validation: `npx jest --testPathPattern='mutation-builder' --no-coverage` passes
 
-**Changes for UpdateBuilder:**
-```ts
-export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> = UpdatePartial<S>>
-  implements PromiseLike<AddId<U>>, Promise<AddId<U>>
-{
-  set<NewU extends UpdatePartial<S>>(data: NewU): UpdateBuilder<S, NewU> {
-    return this.clone({data}) as unknown as UpdateBuilder<S, NewU>;
-  }
-  exec(): Promise<AddId<U>> {
-    return getQueryDispatch().updateQuery(this.build()) as Promise<AddId<U>>;
-  }
-  then<T1 = AddId<U>, T2 = never>(...): Promise<T1 | T2> { ... }
-  catch<T = never>(...): Promise<AddId<U> | T> { ... }
-  finally(...): Promise<AddId<U>> { ... }
-}
-```
+**Step 4.4d.2 — UpdateBuilder:**
+- Add `U extends UpdatePartial<S> = UpdatePartial<S>` generic to class
+- Wire `set<NewU>()` to return `UpdateBuilder<S, NewU>`
+- Wire `exec/then/catch/finally` to use `AddId<U>` instead of `any`
+- `for()` preserves `U` generic: returns `UpdateBuilder<S, U>`
+- Update `implements` clause to `PromiseLike<AddId<U>>`
+- Validation: `npx jest --testPathPattern='mutation-builder' --no-coverage` passes
+
+**Step 4.4d.3 — Verify DeleteBuilder (no changes needed):**
+- DeleteBuilder already uses `DeleteResponse` throughout — just confirm.
+- Validation: full `npm test` passes
 
 Note: `DeleteBuilder` already has proper `DeleteResponse` typing — no changes needed.
 

@@ -23,6 +23,7 @@ import {CreateQueryFactory, CreateResponse} from '../queries/CreateQuery.js';
 import {DeleteQueryFactory, DeleteResponse} from '../queries/DeleteQuery.js';
 import {NodeId} from '../queries/MutationQuery.js';
 import {UpdateQueryFactory} from '../queries/UpdateQuery.js';
+import {QueryBuilder} from '../queries/QueryBuilder.js';
 import {getPropertyShapeByLabel} from '../utils/ShapeClass.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
 
@@ -129,7 +130,7 @@ export abstract class Shape {
   >(
     this: {new (...args: any[]): ShapeType; },
     selectFn: QueryBuildFn<ShapeType, S>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  ): QueryBuilder<ShapeType, S, ResultType>;
   static select<
     ShapeType extends Shape,
     S = unknown,
@@ -139,7 +140,7 @@ export abstract class Shape {
     >[],
   >(
     this: {new (...args: any[]): ShapeType},
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  ): QueryBuilder<ShapeType, S, ResultType>;
   static select<
     ShapeType extends Shape,
     S = unknown,
@@ -151,7 +152,7 @@ export abstract class Shape {
     this: {new (...args: any[]): ShapeType; },
     subjects?: ShapeType | QResult<ShapeType>,
     selectFn?: QueryBuildFn<ShapeType, S>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  ): QueryBuilder<ShapeType, S, ResultType>;
   static select<
     ShapeType extends Shape,
     S = unknown,
@@ -163,7 +164,7 @@ export abstract class Shape {
     this: {new (...args: any[]): ShapeType; },
     subjects?: ICoreIterable<ShapeType> | QResult<ShapeType>[],
     selectFn?: QueryBuildFn<ShapeType, S>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  ): QueryBuilder<ShapeType, S, ResultType>;
   static select<
     ShapeType extends Shape,
     S = unknown,
@@ -175,7 +176,7 @@ export abstract class Shape {
     this: {new (...args: any[]): ShapeType; },
     targetOrSelectFn?: ShapeType | QueryBuildFn<ShapeType, S>,
     selectFn?: QueryBuildFn<ShapeType, S>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType> {
+  ): QueryBuilder<ShapeType, S, ResultType> {
     let _selectFn;
     let subject;
     if (selectFn) {
@@ -185,23 +186,14 @@ export abstract class Shape {
       _selectFn = targetOrSelectFn;
     }
 
-    const query = new SelectQueryFactory<ShapeType, S>(
-      this as any,
-      _selectFn,
-      subject,
-    );
-    let p = new Promise<ResultType>((resolve, reject) => {
-      nextTick(() => {
-        getQueryDispatch().selectQuery(query.build())
-          .then((result) => {
-            resolve(result as ResultType);
-          })
-          .catch((err) => {
-            reject(err);
-          });
-      });
-    });
-    return query.patchResultPromise<ResultType>(p);
+    let builder = QueryBuilder.from(this as any) as QueryBuilder<ShapeType, any, any>;
+    if (_selectFn) {
+      builder = builder.select(_selectFn as any);
+    }
+    if (subject) {
+      builder = builder.for(subject as any);
+    }
+    return builder as QueryBuilder<ShapeType, S, ResultType>;
   }
 
   /**
@@ -216,7 +208,7 @@ export abstract class Shape {
     >[],
   >(
     this: {new (...args: any[]): ShapeType; },
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  ): QueryBuilder<ShapeType, any, ResultType>;
   static selectAll<
     ShapeType extends Shape,
     ResultType = QueryResponseToResultType<
@@ -226,7 +218,7 @@ export abstract class Shape {
   >(
     this: {new (...args: any[]): ShapeType; },
     subject: ShapeType | QResult<ShapeType>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  ): QueryBuilder<ShapeType, any, ResultType>;
   static selectAll<
     ShapeType extends Shape,
     ResultType = QueryResponseToResultType<
@@ -236,13 +228,12 @@ export abstract class Shape {
   >(
     this: {new (...args: any[]): ShapeType; },
     subject?: ShapeType | QResult<ShapeType>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType> {
-    const propertyLabels = (this as any)
-      .shape.getUniquePropertyShapes()
-      .map((propertyShape: PropertyShape) => propertyShape.label);
-    return (this as any).select(subject as any, (shape: ShapeType) =>
-      propertyLabels.map((label) => (shape as any)[label]),
-    ) as Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+  ): QueryBuilder<ShapeType, any, ResultType> {
+    let builder = QueryBuilder.from(this as any).selectAll() as QueryBuilder<ShapeType, any, any>;
+    if (subject) {
+      builder = builder.for(subject as any);
+    }
+    return builder as QueryBuilder<ShapeType, any, ResultType>;
   }
 
 
