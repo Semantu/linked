@@ -712,70 +712,94 @@ This is a multi-step sub-phase that threads result types through builder generic
 
 **Goal:** `await QueryBuilder.from(Person).select(p => p.name)` resolves to `QueryResponseToResultType<R, S>[]` instead of `any`.
 
+**Proven viable:** A type probe (`src/tests/type-probe-4.4a.ts`) confirms that `QueryResponseToResultType<R, S>` resolves correctly when used as a computed generic parameter in a class, including through `PromiseLike`/`Awaited<>`. All 4 probe scenarios pass: standalone type computation, SingleResult unwrap, class generic propagation, and full PromiseLike chain with `Awaited<>`.
+
+**Type inference scope:** Result type inference only works when `QueryBuilder.from(ShapeClass)` receives a TypeScript class. When using a string IRI (`QueryBuilder.from('my:PersonShape')`), `S` defaults to `Shape` and result types degrade to `any`. This is by design — the string/NodeShape path is for runtime/CMS use where types aren't known at compile time. The `<ShapeClass>` generic is required for type inference.
+
 **File:** `src/queries/QueryBuilder.ts`
 
-**Changes:**
+**Incremental implementation steps:**
 
-1. Import `QueryResponseToResultType` from `SelectQuery.ts`.
+Each step is independently verifiable with `npx tsc --noEmit` and `npm test`.
 
-2. Add a third generic `Result` for the resolved await type:
+**Step 1 — Add `Result` generic parameter (pure additive, breaks nothing):**
 ```ts
 // Before
 export class QueryBuilder<S extends Shape = Shape, R = any>
   implements PromiseLike<any>, Promise<any>
 
-// After
+// After — Result defaults to any, so all existing code compiles unchanged
 export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   implements PromiseLike<Result>, Promise<Result>
 ```
+Update `QueryBuilderInit` to carry `Result` if needed, or just propagate via generics.
+**Verify:** `npx tsc --noEmit` + `npm test` — zero changes expected.
 
-3. Update `then()`, `catch()`, `finally()` to use `Result`:
-```ts
-then<TResult1 = Result, TResult2 = never>(
-  onfulfilled?: ((value: Result) => TResult1 | PromiseLike<TResult1>) | null,
-  onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
-): Promise<TResult1 | TResult2> { ... }
-
-catch<TResult = never>(
-  onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
-): Promise<Result | TResult> { ... }
-
-finally(onfinally?: (() => void) | null): Promise<Result> { ... }
-```
-
-4. Update `exec()` return type:
+**Step 2 — Wire `then()`, `catch()`, `finally()`, `exec()` to use `Result`:**
 ```ts
 exec(): Promise<Result> {
   return getQueryDispatch().selectQuery(this.build()) as Promise<Result>;
 }
+then<TResult1 = Result, TResult2 = never>(
+  onfulfilled?: ((value: Result) => TResult1 | PromiseLike<TResult1>) | null,
+  onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+): Promise<TResult1 | TResult2> { ... }
+catch<TResult = never>(...): Promise<Result | TResult> { ... }
+finally(...): Promise<Result> { ... }
 ```
+Since `Result` still defaults to `any`, this is a no-op change at runtime and compile time.
+**Verify:** `npx tsc --noEmit` + `npm test`.
 
-5. Update `select()` overloads to compute `Result` via `QueryResponseToResultType`:
+**Step 3 — Wire `select()` to compute `Result` via `QueryResponseToResultType`:**
+This is the key step. Import `QueryResponseToResultType` and update the callback overload:
 ```ts
+import {QueryResponseToResultType} from './SelectQuery.js';
+
 select<NewR>(fn: QueryBuildFn<S, NewR>): QueryBuilder<S, NewR, QueryResponseToResultType<NewR, S>[]>;
 select(labels: string[]): QueryBuilder<S>;
 select(fieldSet: FieldSet): QueryBuilder<S>;
 ```
-
-6. Update `one()` to unwrap array:
+**Verify:** `npx tsc --noEmit` — the existing tests use `any` result so they should compile. Add the first `query-builder.types.test.ts` smoke test to confirm types resolve:
 ```ts
-one(): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result>
+const promise = QueryBuilder.from(Person).select(p => p.name);
+type Result = Awaited<typeof promise>;
+expectType<string | null | undefined>((null as unknown as Result)[0].name);
 ```
 
-7. Update `clone()` signature to propagate `Result`:
+**Step 4 — Update fluent methods to preserve `Result`:**
+Change `where()`, `orderBy()`, `limit()`, `offset()`, `for()`, `sortBy()` return types from `QueryBuilder<S, R>` to `QueryBuilder<S, R, Result>`:
 ```ts
-private clone<NewR = R, NewResult = Result>(
-  overrides: Partial<QueryBuilderInit<S, any>> = {},
-): QueryBuilder<S, NewR, NewResult>
+where(fn: WhereClause<S>): QueryBuilder<S, R, Result> { ... }
+limit(n: number): QueryBuilder<S, R, Result> { ... }
+// etc.
 ```
+Update `clone()` to propagate `Result`:
+```ts
+private clone(overrides: Partial<QueryBuilderInit<S, any>> = {}): QueryBuilder<S, R, Result> {
+  return new QueryBuilder<S, R, Result>({...});
+}
+```
+**Verify:** `npx tsc --noEmit` + type test confirming `.select().where().limit()` preserves result type.
 
-8. Ensure `where()`, `orderBy()`, `limit()`, `offset()`, `for()` preserve `Result` in return type (they already return `QueryBuilder<S, R>` — just needs to become `QueryBuilder<S, R, Result>`).
+**Step 5 — Wire `one()` to unwrap array:**
+```ts
+one(): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result> {
+  return this.clone({limit: 1, singleResult: true}) as any;
+}
+```
+**Verify:** Type test: `Awaited<typeof builder.select(p => p.name).one()>` resolves to single object, not array.
 
-**Validation:**
+**Step 6 — Wire `selectAll()` result type:**
+```ts
+selectAll(): QueryBuilder<S, any, QueryResponseToResultType<SelectAllQueryResponse<S>, S>[]> { ... }
+```
+This requires importing `SelectAllQueryResponse` from SelectQuery.ts.
+**Verify:** Type test for selectAll.
+
+**Validation (full, after all steps):**
 - `npx tsc --noEmit` passes
 - All existing `query-builder.test.ts` tests pass (IR equivalence unchanged)
-- Add compile-time type tests for QueryBuilder result types that mirror the patterns in `query.types.test.ts`. These should verify that `Awaited<typeof QueryBuilder.from(Person).select(p => p.name)>` resolves to the same types as the DSL path. Result types must stay **identical** — how types are generated internally is free to change, but the resolved types consumers see must not change.
-- Example smoke tests to add to a new `query-builder.types.test.ts` (compile-only, `describe.skip`):
+- New `query-builder.types.test.ts` (compile-only, `describe.skip`) mirroring key patterns from `query.types.test.ts`:
   ```ts
   test('select literal property', () => {
     const promise = QueryBuilder.from(Person).select(p => p.name);
@@ -790,9 +814,47 @@ private clone<NewR = R, NewResult = Result>(
     const single = null as unknown as Result;
     expectType<string | null | undefined>(single.name);
   });
+  test('select with chaining preserves types', () => {
+    const promise = QueryBuilder.from(Person)
+      .select(p => [p.name, p.friends])
+      .where(p => p.name.equals('x'))
+      .limit(5);
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.name);
+    expectType<string | undefined>(first.friends[0].id);
+  });
+  test('sub-select', () => {
+    const promise = QueryBuilder.from(Person).select(p =>
+      p.friends.select(f => ({name: f.name, hobby: f.hobby})),
+    );
+    type Result = Awaited<typeof promise>;
+    expectType<string | null | undefined>((null as unknown as Result)[0].friends[0].name);
+  });
+  test('count', () => {
+    const promise = QueryBuilder.from(Person).select(p => p.friends.size());
+    type Result = Awaited<typeof promise>;
+    expectType<number>((null as unknown as Result)[0].friends);
+  });
+  test('date type', () => {
+    const promise = QueryBuilder.from(Person).select(p => p.birthDate);
+    type Result = Awaited<typeof promise>;
+    expectType<Date | null | undefined>((null as unknown as Result)[0].birthDate);
+  });
+  test('boolean type', () => {
+    const promise = QueryBuilder.from(Person).select(p => p.isRealPerson);
+    type Result = Awaited<typeof promise>;
+    expectType<boolean | null | undefined>((null as unknown as Result)[0].isRealPerson);
+  });
+  test('string path — no type inference (any)', () => {
+    const promise = QueryBuilder.from('my:PersonShape').select(['name']);
+    type Result = Awaited<typeof promise>;
+    // Result is any — string-based construction has no type inference
+    expectType<any>(null as unknown as Result);
+  });
   ```
 
-**Risk:** The `QueryResponseToResultType` conditional type is complex and may not resolve cleanly when the `R` generic is still abstract. If this happens, fall back to keeping `Result = any` at the QueryBuilder level and only resolve types when `Shape.select()` provides concrete types (in 4.4b). This fallback still means the DSL result types stay identical — only the direct QueryBuilder API would lose types. The DSL types must NEVER regress.
+**Risk (largely mitigated):** Type probe confirms `QueryResponseToResultType` resolves correctly through class generics and `Awaited<PromiseLike>`. The incremental 6-step approach means any step that fails can be diagnosed in isolation without rolling back prior steps. Each step is a self-contained commit.
 
 ---
 
