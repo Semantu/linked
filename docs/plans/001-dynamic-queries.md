@@ -8,7 +8,7 @@ packages: [core]
 
 ## Goal
 
-Replace the mutable `SelectQueryFactory` + `PatchedQueryPromise` + `nextTick` system with an immutable `QueryBuilder` + `FieldSet` architecture. The DSL (`Person.select(...)`) becomes sugar over QueryBuilder. A new public API enables CMS-style runtime query building.
+Replace the mutable `SelectQueryFactory` + `PatchedQueryPromise` + `nextTick` system with an immutable `QueryBuilder` + `FieldSet` architecture. Align mutation operations (`create`, `update`, `delete`) to the same immutable builder pattern. The DSL (`Person.select(...)`, `Person.create(...)`, etc.) becomes sugar over builders. A new public API enables CMS-style runtime query building.
 
 ---
 
@@ -51,7 +51,22 @@ One shared `ProxiedPathBuilder` proxy implementation. No separate codepaths.
 - **Delete takes id directly** — `Person.delete(id)`, `Person.deleteAll(ids?)`.
 - All targeting methods accept `string | NodeReferenceValue` (i.e. an IRI string or `{id: string}`). Bulk variants (`.forAll()`, `.deleteAll()`) accept arrays of either form. This supports both raw IRIs and node references from query results.
 
-### 5. FieldSet as the composable primitive
+### 5. Mutation builders: same pattern as QueryBuilder
+
+The existing mutation classes (`CreateQueryFactory`, `UpdateQueryFactory`, `DeleteQueryFactory`) are mutable, imperative, and not composable. They get replaced with immutable builders that follow the same pattern as QueryBuilder:
+
+- `Person.create({name: 'Alice'})` → `CreateBuilder` → `await` / `.exec()`
+- `Person.update({name: 'Alice'}).for(id)` → `UpdateBuilder` → `await` / `.exec()`
+- `Person.delete(id)` → `DeleteBuilder` → `await` / `.exec()`
+- `Person.deleteAll(ids?)` → `DeleteBuilder` → `await` / `.exec()`
+
+All builders are immutable (each method returns a new instance) and implement `PromiseLike` for `await`-based execution.
+
+**Create** doesn't need targeting (it creates a new node). **Update requires targeting** — `.for(id)` or `.forAll(ids)` must be called before execution, enforced at the type level. **Delete takes ids directly** at construction.
+
+The builders delegate to the existing `MutationQueryFactory.convertUpdateObject()` for input normalization, and produce the same `IRCreateMutation` / `IRUpdateMutation` / `IRDeleteMutation` that feeds into `irToAlgebra`.
+
+### 6. FieldSet as the composable primitive
 
 FieldSet is a named, immutable, serializable collection of property paths rooted at a shape. It supports:
 - Construction: `FieldSet.for(shape, fields)`, `FieldSet.for(shape).select(fields)`, `FieldSet.all(shape)`, callback form with proxy
@@ -60,7 +75,7 @@ FieldSet is a named, immutable, serializable collection of property paths rooted
 - Serialization: `.toJSON()` / `FieldSet.fromJSON()`
 - Nesting: `{ friends: personSummary }` and `{ hobbies: ['label', 'description'] }`
 
-### 6. Bridge to existing pipeline: `toRawInput()`
+### 7. Bridge to existing pipeline: `toRawInput()`
 
 QueryBuilder produces `RawSelectInput` — the same structure proxy tracing produces. No new pipeline stages needed. The existing `buildSelectQuery()` → IRDesugar → IRCanonicalize → IRLower → irToAlgebra chain is reused as-is.
 
@@ -183,6 +198,58 @@ private toRawInput(): RawSelectInput {
 }
 ```
 
+### CreateBuilder
+
+```ts
+class CreateBuilder<S> implements PromiseLike<CreateResponse> {
+  static from(shape: NodeShape | string): CreateBuilder;
+
+  set(data: UpdatePartial<S> | ((p: ProxiedPathBuilder) => UpdatePartial<S>)): CreateBuilder<S>;
+  withId(id: string): CreateBuilder<S>;   // optional: pre-assign id for the new node
+
+  build(): IRCreateMutation;
+  exec(): Promise<CreateResponse>;
+  then<T>(onFulfilled?, onRejected?): Promise<T>;
+}
+```
+
+### UpdateBuilder
+
+```ts
+class UpdateBuilder<S> implements PromiseLike<UpdateResponse> {
+  static from(shape: NodeShape | string): UpdateBuilder;
+
+  set(data: UpdatePartial<S> | ((p: ProxiedPathBuilder) => UpdatePartial<S>)): UpdateBuilder<S>;
+  for(id: string | NodeReferenceValue): UpdateBuilder<S>;
+  forAll(ids: (string | NodeReferenceValue)[]): UpdateBuilder<S>;
+
+  build(): IRUpdateMutation;
+  exec(): Promise<UpdateResponse>;
+  then<T>(onFulfilled?, onRejected?): Promise<T>;
+}
+```
+
+### DeleteBuilder
+
+```ts
+class DeleteBuilder implements PromiseLike<DeleteResponse> {
+  static from(shape: NodeShape | string, ids: (string | NodeReferenceValue) | (string | NodeReferenceValue)[]): DeleteBuilder;
+
+  build(): IRDeleteMutation;
+  exec(): Promise<DeleteResponse>;
+  then<T>(onFulfilled?, onRejected?): Promise<T>;
+}
+```
+
+### Mutation builders ↔ Pipeline bridge
+
+```ts
+// Inside mutation builders — not public
+// Reuse MutationQueryFactory.convertUpdateObject() for input normalization
+// Produce IRCreateMutation / IRUpdateMutation / IRDeleteMutation
+// Feed into existing createToAlgebra() / updateToAlgebra() / deleteToAlgebra()
+```
+
 ---
 
 ## Files Expected to Change
@@ -194,14 +261,22 @@ private toRawInput(): RawSelectInput {
 - `src/queries/WhereCondition.ts` — WhereCondition type + comparison helpers (may be extracted from existing code)
 - `src/tests/field-set.test.ts` — FieldSet composition, merging, scoped filters, serialization
 - `src/tests/query-builder.test.ts` — QueryBuilder chain, immutability, IR output equivalence
+- `src/queries/CreateBuilder.ts` — CreateBuilder class (replaces CreateQueryFactory)
+- `src/queries/UpdateBuilder.ts` — UpdateBuilder class (replaces UpdateQueryFactory)
+- `src/queries/DeleteBuilder.ts` — DeleteBuilder class (replaces DeleteQueryFactory)
+- `src/tests/mutation-builder.test.ts` — Mutation builder tests (create, update, delete)
 
 ### Modified files
 - `src/queries/SelectQuery.ts` (~72 KB, ~2100 lines) — Largest change. Contains `SelectQueryFactory`, `QueryShape`, `QueryShapeSet`, `QueryBuilderObject`, proxy handlers (lines ~1018, ~1286, ~1309). Refactor to delegate to QueryBuilder internally. `PatchedQueryPromise` replaced. Proxy creation extracted into shared `ProxiedPathBuilder`.
 - `src/queries/QueryFactory.ts` (~5.5 KB) — Currently contains an empty `abstract class QueryFactory` (extended by `SelectQueryFactory` and `MutationQueryFactory` as a marker) plus mutation-related type utilities (`UpdatePartial`, `SetModification`, `NodeReferenceValue`, etc.) imported by ~10 files. The empty abstract class should be removed (QueryBuilder replaces it). The types stay; file may be renamed to `MutationTypes.ts` later.
 - `src/queries/IRDesugar.ts` (~12 KB) — Owns `RawSelectInput` type definition (lines ~22-31). Type may need extension if QueryBuilder adds new fields. Also defines `DesugaredSelectQuery` and step types.
 - `src/queries/IRPipeline.ts` (~1 KB) — Orchestrates desugar → canonicalize → lower. May need minor adjustments if `buildSelectQuery` input types change.
-- `src/shapes/Shape.ts` — Update `Shape.select()` (line ~125), `Shape.query()` (line ~95), `Shape.selectAll()` (line ~211) to return QueryBuilder. Add `.for()`, `.forAll()`, `.delete()`, `.deleteAll()`, `.update()` with targeting requirement.
-- `src/index.ts` — Export new public API (`QueryBuilder`, `FieldSet`, `PropertyPath`) alongside existing `SelectQuery` namespace.
+- `src/queries/MutationQuery.ts` — `MutationQueryFactory` input normalization logic (`convertUpdateObject`, `convertNodeReferences`, etc.) to be extracted/reused by new builders. The factory class itself is replaced.
+- `src/queries/CreateQuery.ts` — `CreateQueryFactory` replaced by `CreateBuilder`. Input conversion logic reused.
+- `src/queries/UpdateQuery.ts` — `UpdateQueryFactory` replaced by `UpdateBuilder`. Input conversion logic reused.
+- `src/queries/DeleteQuery.ts` — `DeleteQueryFactory` replaced by `DeleteBuilder`. Input conversion logic reused.
+- `src/shapes/Shape.ts` — Update `Shape.select()` (line ~125), `Shape.query()` (line ~95), `Shape.selectAll()` (line ~211) to return QueryBuilder. Update `Shape.create()`, `Shape.update()`, `Shape.delete()` to return mutation builders. Add `.for()`, `.forAll()`, `.deleteAll()` with consistent id types.
+- `src/index.ts` — Export new public API (`QueryBuilder`, `FieldSet`, `PropertyPath`, `CreateBuilder`, `UpdateBuilder`, `DeleteBuilder`) alongside existing namespace.
 
 ### Existing pipeline (no changes expected)
 - `src/queries/IntermediateRepresentation.ts` (~6.7 KB) — IR types stay as-is (`IRSelectQuery`, `IRGraphPattern`, `IRExpression`, mutations)
@@ -240,11 +315,9 @@ private toRawInput(): RawSelectInput {
 
 1. **Result typing** — Dynamic queries can't infer result types statically. Use generic `ResultRow` type for now, potentially add `QueryBuilder.from<T>(shape)` type parameter later.
 
-2. **Mutation builders** — The codebase already has mutation support (`MutationQueryFactory` in `MutationQuery.ts`, `CreateQuery.ts`, `UpdateQuery.ts`, `DeleteQuery.ts`) that powers `Person.create({...})`, `Person.update(id, {...})`, `Person.delete(id)`. The ideation doc (003, phase 6) proposed wrapping these in fluent QueryBuilder-style chains with targeting (e.g. `Person.update({name: 'X'}).for(id)`, `Person.create({...}).exec()`). **Decision needed:** include mutation builder alignment in this plan, or defer to a separate ideation doc?
+2. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. OR support and conflict detection are deferred. **Note:** this needs resolution before this plan is considered complete — either handle it as a late addition or capture it in a follow-up ideation document.
 
-3. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. OR support and conflict detection are deferred. **Note:** this needs resolution before this plan is considered complete — either handle it as a late addition or capture it in a follow-up ideation document.
-
-4. **Immutability implementation** — Shallow clone is sufficient for typical queries. Structural sharing deferred unless benchmarks show need.
+3. **Immutability implementation** — Shallow clone is sufficient for typical queries. Structural sharing deferred unless benchmarks show need.
 
 ---
 
@@ -254,13 +327,13 @@ private toRawInput(): RawSelectInput {
 - PropertyPath, walkPropertyPath, ProxiedPathBuilder extraction
 - FieldSet (construction, composition, scoped filters, serialization)
 - QueryBuilder (fluent chain, immutable, PromiseLike, toRawInput bridge)
-- DSL alignment (Person.select → returns QueryBuilder, .for()/.forAll() pattern)
-- Tests verifying DSL and QueryBuilder produce identical IR
+- Mutation builders: CreateBuilder, UpdateBuilder, DeleteBuilder (immutable, PromiseLike, reuse existing IR pipeline)
+- DSL alignment (Person.select/create/update/delete → returns builders, .for()/.forAll() pattern)
+- Tests verifying DSL and builders produce identical IR
 
 **Out of scope (separate plans, already have ideation docs):**
 - Shared variable bindings / `.as()` activation → 008
 - Shape remapping / ShapeAdapter → 009
 - Computed expressions / L module → 006
 - Raw IR helpers (Option A) → future
-- Mutation builders (create/update/delete) → future
 - CONSTRUCT / MINUS query types → 004, 007
