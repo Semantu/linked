@@ -95,8 +95,10 @@ class PropertyPath {
   as(name: string): PropertyPath;
   matches(name: string): PropertyPath;
 
-  // Where clause helpers
+  // Where clause helpers — validated against sh:datatype of the terminal property
+  // (boolean: only equals/notEquals, numeric/date: all comparisons, string: equals/notEquals/contains)
   equals(value: any): WhereCondition;
+  notEquals(value: any): WhereCondition;
   gt(value: any): WhereCondition;
   gte(value: any): WhereCondition;
   lt(value: any): WhereCondition;
@@ -106,6 +108,22 @@ class PropertyPath {
   // Sub-selection
   select(fn: (p: ProxiedPathBuilder) => FieldSetInput[]): FieldSetInput;
   select(fields: FieldSetInput[]): FieldSetInput;
+}
+```
+
+### ProxiedPathBuilder (shared proxy)
+
+```ts
+// The `p` in callbacks — same proxy used by DSL and dynamic builders.
+// Property access (p.name, p.friends) creates PropertyPaths via Proxy handler.
+class ProxiedPathBuilder {
+  constructor(rootShape: NodeShape);
+
+  // Escape hatch for dynamic/runtime strings — resolves via walkPropertyPath
+  path(input: string | PropertyShape): PropertyPath;
+
+  // Property access via Proxy handler: p.name → PropertyPath for 'name'
+  // p.friends.name → PropertyPath with segments [friendsProp, nameProp]
 }
 ```
 
@@ -128,6 +146,7 @@ class FieldSet {
   static for(shape: NodeShape | string, fn: (p: ProxiedPathBuilder) => FieldSetInput[]): FieldSet;
   static for(shape: NodeShape | string): FieldSetBuilder;  // chained: FieldSet.for(shape).select(fields)
   static all(shape: NodeShape | string, opts?: { depth?: number }): FieldSet;
+  static summary(shape: NodeShape | string): FieldSet;  // properties with low order / summary group
   static merge(sets: FieldSet[]): FieldSet;
 
   select(fields: FieldSetInput[]): FieldSet;
@@ -160,6 +179,7 @@ type FieldSetEntry = {
 
 ```ts
 class QueryBuilder implements PromiseLike<ResultRow[]> {
+  // string form resolves via shape registry (prefixed IRI or label)
   static from(shape: NodeShape | string): QueryBuilder;
 
   select(fields: FieldSet | FieldSetInput[] | ((p: ProxiedPathBuilder) => FieldSetInput[])): QueryBuilder;
@@ -206,6 +226,7 @@ class CreateBuilder<S> implements PromiseLike<CreateResponse> {
 
   set(data: UpdatePartial<S> | ((p: ProxiedPathBuilder) => UpdatePartial<S>)): CreateBuilder<S>;
   withId(id: string): CreateBuilder<S>;   // optional: pre-assign id for the new node
+  // Note: __id in data object is also supported (existing behavior): Person.create({__id: 'x', name: 'Alice'})
 
   build(): IRCreateMutation;
   exec(): Promise<CreateResponse>;
@@ -250,12 +271,38 @@ class DeleteBuilder implements PromiseLike<DeleteResponse> {
 // Feed into existing createToAlgebra() / updateToAlgebra() / deleteToAlgebra()
 ```
 
+### Serialization format
+
+Shape and property identifiers use prefixed IRIs (resolved through existing prefix registry). Unprefixed strings resolve as property labels on the base shape.
+
+**QueryBuilder.toJSON():**
+```json
+{
+  "shape": "my:PersonShape",
+  "fields": [
+    { "path": "name" },
+    { "path": "friends.name" },
+    { "path": "hobbies.label", "as": "hobby" }
+  ],
+  "where": [
+    { "path": "address.city", "op": "=", "value": "Amsterdam" },
+    { "path": "age", "op": ">=", "value": 18 }
+  ],
+  "orderBy": [{ "path": "name", "direction": "asc" }],
+  "limit": 20,
+  "offset": 0
+}
+```
+
+**FieldSet.toJSON()** uses the same `shape` + `fields` subset. `FieldSet.fromJSON()` and `QueryBuilder.fromJSON(json, shapeRegistry)` resolve prefixed IRIs back to NodeShape/PropertyShape references.
+
 ---
 
 ## Files Expected to Change
 
 ### New files
 - `src/queries/PropertyPath.ts` — PropertyPath value object + walkPropertyPath utility
+- `src/queries/ProxiedPathBuilder.ts` — Shared proxy extracted from SelectQuery.ts (used by DSL and builders)
 - `src/queries/FieldSet.ts` — FieldSet class
 - `src/queries/QueryBuilder.ts` — QueryBuilder class
 - `src/queries/WhereCondition.ts` — WhereCondition type + comparison helpers (may be extracted from existing code)
@@ -313,22 +360,29 @@ class DeleteBuilder implements PromiseLike<DeleteResponse> {
 
 ## Open Questions (remaining from ideation)
 
-1. **Result typing** — Dynamic queries can't infer result types statically. Use generic `ResultRow` type for now, potentially add `QueryBuilder.from<T>(shape)` type parameter later.
+1. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. OR support and conflict detection are deferred. **Note:** this needs resolution before this plan is considered complete — either handle it as a late addition or capture it in a follow-up ideation document.
 
-2. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. OR support and conflict detection are deferred. **Note:** this needs resolution before this plan is considered complete — either handle it as a late addition or capture it in a follow-up ideation document.
+2. **Immutability implementation** — Shallow clone is sufficient for typical queries. Structural sharing deferred unless benchmarks show need.
 
-3. **Immutability implementation** — Shallow clone is sufficient for typical queries. Structural sharing deferred unless benchmarks show need.
+## Future work (noted, not in scope)
+
+- **Result typing** — Dynamic queries use generic `ResultRow` type for now. Potential future addition: `QueryBuilder.from<T>(shape)` type parameter for static result typing.
+- **Raw IR helpers** (Option A from ideation) — `ir.select()`, `ir.shapeScan()`, `ir.traverse()` etc. for power-user direct IR construction.
 
 ---
 
 ## Scope boundaries
 
 **In scope (this plan):**
-- PropertyPath, walkPropertyPath, ProxiedPathBuilder extraction
-- FieldSet (construction, composition, scoped filters, serialization)
-- QueryBuilder (fluent chain, immutable, PromiseLike, toRawInput bridge)
+- PropertyPath (value object, segments, comparison helpers with `sh:datatype` validation)
+- walkPropertyPath (string path → PropertyPath resolution)
+- ProxiedPathBuilder extraction (shared proxy between DSL and dynamic builders, `.path()` escape hatch)
+- FieldSet (construction, composition, scoped filters, nesting, serialization, `FieldSet.all()`, `FieldSet.summary()`)
+- QueryBuilder (fluent chain, immutable, PromiseLike, toRawInput bridge, serialization)
 - Mutation builders: CreateBuilder, UpdateBuilder, DeleteBuilder (immutable, PromiseLike, reuse existing IR pipeline)
 - DSL alignment (Person.select/create/update/delete → returns builders, .for()/.forAll() pattern)
+- Shape resolution by prefixed IRI string (for `.from('my:PersonShape')` and JSON deserialization)
+- `Person.selectAll({ depth })` — FieldSet.all with depth exposed on DSL
 - Tests verifying DSL and builders produce identical IR
 
 **Out of scope (separate plans, already have ideation docs):**
