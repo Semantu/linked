@@ -374,6 +374,13 @@ Shape and property identifiers use prefixed IRIs (resolved through existing pref
 
 Top-down approach: tackle the riskiest refactor first (ProxiedPathBuilder extraction from the 72KB SelectQuery.ts), then build new APIs on the clean foundation. Existing golden tests (IR + SPARQL) act as the safety net throughout.
 
+### Global test invariants
+
+1. **All existing tests must pass after every phase.** The 477+ currently passing tests (18 suites) are the regression safety net. This includes golden IR tests, golden SPARQL tests, type inference tests, mutation parity tests, and algebra tests. No existing test may be deleted or weakened — only extended.
+2. **Full test coverage for all new code.** Every new public class and function gets dedicated tests covering: construction, core API behavior, immutability guarantees, edge cases (empty inputs, invalid inputs, missing values), and IR equivalence against the existing DSL where applicable.
+3. **Fuseki integration tests** are environment-dependent (skipped when Fuseki is unavailable). They must not be broken but are not required to run in CI. The SPARQL pipeline (irToAlgebra, algebraToString) is untouched, so these tests remain valid.
+4. **Type-checking** via `npx tsc --noEmit` must pass with zero errors after every phase.
+
 ### Dependency graph
 
 ```
