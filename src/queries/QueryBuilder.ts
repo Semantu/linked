@@ -169,51 +169,51 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   }
 
   /** Add a where clause. */
-  where(fn: WhereClause<S>): QueryBuilder<S, R> {
-    return this.clone({whereFn: fn});
+  where(fn: WhereClause<S>): QueryBuilder<S, R, Result> {
+    return this.clone({whereFn: fn}) as unknown as QueryBuilder<S, R, Result>;
   }
 
   /** Set sort order. */
-  orderBy<OR>(fn: QueryBuildFn<S, OR>, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder<S, R> {
-    return this.clone({sortByFn: fn as any, sortDirection: direction});
+  orderBy<OR>(fn: QueryBuildFn<S, OR>, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder<S, R, Result> {
+    return this.clone({sortByFn: fn as any, sortDirection: direction}) as unknown as QueryBuilder<S, R, Result>;
   }
 
   /**
    * Alias for orderBy — matches the existing DSL's `sortBy` method name.
    */
-  sortBy<OR>(fn: QueryBuildFn<S, OR>, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder<S, R> {
+  sortBy<OR>(fn: QueryBuildFn<S, OR>, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder<S, R, Result> {
     return this.orderBy(fn, direction);
   }
 
   /** Set result limit. */
-  limit(n: number): QueryBuilder<S, R> {
-    return this.clone({limit: n});
+  limit(n: number): QueryBuilder<S, R, Result> {
+    return this.clone({limit: n}) as unknown as QueryBuilder<S, R, Result>;
   }
 
   /** Set result offset. */
-  offset(n: number): QueryBuilder<S, R> {
-    return this.clone({offset: n});
+  offset(n: number): QueryBuilder<S, R, Result> {
+    return this.clone({offset: n}) as unknown as QueryBuilder<S, R, Result>;
   }
 
   /** Target a single entity by ID. Implies singleResult. */
-  for(id: string | NodeReferenceValue): QueryBuilder<S, R> {
+  for(id: string | NodeReferenceValue): QueryBuilder<S, R, Result> {
     const subject = typeof id === 'string' ? {id} : id;
-    return this.clone({subject, singleResult: true});
+    return this.clone({subject, singleResult: true}) as unknown as QueryBuilder<S, R, Result>;
   }
 
   /** Target multiple entities (or all if no ids given). */
-  forAll(ids?: (string | NodeReferenceValue)[]): QueryBuilder<S, R> {
+  forAll(ids?: (string | NodeReferenceValue)[]): QueryBuilder<S, R, Result> {
     if (!ids) {
-      return this.clone({subject: undefined, singleResult: false});
+      return this.clone({subject: undefined, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
     }
     // For multiple IDs we'd need to handle this differently in the future.
     // For now, this is a placeholder that selects without subject filter.
-    return this.clone({subject: undefined, singleResult: false});
+    return this.clone({subject: undefined, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
   }
 
   /** Limit to one result. */
-  one(): QueryBuilder<S, R> {
-    return this.clone({limit: 1, singleResult: true});
+  one(): QueryBuilder<S, R, Result> {
+    return this.clone({limit: 1, singleResult: true}) as unknown as QueryBuilder<S, R, Result>;
   }
 
   /**
