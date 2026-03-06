@@ -680,8 +680,8 @@ Added `toJSON()` / `fromJSON()` to FieldSet and QueryBuilder. Finalized public A
 - `src/tests/serialization.test.ts` — 14 tests: FieldSet round-trip (5), QueryBuilder round-trip (8), minimal (1)
 - Modified `src/index.ts` — Exports `FieldSetJSON`, `FieldSetFieldJSON`, `QueryBuilderJSON`
 
-**Deferred — Dead code cleanup (4.4):**
-PatchedQueryPromise, patchResultPromise(), nextTick, and QueryFactory base class removal blocked by Shape.select()/selectAll() DSL rewire. Changing return types breaks complex conditional type inference (`QueryResponseToResultType`, `GetQueryResponseType`) used by `query.types.test.ts`. This is a separate effort requiring QueryBuilder to thread result types through its generics.
+**Deferred — Builder type threading + DSL rewire + dead code cleanup (4.4a–4.4f):**
+PatchedQueryPromise, patchResultPromise(), nextTick, and factory class removal blocked by Shape.select()/selectAll() DSL rewire. Changing return types requires threading `QueryResponseToResultType` through QueryBuilder generics. Now broken into 6 sub-phases (4.4a–4.4f) with detailed code examples, dependency graph, and validation steps. See task 4.4 below for full breakdown.
 
 Add `toJSON()` / `fromJSON()` to QueryBuilder and FieldSet. Final integration: verify all public API exports, remove dead code.
 
@@ -704,12 +704,333 @@ Add `toJSON()` / `fromJSON()` to QueryBuilder and FieldSet. Final integration: v
 - Remove `nextTick` re-export (no longer needed)
 - Keep `SelectQueryFactory` export for backward compatibility but mark deprecated
 
-**4.4 — Dead code cleanup**
-- Remove `PatchedQueryPromise` type from SelectQuery.ts
-- Remove `patchResultPromise()` from SelectQueryFactory
-- Remove `onQueriesReady` / DOMContentLoaded logic from SelectQuery.ts
-- Remove `next-tick` from `package.json` dependencies if no longer imported anywhere
-- Remove empty `abstract class QueryFactory` from QueryFactory.ts if nothing extends it after mutation builder refactor
+**4.4 — Builder type threading + DSL rewire + dead code cleanup**
+
+This is a multi-step sub-phase that threads result types through builder generics, rewires `Shape.*()` to return builders, and removes dead code. See detailed breakdown below.
+
+##### Phase 4.4a — Thread result types through QueryBuilder
+
+**Goal:** `await QueryBuilder.from(Person).select(p => p.name)` resolves to `QueryResponseToResultType<R, S>[]` instead of `any`.
+
+**File:** `src/queries/QueryBuilder.ts`
+
+**Changes:**
+
+1. Import `QueryResponseToResultType` from `SelectQuery.ts`.
+
+2. Add a third generic `Result` for the resolved await type:
+```ts
+// Before
+export class QueryBuilder<S extends Shape = Shape, R = any>
+  implements PromiseLike<any>, Promise<any>
+
+// After
+export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
+  implements PromiseLike<Result>, Promise<Result>
+```
+
+3. Update `then()`, `catch()`, `finally()` to use `Result`:
+```ts
+then<TResult1 = Result, TResult2 = never>(
+  onfulfilled?: ((value: Result) => TResult1 | PromiseLike<TResult1>) | null,
+  onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+): Promise<TResult1 | TResult2> { ... }
+
+catch<TResult = never>(
+  onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
+): Promise<Result | TResult> { ... }
+
+finally(onfinally?: (() => void) | null): Promise<Result> { ... }
+```
+
+4. Update `exec()` return type:
+```ts
+exec(): Promise<Result> {
+  return getQueryDispatch().selectQuery(this.build()) as Promise<Result>;
+}
+```
+
+5. Update `select()` overloads to compute `Result` via `QueryResponseToResultType`:
+```ts
+select<NewR>(fn: QueryBuildFn<S, NewR>): QueryBuilder<S, NewR, QueryResponseToResultType<NewR, S>[]>;
+select(labels: string[]): QueryBuilder<S>;
+select(fieldSet: FieldSet): QueryBuilder<S>;
+```
+
+6. Update `one()` to unwrap array:
+```ts
+one(): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result>
+```
+
+7. Update `clone()` signature to propagate `Result`:
+```ts
+private clone<NewR = R, NewResult = Result>(
+  overrides: Partial<QueryBuilderInit<S, any>> = {},
+): QueryBuilder<S, NewR, NewResult>
+```
+
+8. Ensure `where()`, `orderBy()`, `limit()`, `offset()`, `for()` preserve `Result` in return type (they already return `QueryBuilder<S, R>` — just needs to become `QueryBuilder<S, R, Result>`).
+
+**Validation:**
+- `npx tsc --noEmit` passes
+- All existing `query-builder.test.ts` tests pass (IR equivalence unchanged)
+- Add compile-time smoke test: verify `QueryBuilder.from(Person).select(p => p.name)` is assignable to `PromiseLike<string[]>` (or whatever `QueryResponseToResultType` resolves to)
+
+**Risk:** The `QueryResponseToResultType` conditional type is complex and may not resolve cleanly when the `R` generic is still abstract. If this happens, fall back to keeping `Result = any` at the QueryBuilder level and only resolve types when `Shape.select()` provides concrete types. This still unblocks Phase 4.4b.
+
+---
+
+##### Phase 4.4b — Rewire Shape.select() / Shape.selectAll() to return QueryBuilder
+
+**Goal:** `Person.select(p => p.name)` returns `QueryBuilder` instead of `PatchedQueryPromise`. Chaining (`.where()`, `.limit()`, `.one()`, `.sortBy()`) works because QueryBuilder already has these methods.
+
+**File:** `src/shapes/Shape.ts`
+
+**Changes:**
+
+1. Add imports:
+```ts
+import {QueryBuilder} from '../queries/QueryBuilder.js';
+```
+
+2. Replace `Shape.select()` implementation — remove `nextTick`, `SelectQueryFactory`, `patchResultPromise`:
+```ts
+static select<
+  ShapeType extends Shape,
+  S = unknown,
+  ResultType = QueryResponseToResultType<S, ShapeType>[],
+>(
+  this: {new (...args: any[]): ShapeType},
+  selectFn: QueryBuildFn<ShapeType, S>,
+): QueryBuilder<ShapeType, S, ResultType>;
+// ... keep subject overloads ...
+static select(this, targetOrSelectFn?, selectFn?) {
+  let _selectFn, subject;
+  if (selectFn) { _selectFn = selectFn; subject = targetOrSelectFn; }
+  else { _selectFn = targetOrSelectFn; }
+
+  let builder = QueryBuilder.from(this as any).select(_selectFn);
+  if (subject) builder = builder.for(subject);
+  return builder;
+}
+```
+
+3. Replace `Shape.selectAll()` similarly:
+```ts
+static selectAll<ShapeType extends Shape>(
+  this: {new (...args: any[]): ShapeType},
+): QueryBuilder<ShapeType>;
+// ... subject overload ...
+static selectAll(this, subject?) {
+  let builder = QueryBuilder.from(this as any).selectAll();
+  if (subject) builder = builder.for(subject);
+  return builder;
+}
+```
+
+4. Remove unused imports: `nextTick`, `PatchedQueryPromise`, `GetQueryResponseType`, `SelectAllQueryResponse`. Keep `SelectQueryFactory` import only if `Shape.query()` still uses it.
+
+**Breaking change analysis:**
+- Return type changes from `Promise<R> & PatchedQueryPromise<R, S>` to `QueryBuilder<S, ...>`.
+- Both are `PromiseLike`, so `await Person.select(...)` still works.
+- `.where()`, `.limit()`, `.one()` still exist on QueryBuilder.
+- `.sortBy()` exists on QueryBuilder (added as alias for `orderBy`).
+- Downstream code that explicitly typed the return as `PatchedQueryPromise` will break — but `PatchedQueryPromise` is not re-exported in `index.ts`, so it's internal only.
+
+**Validation:**
+- All `query-builder.test.ts` IR equivalence tests pass (DSL path now IS builder path, IR should be identical by construction)
+- `npx tsc --noEmit` passes
+- `npm test` — all tests pass
+- Verify `.where().limit().sortBy()` chaining works on `Person.select(...)` result
+
+---
+
+##### Phase 4.4c — Rewire Shape.create() / Shape.update() / Shape.delete() to return builders
+
+**Goal:** `Person.create(data)` returns `CreateBuilder`, `Person.update(id, data)` returns `UpdateBuilder`, `Person.delete(id)` returns `DeleteBuilder`.
+
+**File:** `src/shapes/Shape.ts`
+
+**Changes:**
+
+1. Add imports:
+```ts
+import {CreateBuilder} from '../queries/CreateBuilder.js';
+import {UpdateBuilder} from '../queries/UpdateBuilder.js';
+import {DeleteBuilder} from '../queries/DeleteBuilder.js';
+```
+
+2. Replace `Shape.create()`:
+```ts
+static create<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
+  this: {new (...args: any[]): ShapeType},
+  updateObjectOrFn?: U,
+): CreateBuilder<ShapeType> {
+  let builder = CreateBuilder.from<ShapeType>(this as any);
+  if (updateObjectOrFn) builder = builder.set(updateObjectOrFn);
+  return builder;
+}
+```
+
+3. Replace `Shape.update()`:
+```ts
+static update<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
+  this: {new (...args: any[]): ShapeType},
+  id: string | NodeReferenceValue | QShape<ShapeType>,
+  updateObjectOrFn?: U,
+): UpdateBuilder<ShapeType> {
+  const idValue = typeof id === 'string' ? id : (id as any).id;
+  let builder = UpdateBuilder.from<ShapeType>(this as any).for(idValue);
+  if (updateObjectOrFn) builder = builder.set(updateObjectOrFn);
+  return builder;
+}
+```
+
+4. Replace `Shape.delete()`:
+```ts
+static delete<ShapeType extends Shape>(
+  this: {new (...args: any[]): ShapeType},
+  id: NodeId | NodeId[] | NodeReferenceValue[],
+): DeleteBuilder<ShapeType> {
+  return DeleteBuilder.from<ShapeType>(this as any, id as any);
+}
+```
+
+5. Remove imports: `CreateQueryFactory`, `UpdateQueryFactory`, `DeleteQueryFactory`
+
+**Breaking change analysis:**
+- Return type changes from `Promise<X>` to builder (which implements `PromiseLike<X>`).
+- `await Person.create(...)` still works identically.
+- Code that chains `.then()` directly on the result still works (builders have `.then()`).
+- Only breaks if someone does `instanceof Promise` checks on the result.
+
+**Validation:**
+- `mutation-builder.test.ts` passes
+- `npx tsc --noEmit` passes
+- `npm test` — all tests pass
+
+---
+
+##### Phase 4.4d — Thread result types through mutation builders
+
+**Goal:** `await CreateBuilder.from(Person).set(data)` resolves to `CreateResponse<U>` instead of `any`.
+
+**Files:** `src/queries/CreateBuilder.ts`, `src/queries/UpdateBuilder.ts`
+
+**Changes for CreateBuilder:**
+```ts
+export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> = UpdatePartial<S>>
+  implements PromiseLike<CreateResponse<U>>, Promise<CreateResponse<U>>
+{
+  set<NewU extends UpdatePartial<S>>(data: NewU): CreateBuilder<S, NewU> {
+    return this.clone({data}) as unknown as CreateBuilder<S, NewU>;
+  }
+  exec(): Promise<CreateResponse<U>> {
+    return getQueryDispatch().createQuery(this.build()) as Promise<CreateResponse<U>>;
+  }
+  then<T1 = CreateResponse<U>, T2 = never>(
+    onfulfilled?: ((value: CreateResponse<U>) => T1 | PromiseLike<T1>) | null,
+    onrejected?: ((reason: any) => T2 | PromiseLike<T2>) | null,
+  ): Promise<T1 | T2> { ... }
+  catch<T = never>(
+    onrejected?: ((reason: any) => T | PromiseLike<T>) | null,
+  ): Promise<CreateResponse<U> | T> { ... }
+  finally(onfinally?: (() => void) | null): Promise<CreateResponse<U>> { ... }
+}
+```
+
+**Changes for UpdateBuilder:**
+```ts
+export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> = UpdatePartial<S>>
+  implements PromiseLike<AddId<U>>, Promise<AddId<U>>
+{
+  set<NewU extends UpdatePartial<S>>(data: NewU): UpdateBuilder<S, NewU> {
+    return this.clone({data}) as unknown as UpdateBuilder<S, NewU>;
+  }
+  exec(): Promise<AddId<U>> {
+    return getQueryDispatch().updateQuery(this.build()) as Promise<AddId<U>>;
+  }
+  then<T1 = AddId<U>, T2 = never>(...): Promise<T1 | T2> { ... }
+  catch<T = never>(...): Promise<AddId<U> | T> { ... }
+  finally(...): Promise<AddId<U>> { ... }
+}
+```
+
+Note: `DeleteBuilder` already has proper `DeleteResponse` typing — no changes needed.
+
+**Validation:**
+- `mutation-builder.test.ts` passes
+- `npx tsc --noEmit` passes
+
+---
+
+##### Phase 4.4e — Dead code removal
+
+**Goal:** Remove all legacy code no longer reachable after 4.4b and 4.4c.
+
+**Changes by file:**
+
+1. **`src/queries/SelectQuery.ts`:**
+   - Remove `PatchedQueryPromise` type (lines 277-287)
+   - Remove `patchResultPromise()` method from `SelectQueryFactory` (lines 1863-1892)
+
+2. **`src/shapes/Shape.ts`:**
+   - Remove `import nextTick from 'next-tick'`
+   - Remove unused imports: `PatchedQueryPromise`, `GetQueryResponseType`, `SelectAllQueryResponse`
+   - Remove unused imports: `CreateQueryFactory`, `UpdateQueryFactory`, `DeleteQueryFactory`
+   - If `Shape.query()` still uses `SelectQueryFactory`, keep that import; otherwise remove
+
+3. **`src/index.ts`:**
+   - Remove `import nextTick from 'next-tick'` (line 47)
+   - Remove `export {nextTick}` (line 48)
+
+4. **`package.json`:**
+   - Remove `next-tick` from dependencies if no other file imports it
+
+**NOT removed (still used internally):**
+- `SelectQueryFactory` class — still used by `QueryBuilder.buildFactory()` for IR generation
+- `QueryResponseToResultType`, `GetQueryResponseType` — still used for type inference
+- `MutationQueryFactory` — still used by mutation builders for `convertUpdateObject()`
+
+**Validation:**
+- `npx tsc --noEmit` passes
+- `npm test` — all tests pass
+- `grep -r 'next-tick' src/` returns no hits (only in node_modules)
+- `grep -r 'PatchedQueryPromise' src/` returns no hits
+- `grep -r 'patchResultPromise' src/` returns no hits
+
+---
+
+##### Phase 4.4f — Final validation
+
+- Run full test suite: `npm test`
+- Run type check: `npx tsc --noEmit`
+- Run build: `npm run build` (if available)
+- Verify no `any` leaks in builder `.then()` signatures by inspecting the `.d.ts` output or running a type-level test
+- Verify `nextTick` is not imported anywhere in src/
+
+---
+
+##### Phase 4.4 dependency graph
+
+```
+4.4a (type threading QueryBuilder)       4.4d (type threading mutation builders)
+  │                                        │
+  ▼                                        ▼
+4.4b (rewire Shape.select/selectAll)     4.4c (rewire Shape.create/update/delete)
+  │                                        │
+  └──────────────┬─────────────────────────┘
+                 ▼
+           4.4e (dead code removal)
+                 │
+                 ▼
+           4.4f (final validation)
+```
+
+4.4a and 4.4d are independent and can be done in parallel.
+4.4b depends on 4.4a. 4.4c depends on 4.4d.
+4.4e depends on both 4.4b and 4.4c.
+4.4f is the final gate.
 
 **4.5 — Integration verification**
 - Run all existing golden tests (select + mutation) to confirm no regressions
