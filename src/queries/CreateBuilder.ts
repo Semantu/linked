@@ -25,8 +25,8 @@ interface CreateBuilderInit<S extends Shape> {
  *
  * Internally delegates to CreateQueryFactory for IR generation.
  */
-export class CreateBuilder<S extends Shape = Shape>
-  implements PromiseLike<any>, Promise<any>
+export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> = UpdatePartial<S>>
+  implements PromiseLike<CreateResponse<U>>, Promise<CreateResponse<U>>
 {
   private readonly _shape: ShapeType<S>;
   private readonly _data?: UpdatePartial<S>;
@@ -38,8 +38,8 @@ export class CreateBuilder<S extends Shape = Shape>
     this._fixedId = init.fixedId;
   }
 
-  private clone(overrides: Partial<CreateBuilderInit<S>> = {}): CreateBuilder<S> {
-    return new CreateBuilder<S>({
+  private clone(overrides: Partial<CreateBuilderInit<S>> = {}): CreateBuilder<S, any> {
+    return new CreateBuilder<S, any>({
       shape: this._shape,
       data: this._data,
       fixedId: this._fixedId,
@@ -77,13 +77,13 @@ export class CreateBuilder<S extends Shape = Shape>
   // ---------------------------------------------------------------------------
 
   /** Set the data for the entity to create. */
-  set(data: UpdatePartial<S>): CreateBuilder<S> {
-    return this.clone({data});
+  set<NewU extends UpdatePartial<S>>(data: NewU): CreateBuilder<S, NewU> {
+    return this.clone({data}) as unknown as CreateBuilder<S, NewU>;
   }
 
   /** Pre-assign a node ID for the created entity. */
-  withId(id: string): CreateBuilder<S> {
-    return this.clone({fixedId: id});
+  withId(id: string): CreateBuilder<S, U> {
+    return this.clone({fixedId: id}) as unknown as CreateBuilder<S, U>;
   }
 
   // ---------------------------------------------------------------------------
@@ -105,16 +105,16 @@ export class CreateBuilder<S extends Shape = Shape>
   }
 
   /** Execute the mutation. */
-  exec(): Promise<any> {
-    return getQueryDispatch().createQuery(this.build());
+  exec(): Promise<CreateResponse<U>> {
+    return getQueryDispatch().createQuery(this.build()) as Promise<CreateResponse<U>>;
   }
 
   // ---------------------------------------------------------------------------
   // Promise interface
   // ---------------------------------------------------------------------------
 
-  then<TResult1 = any, TResult2 = never>(
-    onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = CreateResponse<U>, TResult2 = never>(
+    onfulfilled?: ((value: CreateResponse<U>) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.exec().then(onfulfilled, onrejected);
@@ -122,11 +122,11 @@ export class CreateBuilder<S extends Shape = Shape>
 
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
-  ): Promise<any | TResult> {
+  ): Promise<CreateResponse<U> | TResult> {
     return this.exec().catch(onrejected);
   }
 
-  finally(onfinally?: (() => void) | null): Promise<any> {
+  finally(onfinally?: (() => void) | null): Promise<CreateResponse<U>> {
     return this.exec().finally(onfinally);
   }
 

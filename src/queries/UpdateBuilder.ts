@@ -1,6 +1,6 @@
 import {Shape, ShapeType} from '../shapes/Shape.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
-import {UpdatePartial, NodeReferenceValue, toNodeReference} from './QueryFactory.js';
+import {AddId, UpdatePartial, NodeReferenceValue, toNodeReference} from './QueryFactory.js';
 import {UpdateQueryFactory, UpdateQuery} from './UpdateQuery.js';
 import {getQueryDispatch} from './queryDispatch.js';
 
@@ -27,8 +27,8 @@ interface UpdateBuilderInit<S extends Shape> {
  *
  * Internally delegates to UpdateQueryFactory for IR generation.
  */
-export class UpdateBuilder<S extends Shape = Shape>
-  implements PromiseLike<any>, Promise<any>
+export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> = UpdatePartial<S>>
+  implements PromiseLike<AddId<U>>, Promise<AddId<U>>
 {
   private readonly _shape: ShapeType<S>;
   private readonly _data?: UpdatePartial<S>;
@@ -40,8 +40,8 @@ export class UpdateBuilder<S extends Shape = Shape>
     this._targetId = init.targetId;
   }
 
-  private clone(overrides: Partial<UpdateBuilderInit<S>> = {}): UpdateBuilder<S> {
-    return new UpdateBuilder<S>({
+  private clone(overrides: Partial<UpdateBuilderInit<S>> = {}): UpdateBuilder<S, any> {
+    return new UpdateBuilder<S, any>({
       shape: this._shape,
       data: this._data,
       targetId: this._targetId,
@@ -76,14 +76,14 @@ export class UpdateBuilder<S extends Shape = Shape>
   // ---------------------------------------------------------------------------
 
   /** Target a specific entity by ID. Required before build/exec. */
-  for(id: string | NodeReferenceValue): UpdateBuilder<S> {
+  for(id: string | NodeReferenceValue): UpdateBuilder<S, U> {
     const resolvedId = typeof id === 'string' ? id : id.id;
-    return this.clone({targetId: resolvedId});
+    return this.clone({targetId: resolvedId}) as unknown as UpdateBuilder<S, U>;
   }
 
   /** Set the update data. */
-  set(data: UpdatePartial<S>): UpdateBuilder<S> {
-    return this.clone({data});
+  set<NewU extends UpdatePartial<S>>(data: NewU): UpdateBuilder<S, NewU> {
+    return this.clone({data}) as unknown as UpdateBuilder<S, NewU>;
   }
 
   // ---------------------------------------------------------------------------
@@ -111,16 +111,16 @@ export class UpdateBuilder<S extends Shape = Shape>
   }
 
   /** Execute the mutation. */
-  exec(): Promise<any> {
-    return getQueryDispatch().updateQuery(this.build());
+  exec(): Promise<AddId<U>> {
+    return getQueryDispatch().updateQuery(this.build()) as Promise<AddId<U>>;
   }
 
   // ---------------------------------------------------------------------------
   // Promise interface
   // ---------------------------------------------------------------------------
 
-  then<TResult1 = any, TResult2 = never>(
-    onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = AddId<U>, TResult2 = never>(
+    onfulfilled?: ((value: AddId<U>) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.exec().then(onfulfilled, onrejected);
@@ -128,11 +128,11 @@ export class UpdateBuilder<S extends Shape = Shape>
 
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
-  ): Promise<any | TResult> {
+  ): Promise<AddId<U> | TResult> {
     return this.exec().catch(onrejected);
   }
 
-  finally(onfinally?: (() => void) | null): Promise<any> {
+  finally(onfinally?: (() => void) | null): Promise<AddId<U>> {
     return this.exec().finally(onfinally);
   }
 
