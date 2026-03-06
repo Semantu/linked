@@ -194,22 +194,37 @@ private toRawInput(): RawSelectInput {
 - `src/tests/query-builder.test.ts` — QueryBuilder chain, immutability, IR output equivalence
 
 ### Modified files
-- `src/queries/SelectQuery.ts` (currently ~2100 lines) — Refactor `SelectQueryFactory` to delegate to QueryBuilder internally. `PatchedQueryPromise` replaced. Proxy creation (lines ~1018, ~1286) to be extracted into shared `ProxiedPathBuilder`.
-- `src/queries/IRPipeline.ts` — May need minor adjustments if `buildSelectQuery` input types change
-- `src/shapes/Shape.ts` — Update `Shape.select()` (line ~125), `Shape.query()` (line ~95) to return QueryBuilder. Add `.for()`, `.forAll()`, `.delete()`, `.deleteAll()`, `.update()` with targeting requirement.
-- `src/index.ts` — Export new public API (`QueryBuilder`, `FieldSet`, `PropertyPath`) alongside existing `SelectQuery` namespace
+- `src/queries/SelectQuery.ts` (~72 KB, ~2100 lines) — Largest change. Contains `SelectQueryFactory`, `QueryShape`, `QueryShapeSet`, `QueryBuilderObject`, proxy handlers (lines ~1018, ~1286, ~1309). Refactor to delegate to QueryBuilder internally. `PatchedQueryPromise` replaced. Proxy creation extracted into shared `ProxiedPathBuilder`.
+- `src/queries/QueryFactory.ts` (~5.5 KB) — Abstract base `QueryFactory` class and type definitions for shape/node references. May need updates for new QueryBuilder base.
+- `src/queries/IRDesugar.ts` (~12 KB) — Owns `RawSelectInput` type definition (lines ~22-31). Type may need extension if QueryBuilder adds new fields. Also defines `DesugaredSelectQuery` and step types.
+- `src/queries/IRPipeline.ts` (~1 KB) — Orchestrates desugar → canonicalize → lower. May need minor adjustments if `buildSelectQuery` input types change.
+- `src/shapes/Shape.ts` — Update `Shape.select()` (line ~125), `Shape.query()` (line ~95), `Shape.selectAll()` (line ~211) to return QueryBuilder. Add `.for()`, `.forAll()`, `.delete()`, `.deleteAll()`, `.update()` with targeting requirement.
+- `src/index.ts` — Export new public API (`QueryBuilder`, `FieldSet`, `PropertyPath`) alongside existing `SelectQuery` namespace.
 
 ### Existing pipeline (no changes expected)
-- `src/queries/IntermediateRepresentation.ts` — IR types stay as-is
-- `src/queries/IRLower.ts` — no changes (consumes same structures)
-- `src/sparql/irToAlgebra.ts` — no changes
-- `src/sparql/algebraToString.ts` — no changes
+- `src/queries/IntermediateRepresentation.ts` (~6.7 KB) — IR types stay as-is (`IRSelectQuery`, `IRGraphPattern`, `IRExpression`, mutations)
+- `src/queries/IRCanonicalize.ts` (~5 KB) — no changes (normalizes WHERE expressions)
+- `src/queries/IRLower.ts` (~11 KB) — no changes (builds graph patterns and projections)
+- `src/sparql/irToAlgebra.ts` (~37 KB) — no changes (IR → SPARQL algebra)
+- `src/sparql/algebraToString.ts` (~12 KB) — no changes (algebra → SPARQL string)
+
+### Supporting files (reference, may need minor touches)
+- `src/queries/IRProjection.ts` (~4.3 KB) — Result mapping and projection extraction
+- `src/queries/IRAliasScope.ts` (~1.7 KB) — Alias scope management for IR variables
+- `src/utils/ShapeClass.ts` (~10.6 KB) — Shape metadata and property shape utilities
+- `src/queries/QueryContext.ts` (~1.3 KB) — Query execution context
+
+### Existing tests (must pass after refactor)
+- `src/tests/ir-select-golden.test.ts` — Golden tests for full IR generation
+- `src/tests/sparql-select-golden.test.ts` — Golden tests for SPARQL output
+- `src/tests/query.types.test.ts` — Compile-time type inference tests
+- `src/test-helpers/query-fixtures.ts` — Test shapes (Person, Dog, Pet) and query factory builders
 
 ---
 
 ## Potential Pitfalls
 
-1. **SelectQueryFactory complexity** — It's ~1800 lines with complex proxy tracing, `toRawInput()`, and mutable state. Refactoring it to use QueryBuilder internally without breaking existing behavior is the highest-risk change. Strategy: keep old code paths working alongside new ones initially, validate with existing tests, then swap.
+1. **SelectQueryFactory complexity** — It's ~2100 lines / 72 KB with 4 interrelated classes (`SelectQueryFactory`, `QueryShape`, `QueryShapeSet`, `QueryBuilderObject`) and complex proxy tracing with mutable state. Refactoring it to use QueryBuilder internally without breaking existing behavior is the highest-risk change. Strategy: keep old code paths working alongside new ones initially, validate with existing golden tests (`ir-select-golden.test.ts`, `sparql-select-golden.test.ts`), then swap.
 
 2. **ProxiedPathBuilder extraction** — The proxy is currently embedded in SelectQueryFactory. Extracting it into a shared module that both the DSL and QueryBuilder use requires understanding all proxy trap behaviors and edge cases (`.select()` for sub-selection, `.where()` for scoped filters, `.as()` for bindings, `.path()` escape hatch).
 
