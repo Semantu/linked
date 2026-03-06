@@ -352,8 +352,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   }
 
   /** Execute the query and return results. */
-  exec(): Promise<any> {
-    return getQueryDispatch().selectQuery(this.build());
+  exec(): Promise<Result> {
+    return getQueryDispatch().selectQuery(this.build()) as Promise<Result>;
   }
 
   // ---------------------------------------------------------------------------
@@ -361,8 +361,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   // ---------------------------------------------------------------------------
 
   /** `await` triggers execution. */
-  then<TResult1 = any, TResult2 = never>(
-    onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = Result, TResult2 = never>(
+    onfulfilled?: ((value: Result) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.exec().then(onfulfilled, onrejected);
@@ -371,12 +371,12 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   /** Catch errors from execution. */
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
-  ): Promise<any | TResult> {
+  ): Promise<Result | TResult> {
     return this.exec().catch(onrejected);
   }
 
   /** Finally handler after execution. */
-  finally(onfinally?: (() => void) | null): Promise<any> {
+  finally(onfinally?: (() => void) | null): Promise<Result> {
     return this.exec().finally(onfinally);
   }
 
