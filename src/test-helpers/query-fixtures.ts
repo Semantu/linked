@@ -135,8 +135,7 @@ export class Employee extends Person {
 import {QueryBuilder} from '../queries/QueryBuilder';
 import {FieldSet} from '../queries/FieldSet';
 
-const componentQueryBuilder = QueryBuilder.from(Person).select((p) => ({name: p.name}));
-const componentLike = {query: componentQueryBuilder};
+const componentLike = {query: Person.select((p) => ({name: p.name}))};
 
 const componentFieldSet = FieldSet.for(Person.shape, ['name']);
 const componentLikeWithFieldSet = {query: componentFieldSet, fields: componentFieldSet};

@@ -14,7 +14,6 @@ import {
 import { buildSelectQuery } from "../queries/IRPipeline";
 import type { SelectQuery } from "../queries/SelectQuery";
 import { setQueryContext } from "../queries/QueryContext";
-import { QueryBuilder } from "../queries/QueryBuilder";
 
 setQueryContext("user", { id: "user-1" }, Person);
 
@@ -638,11 +637,11 @@ describe("IR pipeline behavior", () => {
   });
 
   test("build() returns canonical IR", async () => {
-    const selectFactory = QueryBuilder.from(Person).select((p) => p.name).where((p) =>
+    const query = Person.select((p) => p.name).where((p) =>
       p.name.equals("Semmy")
     );
 
-    const ir = selectFactory.build();
+    const ir = query.build();
 
     expect(ir.kind).toBe("select");
     expect(ir.projection.length).toBe(1);
@@ -650,8 +649,8 @@ describe("IR pipeline behavior", () => {
   });
 
   test("builder accepts already-lowered IR as pass-through", async () => {
-    const selectFactory = QueryBuilder.from(Person).select((p) => p.name);
-    const ir = selectFactory.build();
+    const query = Person.select((p) => p.name);
+    const ir = query.build();
 
     expect(buildSelectQuery(ir)).toBe(ir);
   });

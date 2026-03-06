@@ -15,7 +15,6 @@ import {LinkedStorage} from '../utils/LinkedStorage';
 import {getQueryDispatch} from '../queries/queryDispatch';
 import {isWhereEvaluationPath} from '../queries/SelectQuery';
 import {getQueryContext, setQueryContext} from '../queries/QueryContext';
-import {QueryBuilder} from '../queries/QueryBuilder';
 import {NodeReferenceValue} from '../utils/NodeReference';
 
 const makeProp = (base: string) => (suffix: string): NodeReferenceValue => ({
@@ -178,8 +177,8 @@ describe('Query dispatch delegation', () => {
     LinkedStorage.setDefaultStore(store);
 
     const dispatch = getQueryDispatch();
-    const queryBuilder = QueryBuilder.from(ContextPerson).select((p) => p.name);
-    const result = await dispatch.selectQuery(queryBuilder.build());
+    const query = ContextPerson.select((p) => p.name);
+    const result = await dispatch.selectQuery(query.build());
 
     expect(store.selectQuery).toHaveBeenCalledTimes(1);
     expect(store.selectQuery.mock.calls[0][0]?.kind).toBe('select');
@@ -229,7 +228,7 @@ describe('QueryContext edge cases', () => {
     const context = getQueryContext('ctx');
     expect(context.id).toBe('ctx-2');
 
-    const query = QueryBuilder.from(ContextPerson).select((p) => p.name).where((p) =>
+    const query = ContextPerson.select((p) => p.name).where((p) =>
       p.bestFriend.equals(context),
     );
     const queryObject = query.toRawInput();
