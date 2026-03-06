@@ -388,9 +388,9 @@ Phase 1 (done)
     ↓
 Phase 2 (done)
     ↓
-Phase 3a (FieldSet)  ←→  Phase 3b (Mutation builders)   [parallel after Phase 2]
+Phase 3a (done)  ←→  Phase 3b (done)   [parallel after Phase 2]
     ↓                         ↓
-Phase 4 (Serialization + integration + DSL rewire)       [after 3a and 3b]
+Phase 4 (done)       [after 3a and 3b]
 ```
 
 ---
@@ -506,9 +506,16 @@ Use `buildSelectQuery()` on both `SelectQueryFactory.toRawInput()` and `QueryBui
 
 ---
 
-### Phase 3a — FieldSet
+### Phase 3a — FieldSet ✅
 
-Build `FieldSet` as an immutable, composable collection of property paths. Integrate with QueryBuilder.
+**Status: Complete.**
+
+Built `FieldSet` as an immutable, composable collection of PropertyPaths. Integrated with QueryBuilder via `.select(fieldSet)` and `.fields()`. 17 new tests covering construction, composition, nesting, and QueryBuilder integration.
+
+**Files delivered:**
+- `src/queries/FieldSet.ts` — FieldSet class (for, all, merge, select, add, remove, set, pick, paths, labels, toJSON, fromJSON)
+- `src/tests/field-set.test.ts` — 17 tests: construction (6), composition (8), nesting (2), QueryBuilder integration (2)
+- Modified `src/queries/QueryBuilder.ts` — Added `.select(fieldSet)` overload, `.fields()`, FieldSet state tracking
 
 **Depends on:** Phase 2 (QueryBuilder, PropertyPath with walkPropertyPath)
 
@@ -571,7 +578,17 @@ Build `FieldSet` as an immutable, composable collection of property paths. Integ
 
 ---
 
-### Phase 3b — Mutation builders
+### Phase 3b — Mutation builders ✅
+
+**Status: Complete.**
+
+Created immutable PromiseLike mutation builders (CreateBuilder, UpdateBuilder, DeleteBuilder) that delegate to existing factories for identical IR generation. 22 new tests covering IR equivalence, immutability, guards, and PromiseLike behavior.
+
+**Files delivered:**
+- `src/queries/CreateBuilder.ts` — Immutable create builder (from, set, withId, build, exec, PromiseLike)
+- `src/queries/UpdateBuilder.ts` — Immutable update builder (from, for, set, build, exec, PromiseLike) with guards
+- `src/queries/DeleteBuilder.ts` — Immutable delete builder (from, build, exec, PromiseLike)
+- `src/tests/mutation-builder.test.ts` — 22 tests: create IR equiv (3), update IR equiv (5), delete IR equiv (2), immutability (4), guards (2), PromiseLike (5)
 
 Replace `CreateQueryFactory` / `UpdateQueryFactory` / `DeleteQueryFactory` with immutable PromiseLike builders.
 
@@ -651,7 +668,20 @@ Capture IR from both old factory path and new builder path, assert deep equality
 
 ---
 
-### Phase 4 — Serialization + integration
+### Phase 4 — Serialization + integration ✅
+
+**Status: Complete (dead code cleanup deferred).**
+
+Added `toJSON()` / `fromJSON()` to FieldSet and QueryBuilder. Finalized public API exports. 14 new serialization tests with round-trip IR equivalence verification.
+
+**Files delivered:**
+- Modified `src/queries/FieldSet.ts` — Added `toJSON()`, `fromJSON()`, `FieldSetJSON`, `FieldSetFieldJSON` types
+- Modified `src/queries/QueryBuilder.ts` — Added `toJSON()`, `fromJSON()`, `QueryBuilderJSON` type
+- `src/tests/serialization.test.ts` — 14 tests: FieldSet round-trip (5), QueryBuilder round-trip (8), minimal (1)
+- Modified `src/index.ts` — Exports `FieldSetJSON`, `FieldSetFieldJSON`, `QueryBuilderJSON`
+
+**Deferred — Dead code cleanup (4.4):**
+PatchedQueryPromise, patchResultPromise(), nextTick, and QueryFactory base class removal blocked by Shape.select()/selectAll() DSL rewire. Changing return types breaks complex conditional type inference (`QueryResponseToResultType`, `GetQueryResponseType`) used by `query.types.test.ts`. This is a separate effort requiring QueryBuilder to thread result types through its generics.
 
 Add `toJSON()` / `fromJSON()` to QueryBuilder and FieldSet. Final integration: verify all public API exports, remove dead code.
 
