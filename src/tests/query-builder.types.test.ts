@@ -147,4 +147,35 @@ describe.skip('QueryBuilder result type inference (compile only)', () => {
     const first = (null as unknown as Result)[0];
     expectType<string | null | undefined>(first.name);
   });
+
+  test('one() unwraps array to single result', () => {
+    const qb = QueryBuilder.from(Person)
+      .select((p) => p.name)
+      .one();
+    type Result = Awaited<typeof qb>;
+    const single = null as unknown as Result;
+    expectType<string | null | undefined>(single.name);
+    expectType<string | undefined>(single.id);
+  });
+
+  test('one() with multiple paths unwraps correctly', () => {
+    const qb = QueryBuilder.from(Person)
+      .select((p) => [p.name, p.friends])
+      .one();
+    type Result = Awaited<typeof qb>;
+    const single = null as unknown as Result;
+    expectType<string | null | undefined>(single.name);
+    expectType<string | undefined>(single.friends[0].id);
+  });
+
+  test('one() with chained where/limit preserves unwrapped type', () => {
+    const qb = QueryBuilder.from(Person)
+      .select((p) => p.name)
+      .where((p) => p.name.equals('Alice'))
+      .limit(1)
+      .one();
+    type Result = Awaited<typeof qb>;
+    const single = null as unknown as Result;
+    expectType<string | null | undefined>(single.name);
+  });
 });

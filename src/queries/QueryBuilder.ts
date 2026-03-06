@@ -211,9 +211,9 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     return this.clone({subject: undefined, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
   }
 
-  /** Limit to one result. */
-  one(): QueryBuilder<S, R, Result> {
-    return this.clone({limit: 1, singleResult: true}) as unknown as QueryBuilder<S, R, Result>;
+  /** Limit to one result. Unwraps array Result type to single element. */
+  one(): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result> {
+    return this.clone({limit: 1, singleResult: true}) as unknown as QueryBuilder<S, R, Result extends (infer E)[] ? E : Result>;
   }
 
   /**
