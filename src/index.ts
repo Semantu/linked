@@ -61,6 +61,9 @@ export {CreateBuilder} from './queries/CreateBuilder.js';
 export {UpdateBuilder} from './queries/UpdateBuilder.js';
 export {DeleteBuilder} from './queries/DeleteBuilder.js';
 
+// Phase 5 — Component query integration
+export type {LinkedComponentInterface, QueryComponentLike} from './queries/SelectQuery.js';
+
 export function initModularApp() {
   let publicFiles = {
     Package,

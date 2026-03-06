@@ -4,6 +4,7 @@ import {captureQuery} from '../test-helpers/query-capture-store';
 import {QueryBuilder} from '../queries/QueryBuilder';
 import {buildSelectQuery} from '../queries/IRPipeline';
 import {walkPropertyPath} from '../queries/PropertyPath';
+import {FieldSet} from '../queries/FieldSet';
 import {setQueryContext} from '../queries/QueryContext';
 
 setQueryContext('user', {id: 'user-1'}, Person);
@@ -298,5 +299,89 @@ describe('QueryBuilder — PromiseLike', () => {
     const result = await QueryBuilder.from(Person).select((p) => p.name);
     // captureStore returns [] for select queries
     expect(result).toEqual([]);
+  });
+});
+
+// =============================================================================
+// Preload tests (Phase 5)
+// =============================================================================
+
+describe('QueryBuilder — preload', () => {
+  const componentQuery = Person.query((p: any) => ({name: p.name}));
+  const componentLike = {query: componentQuery};
+
+  test('.preload() returns new instance', () => {
+    const b1 = QueryBuilder.from(Person).select((p) => [p.name]);
+    const b2 = b1.preload('bestFriend', componentLike);
+    expect(b1).not.toBe(b2);
+  });
+
+  test('.preload() with SelectQueryFactory produces same IR as DSL preloadFor', async () => {
+    const dslIR = await captureDslIR(() =>
+      Person.select((p) => [p.name, p.bestFriend.preloadFor(componentLike)]),
+    );
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .preload('bestFriend', componentLike)
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+
+  test('.preload() with QueryBuilder-based component', async () => {
+    const componentBuilder = QueryBuilder.from(Person).select((p: any) => ({name: p.name}));
+    const componentLikeBuilder = {query: componentBuilder};
+
+    const dslIR = await captureDslIR(() =>
+      Person.select((p) => [p.name, p.bestFriend.preloadFor(componentLike)]),
+    );
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .preload('bestFriend', componentLikeBuilder)
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+
+  test('.preload() with FieldSet-based component', async () => {
+    const personShape = (Person as any).shape;
+    const componentFieldSet = FieldSet.for(personShape, ['name']);
+    const componentLikeFieldSet = {query: componentFieldSet, fields: componentFieldSet};
+
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .preload('bestFriend', componentLikeFieldSet)
+      .build();
+    expect(builderIR.kind).toBe('select');
+    // The preloaded fields should appear in the IR projections
+    expect(builderIR.projection.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('DSL preloadFor with QueryBuilder component produces valid IR', async () => {
+    const componentBuilder = QueryBuilder.from(Person).select((p: any) => ({name: p.name}));
+    const componentLikeBuilder = {query: componentBuilder};
+
+    const ir = await captureQuery(() =>
+      Person.select((p) => p.bestFriend.preloadFor(componentLikeBuilder)),
+    );
+    expect(ir.kind).toBe('select');
+    expect(ir.projection.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('DSL preloadFor with FieldSet component produces valid IR', async () => {
+    const personShape = (Person as any).shape;
+    const componentFieldSet = FieldSet.for(personShape, ['name']);
+    const componentLikeFieldSet = {query: componentFieldSet, fields: componentFieldSet};
+
+    const ir = await captureQuery(() =>
+      Person.select((p) => p.bestFriend.preloadFor(componentLikeFieldSet)),
+    );
+    expect(ir.kind).toBe('select');
+    expect(ir.projection.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('getQueryPaths() returns valid SelectPath', () => {
+    const builder = QueryBuilder.from(Person).select((p) => [p.name]);
+    const paths = builder.getQueryPaths();
+    expect(Array.isArray(paths)).toBe(true);
+    expect((paths as any[]).length).toBeGreaterThan(0);
   });
 });

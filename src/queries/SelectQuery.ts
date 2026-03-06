@@ -14,6 +14,8 @@ import {getQueryDispatch} from './queryDispatch.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import type {IRSelectQuery} from './IntermediateRepresentation.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
+import {FieldSet} from './FieldSet.js';
+import type {QueryBuilder} from './QueryBuilder.js';
 
 /**
  * The canonical SelectQuery type — an IR AST node representing a select query.
@@ -244,8 +246,26 @@ export type ComponentQueryPath = (QueryStep | SubQueryPaths)[] | WherePath;
 export type QueryComponentLike<ShapeType extends Shape, CompQueryResult> = {
   query:
     | SelectQueryFactory<ShapeType, CompQueryResult>
-    | Record<string, SelectQueryFactory<ShapeType, CompQueryResult>>;
+    | QueryBuilder<ShapeType>
+    | FieldSet
+    | Record<string, SelectQueryFactory<ShapeType, CompQueryResult> | QueryBuilder<ShapeType>>;
+  fields?: FieldSet;
 };
+
+/**
+ * Interface that linked components (e.g. from `@_linked/react`'s `linkedComponent()`)
+ * must satisfy to participate in preloadFor.
+ *
+ * Components expose their data requirements as a QueryBuilder or SelectQueryFactory,
+ * and optionally a FieldSet for declarative field access.
+ */
+export interface LinkedComponentInterface<S extends Shape = Shape, R = any> {
+  /** The component's data query (QueryBuilder template, not executed). */
+  query: QueryBuilder<S, any, R> | SelectQueryFactory<S, R>;
+  /** The component's field requirements as a FieldSet. */
+  fields?: FieldSet;
+}
+
 /**
  * ###################################
  * ####    QUERY RESULT TYPES     ####
@@ -876,6 +896,16 @@ export class QueryBuilderObject<
   }
 }
 
+/**
+ * Convert a FieldSet's entries to a SelectPath (QueryPath[]).
+ * Each FieldSetEntry's PropertyPath segments become QuerySteps.
+ */
+function fieldSetToSelectPath(fieldSet: FieldSet): QueryPath[] {
+  return fieldSet.entries.map((entry) =>
+    entry.path.segments.map((segment) => ({property: segment})),
+  );
+}
+
 export class BoundComponent<
   Source extends QueryBuilderObject,
   CompQueryResult = any,
@@ -887,6 +917,55 @@ export class BoundComponent<
     super(null, null);
   }
 
+  /**
+   * Extract the component's query paths from whatever query type was provided.
+   * Handles SelectQueryFactory, QueryBuilder (duck-typed), FieldSet, and Record forms.
+   */
+  getComponentQueryPaths(): SelectPath {
+    // If component exposes a FieldSet via .fields, prefer it
+    if (this.originalValue.fields instanceof FieldSet) {
+      return fieldSetToSelectPath(this.originalValue.fields);
+    }
+
+    const query = this.originalValue.query;
+
+    if (query instanceof SelectQueryFactory) {
+      return query.getQueryPaths();
+    }
+    if (query instanceof FieldSet) {
+      return fieldSetToSelectPath(query);
+    }
+    // Duck-type check for QueryBuilder (has getQueryPaths method but is not SelectQueryFactory)
+    if (query && typeof (query as any).getQueryPaths === 'function') {
+      return (query as any).getQueryPaths();
+    }
+    // Record case
+    if (typeof query === 'object') {
+      if (Object.keys(query).length > 1) {
+        throw new Error(
+          'Only one key is allowed to map a query to a property for linkedSetComponents',
+        );
+      }
+      for (let key in query) {
+        const value = (query as Record<string, any>)[key];
+        if (value instanceof SelectQueryFactory) {
+          return value.getQueryPaths();
+        }
+        // Duck-type check for QueryBuilder in Record
+        if (value && typeof value.getQueryPaths === 'function') {
+          return value.getQueryPaths();
+        }
+        throw new Error(
+          'Unknown value type for query object. Expected a SelectQueryFactory or QueryBuilder',
+        );
+      }
+    }
+    throw new Error(
+      'Unknown data query type. Expected a SelectQueryFactory, QueryBuilder, or FieldSet',
+    );
+  }
+
+  /** @deprecated Use getComponentQueryPaths() instead */
   getParentQueryFactory(): SelectQueryFactory<any> {
     let parentQuery: SelectQueryFactory<any> | Object =
       this.originalValue.query;
@@ -916,8 +995,7 @@ export class BoundComponent<
 
   getPropertyPath() {
     let sourcePath: ComponentQueryPath = this.source.getPropertyPath();
-    let requestQuery = this.getParentQueryFactory();
-    let compSelectQuery: SelectPath = requestQuery.getQueryPaths();
+    let compSelectQuery: SelectPath = this.getComponentQueryPaths();
 
     if (Array.isArray(sourcePath)) {
       if (Array.isArray(compSelectQuery)) {

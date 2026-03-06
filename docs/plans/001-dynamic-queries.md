@@ -1239,7 +1239,7 @@ A new `query-builder.types.test.ts` must be added mirroring key patterns from `q
 
 ### Phase 5 — preloadFor + Component Query Integration
 
-**Status: Not started.**
+**Status: Complete.**
 
 Integrate `preloadFor` with the new QueryBuilder/FieldSet system. Ensure `linkedComponent` (in `@_linked/react`) continues to work by accepting QueryBuilder-based component definitions alongside the legacy SelectQueryFactory pattern.
 

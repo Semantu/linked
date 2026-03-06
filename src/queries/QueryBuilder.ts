@@ -8,7 +8,9 @@ import {
   QResult,
   QueryResponseToResultType,
   SelectAllQueryResponse,
+  QueryComponentLike,
 } from './SelectQuery.js';
+import type {SelectPath} from './SelectQuery.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
@@ -26,6 +28,12 @@ export type QueryBuilderJSON = {
   orderDirection?: 'ASC' | 'DESC';
 };
 
+/** A preload entry binding a property path to a component's query. */
+interface PreloadEntry {
+  path: string;
+  component: QueryComponentLike<any, any>;
+}
+
 /** Internal state bag for QueryBuilder. */
 interface QueryBuilderInit<S extends Shape, R> {
   shape: ShapeType<S>;
@@ -39,6 +47,7 @@ interface QueryBuilderInit<S extends Shape, R> {
   singleResult?: boolean;
   selectAllLabels?: string[];
   fieldSet?: FieldSet;
+  preloads?: PreloadEntry[];
 }
 
 /**
@@ -72,6 +81,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   private readonly _singleResult?: boolean;
   private readonly _selectAllLabels?: string[];
   private readonly _fieldSet?: FieldSet;
+  private readonly _preloads?: PreloadEntry[];
 
   private constructor(init: QueryBuilderInit<S, R>) {
     this._shape = init.shape;
@@ -85,6 +95,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     this._singleResult = init.singleResult;
     this._selectAllLabels = init.selectAllLabels;
     this._fieldSet = init.fieldSet;
+    this._preloads = init.preloads;
   }
 
   /** Create a shallow clone with overrides. */
@@ -101,6 +112,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       singleResult: this._singleResult,
       selectAllLabels: this._selectAllLabels,
       fieldSet: this._fieldSet,
+      preloads: this._preloads,
       ...overrides,
     });
   }
@@ -218,6 +230,28 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   }
 
   /**
+   * Preload a component's query fields at the given property path.
+   *
+   * This merges the component's query paths into this query's selection,
+   * wrapping them in an OPTIONAL block (handled by the IR pipeline).
+   *
+   * Equivalent to the DSL's `.preloadFor()`:
+   * ```ts
+   * // DSL style
+   * Person.select(p => p.bestFriend.preloadFor(PersonCard))
+   * // QueryBuilder style
+   * QueryBuilder.from(Person).select(p => [p.name]).preload('bestFriend', PersonCard)
+   * ```
+   */
+  preload<CS extends Shape, CR>(
+    path: string,
+    component: QueryComponentLike<CS, CR>,
+  ): QueryBuilder<S, R, Result> {
+    const newPreloads = [...(this._preloads || []), {path, component}];
+    return this.clone({preloads: newPreloads}) as unknown as QueryBuilder<S, R, Result>;
+  }
+
+  /**
    * Returns the current selection as a FieldSet.
    * If the selection was set via a FieldSet, returns that directly.
    * If set via selectAll labels, constructs a FieldSet from them.
@@ -319,9 +353,24 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
    * producing the same RawSelectInput the DSL path produces.
    */
   private buildFactory(): SelectQueryFactory<S, R> {
+    // If preloads exist, wrap the selectFn to include preloadFor calls
+    let selectFn = this._selectFn;
+    if (this._preloads && this._preloads.length > 0) {
+      const originalFn = selectFn;
+      const preloads = this._preloads;
+      selectFn = ((p: any, q: any) => {
+        const original = originalFn ? originalFn(p, q) : [];
+        const results = Array.isArray(original) ? [...original] : [original];
+        for (const entry of preloads) {
+          results.push(p[entry.path].preloadFor(entry.component));
+        }
+        return results;
+      }) as any;
+    }
+
     const factory = new SelectQueryFactory<S, R>(
       this._shape,
-      this._selectFn,
+      selectFn,
       this._subject as any,
     );
 
@@ -341,6 +390,14 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       factory.singleResult = true;
     }
     return factory;
+  }
+
+  /**
+   * Get the select paths for this query.
+   * Used by BoundComponent to merge component query paths into a parent query.
+   */
+  getQueryPaths(): SelectPath {
+    return this.buildFactory().getQueryPaths();
   }
 
   /** Get the raw pipeline input (same as SelectQueryFactory.toRawInput()). */
