@@ -245,10 +245,9 @@ export type ComponentQueryPath = (QueryStep | SubQueryPaths)[] | WherePath;
 
 export type QueryComponentLike<ShapeType extends Shape, CompQueryResult> = {
   query:
-    | SelectQueryFactory<ShapeType, CompQueryResult>
     | QueryBuilder<ShapeType>
     | FieldSet
-    | Record<string, SelectQueryFactory<ShapeType, CompQueryResult> | QueryBuilder<ShapeType>>;
+    | Record<string, QueryBuilder<ShapeType>>;
   fields?: FieldSet;
 };
 
@@ -256,12 +255,12 @@ export type QueryComponentLike<ShapeType extends Shape, CompQueryResult> = {
  * Interface that linked components (e.g. from `@_linked/react`'s `linkedComponent()`)
  * must satisfy to participate in preloadFor.
  *
- * Components expose their data requirements as a QueryBuilder or SelectQueryFactory,
+ * Components expose their data requirements as a QueryBuilder,
  * and optionally a FieldSet for declarative field access.
  */
 export interface LinkedComponentInterface<S extends Shape = Shape, R = any> {
   /** The component's data query (QueryBuilder template, not executed). */
-  query: QueryBuilder<S, any, R> | SelectQueryFactory<S, R>;
+  query: QueryBuilder<S, any, R>;
   /** The component's field requirements as a FieldSet. */
   fields?: FieldSet;
 }
@@ -278,11 +277,6 @@ export type QResult<ShapeType extends Shape = Shape, Object = {}> = Object & {
   id: string;
   // shape?: ShapeType;
 };
-
-export type QueryProps<Q extends SelectQueryFactory<any>> =
-  Q extends SelectQueryFactory<infer ShapeType, infer ResponseType>
-    ? QueryResponseToResultType<ResponseType, ShapeType>
-    : never;
 
 export type QueryControllerProps = {
   query?: QueryController;
@@ -929,13 +923,10 @@ export class BoundComponent<
 
     const query = this.originalValue.query;
 
-    if (query instanceof SelectQueryFactory) {
-      return query.getQueryPaths();
-    }
     if (query instanceof FieldSet) {
       return fieldSetToSelectPath(query);
     }
-    // Duck-type check for QueryBuilder (has getQueryPaths method but is not SelectQueryFactory)
+    // Duck-type check for QueryBuilder (has getQueryPaths method)
     if (query && typeof (query as any).getQueryPaths === 'function') {
       return (query as any).getQueryPaths();
     }
@@ -948,48 +939,16 @@ export class BoundComponent<
       }
       for (let key in query) {
         const value = (query as Record<string, any>)[key];
-        if (value instanceof SelectQueryFactory) {
-          return value.getQueryPaths();
-        }
-        // Duck-type check for QueryBuilder in Record
         if (value && typeof value.getQueryPaths === 'function') {
           return value.getQueryPaths();
         }
         throw new Error(
-          'Unknown value type for query object. Expected a SelectQueryFactory or QueryBuilder',
+          'Unknown value type for query object. Expected a QueryBuilder',
         );
       }
     }
     throw new Error(
-      'Unknown data query type. Expected a SelectQueryFactory, QueryBuilder, or FieldSet',
-    );
-  }
-
-  /** @deprecated Use getComponentQueryPaths() instead */
-  getParentQueryFactory(): SelectQueryFactory<any> {
-    let parentQuery: SelectQueryFactory<any> | Object =
-      this.originalValue.query;
-
-    if (parentQuery instanceof SelectQueryFactory) {
-      return parentQuery;
-    }
-    if (typeof parentQuery === 'object') {
-      if (Object.keys(parentQuery).length > 1) {
-        throw new Error(
-          'Only one key is allowed to map a query to a property for linkedSetComponents',
-        );
-      }
-      for (let key in parentQuery) {
-        if (parentQuery[key] instanceof SelectQueryFactory) {
-          return parentQuery[key];
-        }
-        throw new Error(
-          'Unknown value type for query object. Keep to this format: {propName: Shape.query(s => ...)}',
-        );
-      }
-    }
-    throw new Error(
-      'Unknown data query type. Expected a SelectQueryFactory (from Shape.query()) or an object with 1 key whose value is a SelectQueryFactory',
+      'Unknown data query type. Expected a QueryBuilder or FieldSet',
     );
   }
 
@@ -1922,8 +1881,6 @@ export class SelectQueryFactory<
    * @param subject
    */
   execFor(subject) {
-    //TODO: Differentiate between the result of Shape.query and the internal query in Shape.select?
-    // so that Shape.query can never be executed. Its just a template
     return this.clone().setSubject(subject).exec();
   }
 

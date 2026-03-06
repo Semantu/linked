@@ -132,15 +132,12 @@ export class Employee extends Person {
   }
 }
 
-const componentQuery = Person.query((p) => ({name: p.name}));
-const componentLike = {query: componentQuery};
-
-// QueryBuilder-based component equivalents for Phase 5 testing
 import {QueryBuilder} from '../queries/QueryBuilder';
-const componentQueryBuilder = QueryBuilder.from(Person).select((p) => ({name: p.name}));
-const componentLikeWithBuilder = {query: componentQueryBuilder};
-
 import {FieldSet} from '../queries/FieldSet';
+
+const componentQueryBuilder = QueryBuilder.from(Person).select((p) => ({name: p.name}));
+const componentLike = {query: componentQueryBuilder};
+
 const componentFieldSet = FieldSet.for(Person.shape, ['name']);
 const componentLikeWithFieldSet = {query: componentFieldSet, fields: componentFieldSet};
 
@@ -356,15 +353,9 @@ export const queryFactories = {
   updateBirthDate: () => Person.update(entity('p1'), updateBirthDate),
   preloadBestFriend: () =>
     Person.select((p) => p.bestFriend.preloadFor(componentLike)),
-  // Phase 5: QueryBuilder-based preload variants
-  preloadBestFriendWithQueryBuilder: () =>
-    Person.select((p) => p.bestFriend.preloadFor(componentLikeWithBuilder)),
   preloadBestFriendWithFieldSet: () =>
     Person.select((p) => p.bestFriend.preloadFor(componentLikeWithFieldSet)),
-  // Phase 5: QueryBuilder.preload() method
   queryBuilderPreload: () =>
     QueryBuilder.from(Person).select((p) => [p.name]).preload('bestFriend', componentLike),
-  queryBuilderPreloadWithBuilder: () =>
-    QueryBuilder.from(Person).select((p) => [p.name]).preload('bestFriend', componentLikeWithBuilder),
   selectAllEmployeeProperties: () => Employee.selectAll(),
 };

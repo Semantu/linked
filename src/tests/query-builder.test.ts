@@ -307,8 +307,8 @@ describe('QueryBuilder — PromiseLike', () => {
 // =============================================================================
 
 describe('QueryBuilder — preload', () => {
-  const componentQuery = Person.query((p: any) => ({name: p.name}));
-  const componentLike = {query: componentQuery};
+  const componentBuilder = QueryBuilder.from(Person).select((p: any) => ({name: p.name}));
+  const componentLike = {query: componentBuilder};
 
   test('.preload() returns new instance', () => {
     const b1 = QueryBuilder.from(Person).select((p) => [p.name]);
@@ -316,7 +316,7 @@ describe('QueryBuilder — preload', () => {
     expect(b1).not.toBe(b2);
   });
 
-  test('.preload() with SelectQueryFactory produces same IR as DSL preloadFor', async () => {
+  test('.preload() produces same IR as DSL preloadFor', async () => {
     const dslIR = await captureDslIR(() =>
       Person.select((p) => [p.name, p.bestFriend.preloadFor(componentLike)]),
     );
@@ -327,16 +327,13 @@ describe('QueryBuilder — preload', () => {
     expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
   });
 
-  test('.preload() with QueryBuilder-based component', async () => {
-    const componentBuilder = QueryBuilder.from(Person).select((p: any) => ({name: p.name}));
-    const componentLikeBuilder = {query: componentBuilder};
-
+  test('.preload() IR matches DSL preloadFor', async () => {
     const dslIR = await captureDslIR(() =>
       Person.select((p) => [p.name, p.bestFriend.preloadFor(componentLike)]),
     );
     const builderIR = QueryBuilder.from(Person)
       .select((p) => [p.name])
-      .preload('bestFriend', componentLikeBuilder)
+      .preload('bestFriend', componentLike)
       .build();
     expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
   });

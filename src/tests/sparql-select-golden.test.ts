@@ -1077,20 +1077,6 @@ WHERE {
 }`);
   });
 
-  test('preloadBestFriend with QueryBuilder component produces same SPARQL', async () => {
-    const sparql = await goldenSelect(queryFactories.preloadBestFriendWithQueryBuilder);
-    expect(sparql).toBe(
-`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT DISTINCT ?a0 ?a1_name ?a1
-WHERE {
-  ?a0 rdf:type <${P}> .
-  ?a0 <${P}/bestFriend> ?a1 .
-  OPTIONAL {
-    ?a1 <${P}/name> ?a1_name .
-  }
-}`);
-  });
-
   test('QueryBuilder.preload() produces same SPARQL as DSL preloadFor', async () => {
     const sparql = await goldenSelect(queryFactories.queryBuilderPreload);
     // QueryBuilder.preload adds name selection + bestFriend preload

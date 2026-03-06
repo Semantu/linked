@@ -90,30 +90,6 @@ export abstract class Shape {
     this.typesToShapes.get(typeId).add(shapeClass);
   }
 
-  static query<S extends Shape, R = unknown>(
-    this: {new (...args: any[]): S; targetClass: any},
-    subject: S | QShape<S> | QResult<S>,
-    queryFn: QueryBuildFn<S, R>,
-  ): SelectQueryFactory<S, R>;
-  static query<S extends Shape, R = unknown>(
-    this: {new (...args: any[]): S; targetClass: any},
-    queryFn: QueryBuildFn<S, R>,
-  ): SelectQueryFactory<S, R>;
-  static query<S extends Shape, R = unknown>(
-    this: {new (...args: any[]): S; targetClass: any},
-    subject: S | QShape<S> | QResult<S> | QueryBuildFn<S, R>,
-    queryFn?: QueryBuildFn<S, R>,
-  ): SelectQueryFactory<S, R> {
-    const _queryFn =
-      subject && queryFn ? queryFn : (subject as QueryBuildFn<S, R>);
-    let _subject: S | QResult<S> = queryFn ? (subject as S) : undefined;
-    if (_subject instanceof QueryShape) {
-      _subject = {id: _subject.id} as QResult<S>;
-    }
-    const query = new SelectQueryFactory<S>(this as any, _queryFn, _subject);
-    return query;
-  }
-
   /**
    * Select properties of instances of this shape.
    * Returns a single result if a single subject is provided, or an array of results if no subjects are provided.

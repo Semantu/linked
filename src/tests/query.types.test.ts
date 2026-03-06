@@ -399,7 +399,9 @@ describe.skip('query result type inference (compile only)', () => {
     const promise = queryFactories.preloadBestFriend();
     type Result = Awaited<typeof promise>;
     const first = (null as unknown as Result)[0];
-    expectType<string | null | undefined>(first.bestFriend.name);
+    // Preloaded component data is resolved at runtime via SPARQL;
+    // the parent query's type only knows about bestFriend as a QResult.
+    expectType<{id: string}>(first.bestFriend);
   });
 
   test('outer where with limit', () => {
