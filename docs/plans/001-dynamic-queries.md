@@ -391,6 +391,8 @@ Phase 2 (done)
 Phase 3a (done)  ←→  Phase 3b (done)   [parallel after Phase 2]
     ↓                         ↓
 Phase 4 (done)       [after 3a and 3b]
+    ↓
+Phase 5              [after 4.4a and 3a — preloadFor + component integration]
 ```
 
 ---
@@ -1232,6 +1234,223 @@ A new `query-builder.types.test.ts` must be added mirroring key patterns from `q
 - `npx tsc --noEmit` exits 0
 - `npm test` — all tests pass
 - `npm run build` (if available) — clean build with no errors
+
+---
+
+### Phase 5 — preloadFor + Component Query Integration
+
+**Status: Not started.**
+
+Integrate `preloadFor` with the new QueryBuilder/FieldSet system. Ensure `linkedComponent` (in `@_linked/react`) continues to work by accepting QueryBuilder-based component definitions alongside the legacy SelectQueryFactory pattern.
+
+**Depends on:** Phase 4.4a (QueryBuilder with result types), Phase 3a (FieldSet)
+
+#### Background
+
+The current `preloadFor` system works like this:
+
+1. `linkedComponent(query, ReactComponent)` creates a new React component with a `.query` property (a `SelectQueryFactory`)
+2. The component satisfies `QueryComponentLike<S, R> = { query: SelectQueryFactory | Record<string, SelectQueryFactory> }`
+3. In a parent query: `Person.select(p => p.bestFriend.preloadFor(ChildComponent))` creates a `BoundComponent`
+4. `BoundComponent.getPropertyPath()` extracts the child's `SelectQueryFactory`, calls `getQueryPaths()`, and merges the result paths into the parent query path
+5. The IR pipeline wraps the component's selections in an `OPTIONAL` block (so preloaded fields don't filter parent results)
+
+The current system is tightly coupled to `SelectQueryFactory`. This phase extends it to work with `QueryBuilder` and `FieldSet`.
+
+#### Architecture Decisions
+
+**1. `QueryComponentLike` accepts QueryBuilder and FieldSet**
+
+```ts
+export type QueryComponentLike<ShapeType extends Shape, CompQueryResult> = {
+  query:
+    | SelectQueryFactory<ShapeType, CompQueryResult>
+    | QueryBuilder<ShapeType>
+    | FieldSet
+    | Record<string, SelectQueryFactory<ShapeType, CompQueryResult> | QueryBuilder<ShapeType>>;
+};
+```
+
+This is backward-compatible — existing components with `{query: SelectQueryFactory}` still work.
+
+**2. `linkedComponent` exposes both `.query` and `.fields`**
+
+The `@_linked/react` `linkedComponent` wrapper should expose:
+- `.query` — a `QueryBuilder` (replaces the old `SelectQueryFactory` template)
+- `.fields` — a `FieldSet` derived from the query's selection
+
+This is a contract that `@_linked/react` implements. Core defines the interface.
+
+**3. `Shape.query()` returns QueryBuilder**
+
+After Phase 4.4b rewires `Shape.select()` to return `QueryBuilder`, `Shape.query()` should also return `QueryBuilder` (as a template, not executed). This makes `linkedComponent(Person.query(p => ({name: p.name})), Component)` produce a component with a `QueryBuilder` on `.query`.
+
+If `Shape.query()` is removed in Phase 4.4e, the equivalent is `QueryBuilder.from(Person).select(p => ({name: p.name}))` — `linkedComponent` simply accepts a `QueryBuilder` directly.
+
+**4. `preloadFor` on PropertyPath for QueryBuilder API**
+
+The proxy-based DSL (`p.bestFriend.preloadFor(comp)`) already works via `QueryBuilderObject.preloadFor()`. For the QueryBuilder/FieldSet API, preloading is expressed as a nested FieldSet input or a dedicated method:
+
+```ts
+// Option A: FieldSet nesting with component
+FieldSet.for(Person.shape, [
+  'name',
+  { bestFriend: PersonCardComponent.fields }
+])
+
+// Option B: QueryBuilder.preload() method
+QueryBuilder.from(Person)
+  .select(p => [p.name])
+  .preload('bestFriend', PersonCardComponent)
+
+// Option C: Both — FieldSet nesting for static, preload() for dynamic
+```
+
+Decision: Support **both Option A and B**. FieldSet nesting (`{ path: FieldSet }`) already works for sub-selections. Component preloading through QueryBuilder adds a `.preload()` convenience method.
+
+#### Tasks
+
+**5.1 — Extend `QueryComponentLike` type**
+
+**File:** `src/queries/SelectQuery.ts`
+
+Update the type to accept `QueryBuilder` and `FieldSet`:
+
+```ts
+export type QueryComponentLike<ShapeType extends Shape, CompQueryResult> = {
+  query:
+    | SelectQueryFactory<ShapeType, CompQueryResult>
+    | QueryBuilder<ShapeType>
+    | FieldSet
+    | Record<string, SelectQueryFactory<ShapeType, CompQueryResult> | QueryBuilder<ShapeType>>;
+  fields?: FieldSet;  // optional: component can also expose a FieldSet
+};
+```
+
+**5.2 — Update `BoundComponent.getParentQueryFactory()` to handle new types**
+
+**File:** `src/queries/SelectQuery.ts`
+
+Rename to `getComponentQueryPaths()` (more accurate since it now returns paths from multiple sources). Handle:
+- `SelectQueryFactory` → call `getQueryPaths()` (existing)
+- `QueryBuilder` → call `buildFactory().getQueryPaths()` or `toRawInput()` and extract select paths
+- `FieldSet` → convert to `QueryPath[]` via the existing FieldSet→QueryPath bridge (from Phase 3a.3)
+
+```ts
+getComponentQueryPaths(): SelectPath {
+  const query = this.originalValue.query;
+
+  // If component exposes a FieldSet, prefer it
+  if (this.originalValue.fields instanceof FieldSet) {
+    return fieldSetToQueryPaths(this.originalValue.fields);
+  }
+
+  if (query instanceof SelectQueryFactory) {
+    return query.getQueryPaths();
+  }
+  if (query instanceof QueryBuilder) {
+    return query.buildFactory().getQueryPaths();
+  }
+  if (query instanceof FieldSet) {
+    return fieldSetToQueryPaths(query);
+  }
+  // Record case
+  if (typeof query === 'object') {
+    // ... existing Record handling, extended for QueryBuilder values
+  }
+}
+```
+
+**5.3 — Add `.preload()` method to QueryBuilder**
+
+**File:** `src/queries/QueryBuilder.ts`
+
+Add a method that creates a preload relationship:
+
+```ts
+preload<CS extends Shape, CR>(
+  path: string,
+  component: QueryComponentLike<CS, CR>,
+): QueryBuilder<S, R, Result> {
+  // Resolve the path, create a BoundComponent-like structure
+  // that the FieldSet→QueryPath bridge can handle
+  // Store as additional preload entries in the builder state
+}
+```
+
+This stores preload bindings that get merged when `toRawInput()` is called.
+
+**5.4 — FieldSet nesting with component FieldSets**
+
+**File:** `src/queries/FieldSet.ts`
+
+FieldSet nesting already supports `{ friends: ['name', 'hobby'] }` and `{ friends: childFieldSet }`. Verify and test that this works correctly for component preloading:
+
+```ts
+const personCardFields = FieldSet.for(Person.shape, ['name', 'hobby']);
+const parentFields = FieldSet.for(Person.shape, [
+  'name',
+  { bestFriend: personCardFields }
+]);
+```
+
+The existing `resolveInputs()` handles `Record<string, FieldSet>` — this just needs validation that the resulting QueryPaths produce the correct OPTIONAL-wrapped SPARQL when going through the IR pipeline.
+
+**5.5 — Define `ComponentInterface` for `@_linked/react` contract**
+
+**File:** `src/queries/SelectQuery.ts` (or new file `src/queries/ComponentInterface.ts`)
+
+Define the interface that React components (from `@_linked/react`) must satisfy:
+
+```ts
+export interface LinkedComponentInterface<S extends Shape = Shape, R = any> {
+  /** The component's data query (QueryBuilder template, not executed) */
+  query: QueryBuilder<S, any, R> | SelectQueryFactory<S, R>;
+  /** The component's field requirements as a FieldSet */
+  fields?: FieldSet;
+}
+```
+
+This is what `linkedComponent()` in `@_linked/react` should produce. Export from `src/index.ts`.
+
+**5.6 — Keep `Shape.query()` alive (adjust Phase 4.4e)**
+
+**File:** `src/shapes/Shape.ts`
+
+Phase 4.4e planned to remove `Shape.query()`. Instead, rewire it to return `QueryBuilder`:
+
+```ts
+static query<S extends Shape, R = unknown>(
+  this: {new (...args: any[]): S; targetClass: any},
+  queryFn: QueryBuildFn<S, R>,
+): QueryBuilder<S, R> {
+  return QueryBuilder.from(this as any).select(queryFn);
+}
+```
+
+This preserves the `Person.query(p => ({name: p.name}))` pattern used by `linkedComponent`.
+
+#### Validation — `src/tests/preload-component.test.ts`
+
+**Backward compatibility tests:**
+- `preloadFor with SelectQueryFactory` — existing `preloadBestFriend` fixture produces same IR as before
+- `preloadFor SPARQL golden` — same SPARQL with OPTIONAL wrapper
+
+**New QueryBuilder-based tests:**
+- `preloadFor with QueryBuilder` — `Person.select(p => p.bestFriend.preloadFor({query: QueryBuilder.from(Person).select(p => ({name: p.name}))}))` produces equivalent IR
+- `preloadFor with FieldSet` — `Person.select(p => p.bestFriend.preloadFor({query: FieldSet.for(Person.shape, ['name'])}))` produces equivalent IR
+- `FieldSet nesting as preload` — `FieldSet.for(Person.shape, [{ bestFriend: FieldSet.for(Person.shape, ['name']) }])` through QueryBuilder produces correct IR with OPTIONAL
+
+**QueryBuilder.preload() tests:**
+- `QueryBuilder.preload()` — `QueryBuilder.from(Person).select(p => [p.name]).preload('bestFriend', {query: personCardQuery})` produces equivalent IR to DSL `preloadFor`
+
+**Shape.query() returns QueryBuilder:**
+- `Shape.query() returns QueryBuilder` — `Person.query(p => ({name: p.name}))` returns instance of QueryBuilder
+- `preloadFor with Shape.query() QueryBuilder` — works end-to-end
+
+**Validation commands:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
 
 ---
 
