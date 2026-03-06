@@ -45,16 +45,16 @@ One shared `ProxiedPathBuilder` proxy implementation. No separate codepaths.
 
 ### 4. Targeting: `.for()` / `.forAll()`
 
-- `.for(id)` — single ID
+- `.for(id)` — single ID (implies singleResult)
 - `.forAll(ids?)` — specific list or all instances (no args)
-- `.one(id)` — `.for(id)` + singleResult
 - **Update requires targeting** — `Person.update({...})` without `.for()`/`.forAll()` is a type error.
 - **Delete takes id directly** — `Person.delete(id)`, `Person.deleteAll(ids?)`.
+- All targeting methods accept `string | NodeReferenceValue` (i.e. an IRI string or `{id: string}`). Bulk variants (`.forAll()`, `.deleteAll()`) accept arrays of either form. This supports both raw IRIs and node references from query results.
 
 ### 5. FieldSet as the composable primitive
 
 FieldSet is a named, immutable, serializable collection of property paths rooted at a shape. It supports:
-- Construction: `FieldSet.for(shape, fields)`, `FieldSet.all(shape)`, callback form with proxy
+- Construction: `FieldSet.for(shape, fields)`, `FieldSet.for(shape).select(fields)`, `FieldSet.all(shape)`, callback form with proxy
 - Composition: `.add()`, `.remove()`, `.set()`, `.pick()`, `FieldSet.merge()`
 - Scoped filters: conditions that attach to a specific traversal
 - Serialization: `.toJSON()` / `FieldSet.fromJSON()`
@@ -72,7 +72,7 @@ QueryBuilder produces `RawSelectInput` — the same structure proxy tracing prod
 
 ```ts
 class PropertyPath {
-  readonly steps: PropertyShape[];
+  readonly segments: PropertyShape[];  // each segment is one property traversal hop
   readonly rootShape: NodeShape;
   readonly bindingName?: string;     // reserved for 008
 
@@ -111,9 +111,12 @@ class FieldSet {
 
   static for(shape: NodeShape | string, fields: FieldSetInput[]): FieldSet;
   static for(shape: NodeShape | string, fn: (p: ProxiedPathBuilder) => FieldSetInput[]): FieldSet;
+  static for(shape: NodeShape | string): FieldSetBuilder;  // chained: FieldSet.for(shape).select(fields)
   static all(shape: NodeShape | string, opts?: { depth?: number }): FieldSet;
   static merge(sets: FieldSet[]): FieldSet;
 
+  select(fields: FieldSetInput[]): FieldSet;
+  select(fn: (p: ProxiedPathBuilder) => FieldSetInput[]): FieldSet;
   add(fields: FieldSetInput[]): FieldSet;
   remove(fields: string[]): FieldSet;
   set(fields: FieldSetInput[]): FieldSet;
@@ -156,9 +159,8 @@ class QueryBuilder implements PromiseLike<ResultRow[]> {
   limit(n: number): QueryBuilder;
   offset(n: number): QueryBuilder;
 
-  for(id: string): QueryBuilder;
-  forAll(ids?: string[]): QueryBuilder;
-  one(id: string): QueryBuilder;
+  for(id: string | NodeReferenceValue): QueryBuilder;
+  forAll(ids?: (string | NodeReferenceValue)[]): QueryBuilder;
 
   fields(): FieldSet;
   build(): IRSelectQuery;
@@ -195,7 +197,7 @@ private toRawInput(): RawSelectInput {
 
 ### Modified files
 - `src/queries/SelectQuery.ts` (~72 KB, ~2100 lines) — Largest change. Contains `SelectQueryFactory`, `QueryShape`, `QueryShapeSet`, `QueryBuilderObject`, proxy handlers (lines ~1018, ~1286, ~1309). Refactor to delegate to QueryBuilder internally. `PatchedQueryPromise` replaced. Proxy creation extracted into shared `ProxiedPathBuilder`.
-- `src/queries/QueryFactory.ts` (~5.5 KB) — Abstract base `QueryFactory` class and type definitions for shape/node references. May need updates for new QueryBuilder base.
+- `src/queries/QueryFactory.ts` (~5.5 KB) — Currently contains an empty `abstract class QueryFactory` (extended by `SelectQueryFactory` and `MutationQueryFactory` as a marker) plus mutation-related type utilities (`UpdatePartial`, `SetModification`, `NodeReferenceValue`, etc.) imported by ~10 files. The empty abstract class should be removed (QueryBuilder replaces it). The types stay; file may be renamed to `MutationTypes.ts` later.
 - `src/queries/IRDesugar.ts` (~12 KB) — Owns `RawSelectInput` type definition (lines ~22-31). Type may need extension if QueryBuilder adds new fields. Also defines `DesugaredSelectQuery` and step types.
 - `src/queries/IRPipeline.ts` (~1 KB) — Orchestrates desugar → canonicalize → lower. May need minor adjustments if `buildSelectQuery` input types change.
 - `src/shapes/Shape.ts` — Update `Shape.select()` (line ~125), `Shape.query()` (line ~95), `Shape.selectAll()` (line ~211) to return QueryBuilder. Add `.for()`, `.forAll()`, `.delete()`, `.deleteAll()`, `.update()` with targeting requirement.
@@ -228,11 +230,9 @@ private toRawInput(): RawSelectInput {
 
 2. **ProxiedPathBuilder extraction** — The proxy is currently embedded in SelectQueryFactory. Extracting it into a shared module that both the DSL and QueryBuilder use requires understanding all proxy trap behaviors and edge cases (`.select()` for sub-selection, `.where()` for scoped filters, `.as()` for bindings, `.path()` escape hatch).
 
-3. **PromiseLike backward compatibility** — Existing code does `await Person.select(p => [...]).where(...)`. The `.where()` currently mutates the factory before `nextTick` fires. Switching to immutable builders that chain before `await` should be backward compatible (JS evaluates the full chain before calling `.then()`), but edge cases where users store intermediate references may break.
+3. **Scoped filter representation** — FieldSet entries can carry scoped filters. These must be correctly lowered into `IRTraversePattern.filter` fields. The existing proxy-based scoped `.where()` already does this — need to ensure the FieldSet path produces identical IR.
 
-4. **Scoped filter representation** — FieldSet entries can carry scoped filters. These must be correctly lowered into `IRTraversePattern.filter` fields. The existing proxy-based scoped `.where()` already does this — need to ensure the FieldSet path produces identical IR.
-
-5. **String path resolution** — `walkPropertyPath('friends.name')` must walk `NodeShape.getPropertyShape('friends')` → get valueShape → `getPropertyShape('name')`. Need to handle cases where property labels are ambiguous or the valueShape isn't a NodeShape.
+4. **String path resolution** — `walkPropertyPath('friends.name')` must walk `NodeShape.getPropertyShape('friends')` → get valueShape → `getPropertyShape('name')`. Need to handle cases where property labels are ambiguous or the valueShape isn't a NodeShape.
 
 ---
 
@@ -240,9 +240,9 @@ private toRawInput(): RawSelectInput {
 
 1. **Result typing** — Dynamic queries can't infer result types statically. Use generic `ResultRow` type for now, potentially add `QueryBuilder.from<T>(shape)` type parameter later.
 
-2. **Mutation builders** — Phase 6 in ideation. Not part of this plan's scope. The current plan covers select queries + DSL alignment only.
+2. **Mutation builders** — The codebase already has mutation support (`MutationQueryFactory` in `MutationQuery.ts`, `CreateQuery.ts`, `UpdateQuery.ts`, `DeleteQuery.ts`) that powers `Person.create({...})`, `Person.update(id, {...})`, `Person.delete(id)`. The ideation doc (003, phase 6) proposed wrapping these in fluent QueryBuilder-style chains with targeting (e.g. `Person.update({name: 'X'}).for(id)`, `Person.create({...}).exec()`). **Decision needed:** include mutation builder alignment in this plan, or defer to a separate ideation doc?
 
-3. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. OR support and conflict detection are deferred.
+3. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. OR support and conflict detection are deferred. **Note:** this needs resolution before this plan is considered complete — either handle it as a late addition or capture it in a follow-up ideation document.
 
 4. **Immutability implementation** — Shallow clone is sufficient for typical queries. Structural sharing deferred unless benchmarks show need.
 
