@@ -13,6 +13,7 @@ import {
 import {getQueryDispatch} from './queryDispatch.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import type {IRSelectQuery} from './IntermediateRepresentation.js';
+import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 
 /**
  * The canonical SelectQuery type — an IR AST node representing a select query.
@@ -1920,18 +1921,7 @@ export class SelectQueryFactory<
    * @private
    */
   private getQueryShape() {
-    let queryShape: QueryBuilderObject;
-    //if the given class already extends QueryValue
-    if (this.shape instanceof QueryBuilderObject) {
-      //then we're likely dealing with QueryPrimitives (end values like strings)
-      //and we can use the given query value directly for the query evaluation
-      queryShape = this.shape;
-    } else {
-      //else a shape class is given, and we need to create a dummy node to apply and trace the query
-      let dummyShape = new (this.shape as any)();
-      queryShape = QueryShape.create(dummyShape);
-    }
-    return queryShape;
+    return createProxiedPathBuilder(this.shape);
   }
 
   private getSortByPath() {
