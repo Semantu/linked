@@ -146,7 +146,6 @@ class FieldSet {
   static for(shape: NodeShape | string, fn: (p: ProxiedPathBuilder) => FieldSetInput[]): FieldSet;
   static for(shape: NodeShape | string): FieldSetBuilder;  // chained: FieldSet.for(shape).select(fields)
   static all(shape: NodeShape | string, opts?: { depth?: number }): FieldSet;
-  static summary(shape: NodeShape | string): FieldSet;  // properties with low order / summary group
   static merge(sets: FieldSet[]): FieldSet;
 
   select(fields: FieldSetInput[]): FieldSet;
@@ -371,13 +370,81 @@ Shape and property identifiers use prefixed IRIs (resolved through existing pref
 
 ---
 
+## Implementation Phases
+
+Top-down approach: tackle the riskiest refactor first (ProxiedPathBuilder extraction from the 72KB SelectQuery.ts), then build new APIs on the clean foundation. Existing golden tests (IR + SPARQL) act as the safety net throughout.
+
+### Phase 1 — ProxiedPathBuilder extraction + DSL rewire
+
+Extract the proxy machinery from `SelectQuery.ts` into a standalone `ProxiedPathBuilder`. Rewire the existing DSL (`Person.select(...)`) to use it. All existing golden tests must pass — they validate correctness during this refactor.
+
+**Delivers:**
+- `src/queries/ProxiedPathBuilder.ts` — shared proxy, extracted from SelectQuery.ts
+- `src/queries/PropertyPath.ts` — PropertyPath value object (needed by ProxiedPathBuilder)
+- `src/queries/WhereCondition.ts` — WhereCondition type (needed by PropertyPath comparisons)
+- Modified `SelectQuery.ts` — delegates to ProxiedPathBuilder instead of inline proxy logic
+- All existing tests pass (ir-select-golden, sparql-select-golden, query.types)
+
+**Exit criteria:** `npm test` green, no behavioral changes.
+
+### Phase 2 — QueryBuilder (select queries)
+
+Build `QueryBuilder` on top of the extracted `ProxiedPathBuilder`. DSL becomes a thin wrapper — `Person.select()` returns a `QueryBuilder`. Introduce `walkPropertyPath` for string-based field resolution.
+
+**Delivers:**
+- `src/queries/QueryBuilder.ts` — immutable, fluent, PromiseLike
+- `src/queries/PropertyPath.ts` — add `walkPropertyPath` utility
+- Modified `Shape.ts` — `.select()`, `.selectAll()`, `.query()` return QueryBuilder
+- `src/tests/query-builder.test.ts` — chain, immutability, IR output equivalence with DSL
+- Shape resolution by prefixed IRI string (`QueryBuilder.from('my:PersonShape')`)
+- `PatchedQueryPromise` / `nextTick` removed
+
+**Exit criteria:** `QueryBuilder.from(Shape).select(...)` and `Shape.select(...)` produce identical IR. All existing + new tests pass.
+
+### Phase 3 — FieldSet
+
+Build `FieldSet` as a composable, serializable collection of property paths. Integrate with QueryBuilder (`.select(fieldSet)`, `.setFields()`, `.addFields()`, `.removeFields()`).
+
+**Delivers:**
+- `src/queries/FieldSet.ts` — construction, composition (`.add()`, `.remove()`, `.set()`, `.pick()`, `FieldSet.merge()`), nesting, `FieldSet.all()`, scoped filters
+- `src/tests/field-set.test.ts` — composition, merging, scoped filters, serialization
+- QueryBuilder integration (accepts FieldSet in `.select()` and field mutation methods)
+
+**Exit criteria:** FieldSet composes correctly, serializes/deserializes, and integrates with QueryBuilder.
+
+### Phase 4 — Mutation builders
+
+Replace mutable `CreateQueryFactory` / `UpdateQueryFactory` / `DeleteQueryFactory` with immutable builders following the same pattern as QueryBuilder.
+
+**Delivers:**
+- `src/queries/CreateBuilder.ts` — immutable, PromiseLike
+- `src/queries/UpdateBuilder.ts` — immutable, PromiseLike, `.for()`/`.forAll()` required
+- `src/queries/DeleteBuilder.ts` — immutable, PromiseLike
+- Modified `Shape.ts` — `.create()`, `.update()`, `.delete()`, `.deleteAll()` return builders
+- `src/tests/mutation-builder.test.ts`
+
+**Exit criteria:** All mutation operations work through builders. Old factory classes removed or reduced to internal helpers.
+
+### Phase 5 — Serialization
+
+Add `toJSON()` / `fromJSON()` to QueryBuilder and FieldSet for CMS-style persistence and transport.
+
+**Delivers:**
+- QueryBuilder serialization (`toJSON()` / `QueryBuilder.fromJSON()`)
+- FieldSet serialization (`toJSON()` / `FieldSet.fromJSON()`)
+- Updated `src/index.ts` — full public API exports
+
+**Exit criteria:** Round-trip serialization produces identical IR. All tests pass.
+
+---
+
 ## Scope boundaries
 
 **In scope (this plan):**
 - PropertyPath (value object, segments, comparison helpers with `sh:datatype` validation)
 - walkPropertyPath (string path → PropertyPath resolution)
 - ProxiedPathBuilder extraction (shared proxy between DSL and dynamic builders, `.path()` escape hatch)
-- FieldSet (construction, composition, scoped filters, nesting, serialization, `FieldSet.all()`, `FieldSet.summary()`)
+- FieldSet (construction, composition, scoped filters, nesting, serialization, `FieldSet.all()`)
 - QueryBuilder (fluent chain, immutable, PromiseLike, toRawInput bridge, serialization)
 - Mutation builders: CreateBuilder, UpdateBuilder, DeleteBuilder (immutable, PromiseLike, reuse existing IR pipeline)
 - DSL alignment (Person.select/create/update/delete → returns builders, .for()/.forAll() pattern)
@@ -386,6 +453,7 @@ Shape and property identifiers use prefixed IRIs (resolved through existing pref
 - Tests verifying DSL and builders produce identical IR
 
 **Out of scope (separate plans, already have ideation docs):**
+- `FieldSet.summary()` — CMS-layer concern, not core
 - Shared variable bindings / `.as()` activation → 008
 - Shape remapping / ShapeAdapter → 009
 - Computed expressions / L module → 006
