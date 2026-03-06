@@ -360,7 +360,7 @@ Shape and property identifiers use prefixed IRIs (resolved through existing pref
 
 ## Open Questions (remaining from ideation)
 
-1. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. OR support and conflict detection are deferred. **Note:** this needs resolution before this plan is considered complete — either handle it as a late addition or capture it in a follow-up ideation document.
+1. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. If merging detects potential conflicts (e.g. same property with contradictory equality filters), log a warning. OR support and more sophisticated conflict resolution are deferred to when this actually comes up in practice.
 
 2. **Immutability implementation** — Shallow clone is sufficient for typical queries. Structural sharing deferred unless benchmarks show need.
 
