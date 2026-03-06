@@ -11,6 +11,7 @@ import type {RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
 import type {NodeReferenceValue} from './QueryFactory.js';
+import {FieldSet} from './FieldSet.js';
 
 /** Internal state bag for QueryBuilder. */
 interface QueryBuilderInit<S extends Shape, R> {
@@ -24,6 +25,7 @@ interface QueryBuilderInit<S extends Shape, R> {
   subject?: S | QResult<S> | NodeReferenceValue;
   singleResult?: boolean;
   selectAllLabels?: string[];
+  fieldSet?: FieldSet;
 }
 
 /**
@@ -56,6 +58,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any>
   private readonly _subject?: S | QResult<S> | NodeReferenceValue;
   private readonly _singleResult?: boolean;
   private readonly _selectAllLabels?: string[];
+  private readonly _fieldSet?: FieldSet;
 
   private constructor(init: QueryBuilderInit<S, R>) {
     this._shape = init.shape;
@@ -68,6 +71,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any>
     this._subject = init.subject;
     this._singleResult = init.singleResult;
     this._selectAllLabels = init.selectAllLabels;
+    this._fieldSet = init.fieldSet;
   }
 
   /** Create a shallow clone with overrides. */
@@ -83,6 +87,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any>
       subject: this._subject,
       singleResult: this._singleResult,
       selectAllLabels: this._selectAllLabels,
+      fieldSet: this._fieldSet,
       ...overrides,
     });
   }
@@ -121,17 +126,24 @@ export class QueryBuilder<S extends Shape = Shape, R = any>
   // Fluent API — each returns a new instance
   // ---------------------------------------------------------------------------
 
-  /** Set the select projection via a callback or labels. */
+  /** Set the select projection via a callback, labels, or FieldSet. */
   select<NewR = R>(fn: QueryBuildFn<S, NewR>): QueryBuilder<S, NewR>;
   select(labels: string[]): QueryBuilder<S>;
-  select<NewR = R>(fnOrLabels: QueryBuildFn<S, NewR> | string[]): QueryBuilder<S, NewR> {
-    if (Array.isArray(fnOrLabels)) {
-      const labels = fnOrLabels;
+  select(fieldSet: FieldSet): QueryBuilder<S>;
+  select<NewR = R>(fnOrLabelsOrFieldSet: QueryBuildFn<S, NewR> | string[] | FieldSet): QueryBuilder<S, NewR> {
+    if (fnOrLabelsOrFieldSet instanceof FieldSet) {
+      const labels = fnOrLabelsOrFieldSet.labels();
       const selectFn = ((p: any) =>
         labels.map((label) => p[label])) as unknown as QueryBuildFn<S, any>;
-      return this.clone({selectFn, selectAllLabels: undefined}) as QueryBuilder<S, NewR>;
+      return this.clone({selectFn, selectAllLabels: undefined, fieldSet: fnOrLabelsOrFieldSet}) as QueryBuilder<S, NewR>;
     }
-    return this.clone({selectFn: fnOrLabels as any, selectAllLabels: undefined}) as QueryBuilder<S, NewR>;
+    if (Array.isArray(fnOrLabelsOrFieldSet)) {
+      const labels = fnOrLabelsOrFieldSet;
+      const selectFn = ((p: any) =>
+        labels.map((label) => p[label])) as unknown as QueryBuildFn<S, any>;
+      return this.clone({selectFn, selectAllLabels: undefined, fieldSet: undefined}) as QueryBuilder<S, NewR>;
+    }
+    return this.clone({selectFn: fnOrLabelsOrFieldSet as any, selectAllLabels: undefined, fieldSet: undefined}) as QueryBuilder<S, NewR>;
   }
 
   /** Select all decorated properties of the shape. */
@@ -190,6 +202,21 @@ export class QueryBuilder<S extends Shape = Shape, R = any>
   /** Limit to one result. */
   one(): QueryBuilder<S, R> {
     return this.clone({limit: 1, singleResult: true});
+  }
+
+  /**
+   * Returns the current selection as a FieldSet.
+   * If the selection was set via a FieldSet, returns that directly.
+   * If set via selectAll labels, constructs a FieldSet from them.
+   */
+  fields(): FieldSet | undefined {
+    if (this._fieldSet) {
+      return this._fieldSet;
+    }
+    if (this._selectAllLabels) {
+      return FieldSet.for((this._shape as any).shape, this._selectAllLabels);
+    }
+    return undefined;
   }
 
   // ---------------------------------------------------------------------------

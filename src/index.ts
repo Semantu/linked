@@ -40,6 +40,10 @@ import * as Sparql from './sparql/index.js';
 import * as QueryBuilderModule from './queries/QueryBuilder.js';
 import * as PropertyPathModule from './queries/PropertyPath.js';
 import * as WhereConditionModule from './queries/WhereCondition.js';
+import * as FieldSetModule from './queries/FieldSet.js';
+import * as CreateBuilderModule from './queries/CreateBuilder.js';
+import * as UpdateBuilderModule from './queries/UpdateBuilder.js';
+import * as DeleteBuilderModule from './queries/DeleteBuilder.js';
 import nextTick from 'next-tick';
 export {nextTick};
 
@@ -47,6 +51,15 @@ export {nextTick};
 export {QueryBuilder} from './queries/QueryBuilder.js';
 export {PropertyPath, walkPropertyPath} from './queries/PropertyPath.js';
 export type {WhereCondition, WhereOperator} from './queries/WhereCondition.js';
+
+// Phase 3a — FieldSet
+export {FieldSet} from './queries/FieldSet.js';
+export type {FieldSetEntry, FieldSetInput} from './queries/FieldSet.js';
+
+// Phase 3b — Mutation builders
+export {CreateBuilder} from './queries/CreateBuilder.js';
+export {UpdateBuilder} from './queries/UpdateBuilder.js';
+export {DeleteBuilder} from './queries/DeleteBuilder.js';
 
 export function initModularApp() {
   let publicFiles = {
@@ -87,6 +100,10 @@ export function initModularApp() {
     QueryBuilderModule,
     PropertyPathModule,
     WhereConditionModule,
+    FieldSetModule,
+    CreateBuilderModule,
+    UpdateBuilderModule,
+    DeleteBuilderModule,
   };
   var lincdExport = {};
   for (let fileKey in publicFiles) {
