@@ -209,10 +209,15 @@ Person.update(p1, p => ({
 ```
 
 ```ts
-// Apply 10% discount to products over $100 (uses updateWhere from idea 007)
-Product.updateWhere(p => ({
+// Apply 10% discount to products over $100 (uses bulk update from idea 007)
+Product.update(p => ({
   price: p.price.times(0.9),
-}), p => p.price.gt(100))
+})).where(p => p.price.gt(100))
+
+// or filter-first:
+Product.where(p => p.price.gt(100)).update(p => ({
+  price: p.price.times(0.9),
+}))
 
 // Generated SPARQL:
 // DELETE { ?s ex:price ?old_price . }
