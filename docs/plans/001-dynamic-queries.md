@@ -374,67 +374,318 @@ Shape and property identifiers use prefixed IRIs (resolved through existing pref
 
 Top-down approach: tackle the riskiest refactor first (ProxiedPathBuilder extraction from the 72KB SelectQuery.ts), then build new APIs on the clean foundation. Existing golden tests (IR + SPARQL) act as the safety net throughout.
 
-### Phase 1 — ProxiedPathBuilder extraction + DSL rewire
+### Dependency graph
 
-Extract the proxy machinery from `SelectQuery.ts` into a standalone `ProxiedPathBuilder`. Rewire the existing DSL (`Person.select(...)`) to use it. All existing golden tests must pass — they validate correctness during this refactor.
+```
+Phase 1 (done)
+    ↓
+Phase 2 (QueryBuilder)
+    ↓
+Phase 3a (FieldSet)  ←→  Phase 3b (Mutation builders)   [parallel after Phase 2]
+    ↓                         ↓
+Phase 4 (Serialization + integration)                    [after 3a and 3b]
+```
 
-**Delivers:**
-- `src/queries/ProxiedPathBuilder.ts` — shared proxy, extracted from SelectQuery.ts
-- `src/queries/PropertyPath.ts` — PropertyPath value object (needed by ProxiedPathBuilder)
-- `src/queries/WhereCondition.ts` — WhereCondition type (needed by PropertyPath comparisons)
-- Modified `SelectQuery.ts` — delegates to ProxiedPathBuilder instead of inline proxy logic
-- All existing tests pass (ir-select-golden, sparql-select-golden, query.types)
+---
 
-**Exit criteria:** `npm test` green, no behavioral changes.
+### Phase 1 — ProxiedPathBuilder extraction + DSL rewire ✅
+
+**Status: Complete.**
+
+Extracted `createProxiedPathBuilder()` from `SelectQueryFactory.getQueryShape()` into `src/queries/ProxiedPathBuilder.ts`. Created `PropertyPath` value object and `WhereCondition` type as foundations. All 477 tests pass, zero behavioral changes.
+
+**Files delivered:**
+- `src/queries/ProxiedPathBuilder.ts` — `createProxiedPathBuilder()` function
+- `src/queries/PropertyPath.ts` — PropertyPath value object (rootShape, segments, prop, equals, toString)
+- `src/queries/WhereCondition.ts` — WhereCondition type and WhereOperator
+- Modified `src/queries/SelectQuery.ts` — `getQueryShape()` delegates to `createProxiedPathBuilder()`
+
+---
 
 ### Phase 2 — QueryBuilder (select queries)
 
-Build `QueryBuilder` on top of the extracted `ProxiedPathBuilder`. DSL becomes a thin wrapper — `Person.select()` returns a `QueryBuilder`. Introduce `walkPropertyPath` for string-based field resolution.
+Build `QueryBuilder` on top of `ProxiedPathBuilder`. The DSL becomes a thin wrapper — `Person.select()` returns a `QueryBuilder`. Remove `nextTick`/`PatchedQueryPromise`.
 
-**Delivers:**
-- `src/queries/QueryBuilder.ts` — immutable, fluent, PromiseLike
-- `src/queries/PropertyPath.ts` — add `walkPropertyPath` utility
-- Modified `Shape.ts` — `.select()`, `.selectAll()`, `.query()` return QueryBuilder
-- `src/tests/query-builder.test.ts` — chain, immutability, IR output equivalence with DSL
-- Shape resolution by prefixed IRI string (`QueryBuilder.from('my:PersonShape')`)
-- `PatchedQueryPromise` / `nextTick` removed
+#### Tasks
 
-**Exit criteria:** `QueryBuilder.from(Shape).select(...)` and `Shape.select(...)` produce identical IR. All existing + new tests pass.
+**2.1 — Add `walkPropertyPath` to PropertyPath.ts**
+- Implement `walkPropertyPath(shape: NodeShape, path: string): PropertyPath`
+- Resolve dot-separated labels: `'friends.name'` → walk `NodeShape.getPropertyShapes(true)` by label → follow `PropertyShape.valueShape` → `getShapeClass(valueShape).shape.getPropertyShapes(true)` → match next label
+- Throw on invalid segments, missing valueShape, or non-NodeShape intermediates
 
-### Phase 3 — FieldSet
+**2.2 — Create `QueryBuilder.ts`**
+- Immutable class: every method (`.select()`, `.where()`, `.limit()`, `.offset()`, `.orderBy()`, `.for()`, `.forAll()`) returns a new shallow-cloned instance
+- `static from(shape: NodeShape | ShapeType | string): QueryBuilder` — accepts NodeShape, shape class, or prefixed IRI string (resolved via `getShapeClass()`)
+- `.select(fn)` — accepts callback `(p) => [...]` using `createProxiedPathBuilder()`, stores trace response
+- `.select(fields)` — accepts `string[]` (resolved via `walkPropertyPath`)
+- `.where(fn)` — accepts callback producing `Evaluation` (reuses existing `processWhereClause` / `LinkedWhereQuery`)
+- `.for(id)` — sets subject + singleResult, accepts `string | NodeReferenceValue`
+- `.forAll(ids?)` — sets subject for multiple or all, accepts `(string | NodeReferenceValue)[]`
+- `.orderBy(fn, direction?)` — stores sort trace
+- `.limit(n)`, `.offset(n)` — store pagination
+- `.build(): IRSelectQuery` — calls `toRawInput()` → `buildSelectQuery()`
+- `.exec(): Promise<ResultRow[]>` — calls `getQueryDispatch().selectQuery(this.build())`
+- `implements PromiseLike` — `.then()` delegates to `.exec()`
+- Private `toRawInput(): RawSelectInput` — converts internal state to the same `RawSelectInput` that `SelectQueryFactory.toRawInput()` produces (same shape: `{ select, subject, limit, offset, shape, sortBy, singleResult, where }`)
 
-Build `FieldSet` as a composable, serializable collection of property paths. Integrate with QueryBuilder (`.select(fieldSet)`, `.setFields()`, `.addFields()`, `.removeFields()`).
+**2.3 — Rewire `Shape.select()`, `.selectAll()`, `.query()` in Shape.ts**
+- `Shape.select(fn)` and `Shape.select(subject, fn)` return `QueryBuilder` instead of patched Promise
+- `Shape.selectAll()` returns `QueryBuilder` using `FieldSet.all()` (or interim: build labels from `getUniquePropertyShapes`)
+- `Shape.query(fn)` returns `QueryBuilder` (template, not executed)
+- Remove `nextTick` import and the `new Promise` + `nextTick` wrapping in `Shape.select()`
+- Remove `PatchedQueryPromise` usage — QueryBuilder's immutable `.where()`, `.limit()`, `.sortBy()`, `.one()` replace it
+- Keep backward compatibility: chaining `.where().limit().sortBy()` on the result of `Shape.select()` must still work (QueryBuilder supports all these)
 
-**Delivers:**
-- `src/queries/FieldSet.ts` — construction, composition (`.add()`, `.remove()`, `.set()`, `.pick()`, `FieldSet.merge()`), nesting, `FieldSet.all()`, scoped filters
-- `src/tests/field-set.test.ts` — composition, merging, scoped filters, serialization
-- QueryBuilder integration (accepts FieldSet in `.select()` and field mutation methods)
+**2.4 — Deprecate `SelectQueryFactory` public surface**
+- `SelectQueryFactory` stays as an internal class (still used by `QueryShape.select()`, `QueryShapeSet.select()` for sub-queries)
+- Remove `patchResultPromise()` method
+- Remove `onQueriesReady` / DOMContentLoaded logic (was for browser bundle lazy init — QueryBuilder's PromiseLike model doesn't need it)
+- Mark `SelectQueryFactory` as `@internal` — not part of public API
 
-**Exit criteria:** FieldSet composes correctly, serializes/deserializes, and integrates with QueryBuilder.
+**2.5 — Update `src/index.ts` exports**
+- Export `QueryBuilder` from `src/queries/QueryBuilder.ts`
+- Export `PropertyPath` and `walkPropertyPath` from `src/queries/PropertyPath.ts`
+- Keep existing exports for backward compatibility during transition
 
-### Phase 4 — Mutation builders
+#### Validation — `src/tests/query-builder.test.ts`
 
-Replace mutable `CreateQueryFactory` / `UpdateQueryFactory` / `DeleteQueryFactory` with immutable builders following the same pattern as QueryBuilder.
+**Immutability tests:**
+- `immutability — .where() returns new instance`: Create builder, call `.where()`, assert original and result are different objects, assert original has no where clause
+- `immutability — .limit() returns new instance`: Same pattern for `.limit(10)`
+- `immutability — .select() returns new instance`: Same pattern for `.select(fn)`
+- `immutability — chaining preserves prior state`: `b1 = from(Person)`, `b2 = b1.limit(5)`, `b3 = b1.limit(10)`, assert b2 and b3 have different limits, b1 has no limit
 
-**Delivers:**
-- `src/queries/CreateBuilder.ts` — immutable, PromiseLike
-- `src/queries/UpdateBuilder.ts` — immutable, PromiseLike, `.for()`/`.forAll()` required
-- `src/queries/DeleteBuilder.ts` — immutable, PromiseLike
-- Modified `Shape.ts` — `.create()`, `.update()`, `.delete()`, `.deleteAll()` return builders
-- `src/tests/mutation-builder.test.ts`
+**IR equivalence tests (must produce identical IR as existing DSL):**
+Use `buildSelectQuery()` on both `SelectQueryFactory.toRawInput()` and `QueryBuilder.toRawInput()` for each fixture, assert deep equality on the resulting `IRSelectQuery`.
+- `selectName` — `QueryBuilder.from(Person).select(p => p.name)` vs `Person.select(p => p.name)` golden IR
+- `selectMultiplePaths` — `QueryBuilder.from(Person).select(p => [p.name, p.friends, p.bestFriend.name])`
+- `selectFriendsName` — `QueryBuilder.from(Person).select(p => p.friends.name)`
+- `selectDeepNested` — `QueryBuilder.from(Person).select(p => p.friends.bestFriend.bestFriend.name)`
+- `whereFriendsNameEquals` — `.select(p => p.friends.where(f => f.name.equals('Moa')))`
+- `whereAnd` — `.select(p => p.friends.where(f => f.name.equals('Moa').and(f.hobby.equals('Jogging'))))`
+- `selectById` — `.select(p => p.name).for(entity('p1'))`
+- `outerWhereLimit` — `.select(p => p.name).where(p => p.name.equals('Semmy').or(p.name.equals('Moa'))).limit(1)`
+- `sortByAsc` — `.select(p => p.name).orderBy(p => p.name)`
+- `countFriends` — `.select(p => p.friends.size())`
+- `subSelectPluralCustom` — `.select(p => p.friends.select(f => ({name: f.name, hobby: f.hobby})))`
+- `selectAllProperties` — `QueryBuilder.from(Person).selectAll()` vs `Person.selectAll()`
 
-**Exit criteria:** All mutation operations work through builders. Old factory classes removed or reduced to internal helpers.
+**String path resolution tests:**
+- `walkPropertyPath — single segment`: `walkPropertyPath(Person.shape, 'name')` — assert segments length 1, terminal label `'name'`
+- `walkPropertyPath — nested segments`: `walkPropertyPath(Person.shape, 'friends.name')` — assert segments length 2
+- `walkPropertyPath — invalid segment throws`: `walkPropertyPath(Person.shape, 'nonexistent')` — assert throws
 
-### Phase 5 — Serialization
+**Shape resolution test:**
+- `from() with string`: `QueryBuilder.from(Person.shape.id)` — assert build does not throw and produces valid IR
 
-Add `toJSON()` / `fromJSON()` to QueryBuilder and FieldSet for CMS-style persistence and transport.
+**PromiseLike test:**
+- `then() triggers execution`: assert `QueryBuilder.from(Person).select(p => p.name)` is thenable (has `.then` method)
 
-**Delivers:**
-- QueryBuilder serialization (`toJSON()` / `QueryBuilder.fromJSON()`)
-- FieldSet serialization (`toJSON()` / `FieldSet.fromJSON()`)
-- Updated `src/index.ts` — full public API exports
+**Existing test regression:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all existing 477+ tests pass
 
-**Exit criteria:** Round-trip serialization produces identical IR. All tests pass.
+---
+
+### Phase 3a — FieldSet
+
+Build `FieldSet` as an immutable, composable collection of property paths. Integrate with QueryBuilder.
+
+**Depends on:** Phase 2 (QueryBuilder, PropertyPath with walkPropertyPath)
+
+#### Tasks
+
+**3a.1 — Create `FieldSet.ts`**
+- `FieldSet` class with `readonly shape: NodeShape`, `readonly entries: FieldSetEntry[]`
+- `FieldSetEntry = { path: PropertyPath, alias?: string, scopedFilter?: WhereCondition }`
+- `static for(shape, fields)` — accepts `NodeShape | string`, resolves string via `getShapeClass()`; fields can be string[] (resolved via `walkPropertyPath`), PropertyPath[], or callback `(p) => [...]`
+- `static all(shape, opts?)` — enumerate all `getUniquePropertyShapes()`, optionally recurse to `depth`
+- `static merge(sets)` — union entries, deduplicate by path equality, AND merge scoped filters on same path
+- `.select(fields)` — returns new FieldSet with only the given fields
+- `.add(fields)` — returns new FieldSet with additional entries
+- `.remove(labels)` — returns new FieldSet without entries matching labels
+- `.set(fields)` — returns new FieldSet replacing all entries
+- `.pick(labels)` — returns new FieldSet keeping only entries matching labels
+- `.paths()` — returns `PropertyPath[]`
+- `.labels()` — returns `string[]` (terminal property labels)
+- Nesting support: `{ friends: ['name', 'hobby'] }` and `{ friends: existingFieldSet }`
+
+**3a.2 — Integrate FieldSet with QueryBuilder**
+- `QueryBuilder.select(fieldSet: FieldSet)` — converts FieldSet entries to the same trace structure used by proxy callbacks
+- `.setFields(fieldSet)`, `.addFields(fieldSet)`, `.removeFields(labels)` — delegate to FieldSet composition methods internally
+- `.fields(): FieldSet` — returns the current selection as a FieldSet
+
+**3a.3 — FieldSet to QueryPath bridge**
+- Private utility that converts `FieldSetEntry[]` → `QueryPath[]` (the format `RawSelectInput.select` expects)
+- Each `PropertyPath` segment becomes a `PropertyQueryStep` with `{ property, where? }`
+- Nested entries become `SubQueryPaths`
+- Scoped filters become `WherePath` on the relevant step
+
+#### Validation — `src/tests/field-set.test.ts`
+
+**Construction tests:**
+- `FieldSet.for — string fields`: `FieldSet.for(Person.shape, ['name', 'hobby'])` — assert entries length 2, first entry path terminal label is `'name'`
+- `FieldSet.for — callback`: `FieldSet.for(Person.shape, p => [p.name, p.hobby])` — assert same entries as string form
+- `FieldSet.for — string shape resolution`: `FieldSet.for(Person.shape.id, ['name'])` — assert resolves correctly
+- `FieldSet.all — depth 1`: `FieldSet.all(Person.shape)` — assert entries include all of Person's unique property shapes (name, hobby, nickNames, birthDate, isRealPerson, bestFriend, friends, pets, firstPet, pluralTestProp)
+- `FieldSet.all — depth 0`: `FieldSet.all(Person.shape, { depth: 0 })` — assert same as depth 1 (no recursion into object properties)
+
+**Composition tests:**
+- `add — appends entries`: start with `['name']`, `.add(['hobby'])`, assert 2 entries
+- `remove — removes by label`: start with `['name', 'hobby']`, `.remove(['hobby'])`, assert 1 entry with label `'name'`
+- `set — replaces all`: start with `['name', 'hobby']`, `.set(['friends'])`, assert 1 entry with label `'friends'`
+- `pick — keeps only listed`: start with `['name', 'hobby', 'friends']`, `.pick(['name', 'friends'])`, assert 2 entries
+- `merge — union of entries`: merge two FieldSets `['name']` and `['hobby']`, assert 2 entries
+- `merge — deduplicates`: merge `['name']` and `['name', 'hobby']`, assert 2 entries (not 3)
+- `immutability`: original FieldSet unchanged after `.add()` call
+
+**Nesting tests:**
+- `nested — object form`: `FieldSet.for(Person.shape, [{ friends: ['name', 'hobby'] }])` — assert produces entries with 2-segment paths (friends.name, friends.hobby)
+
+**QueryBuilder integration tests:**
+- `QueryBuilder.select(fieldSet)` — build IR from FieldSet and from equivalent callback, assert identical IR
+- `QueryBuilder.fields()` — assert returns a FieldSet with expected entries
+
+**Validation commands:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+
+---
+
+### Phase 3b — Mutation builders
+
+Replace `CreateQueryFactory` / `UpdateQueryFactory` / `DeleteQueryFactory` with immutable PromiseLike builders.
+
+**Depends on:** Phase 2 (PromiseLike pattern, `createProxiedPathBuilder`)
+**Independent of:** Phase 3a (FieldSet)
+
+#### Tasks
+
+**3b.1 — Extract mutation input conversion as standalone functions**
+- Extract `MutationQueryFactory.convertUpdateObject()`, `convertNodeReferences()`, `convertNodeDescription()`, `convertUpdateValue()`, `convertSetModification()`, `isNodeReference()`, `isSetModification()` from `MutationQuery.ts` as standalone functions (not methods on a class)
+- These functions take `(obj, shape, ...)` and return the same `NodeDescriptionValue` / `NodeReferenceValue[]` as before
+- `MutationQueryFactory` can be retained as a thin wrapper calling these functions, or removed if nothing depends on it
+- **Stub for parallel execution:** If 3b starts before Phase 2 is fully merged, the PromiseLike pattern can be implemented standalone using `getQueryDispatch()` directly, without depending on QueryBuilder
+
+**3b.2 — Create `CreateBuilder.ts`**
+- Immutable: `.set(data)` returns new instance, `.withId(id)` returns new instance
+- `static from(shape)` — accepts `NodeShape | ShapeType | string`
+- `.set(data)` — accepts `UpdatePartial<S>`, stores internally
+- `.withId(id)` — pre-assigns node id
+- `.build(): IRCreateMutation` — calls extracted `convertUpdateObject()` → `buildCanonicalCreateMutationIR()`
+- `.exec()` — calls `getQueryDispatch().createQuery(this.build())`
+- `implements PromiseLike` via `.then()`
+
+**3b.3 — Create `UpdateBuilder.ts`**
+- Immutable: `.set(data)`, `.for(id)`, `.forAll(ids)` return new instances
+- `.for(id)` required before `.build()` / `.exec()` — throw if not set
+- `.build(): IRUpdateMutation` — calls `convertUpdateObject()` → `buildCanonicalUpdateMutationIR()`
+- Type-level enforcement: `.exec()` / `.then()` on an UpdateBuilder without `.for()` is a compile error (use branded type or overloads)
+
+**3b.4 — Create `DeleteBuilder.ts`**
+- `static from(shape, ids)` — accepts single or array of `string | NodeReferenceValue`
+- `.build(): IRDeleteMutation` — calls `convertNodeReferences()` → `buildCanonicalDeleteMutationIR()`
+- Immutable, PromiseLike
+
+**3b.5 — Rewire `Shape.create()`, `.update()`, `.delete()` in Shape.ts**
+- `Shape.create(data)` → returns `CreateBuilder`
+- `Shape.update(id, data)` → returns `UpdateBuilder` with `.for(id)` pre-set
+- `Shape.delete(ids)` → returns `DeleteBuilder`
+- Remove direct `getQueryDispatch().createQuery()` / `.updateQuery()` / `.deleteQuery()` calls from Shape.ts — builders handle execution
+
+**3b.6 — Deprecate old factory classes**
+- Mark `CreateQueryFactory`, `UpdateQueryFactory`, `DeleteQueryFactory` as `@internal` or remove entirely
+- `MutationQueryFactory` class removed; conversion functions are standalone
+
+#### Validation — `src/tests/mutation-builder.test.ts`
+
+**IR equivalence tests (must produce identical IR as existing factories):**
+
+Capture IR from both old factory path and new builder path, assert deep equality:
+- `create — simple`: `CreateBuilder.from(Person).set({name: 'Test', hobby: 'Chess'}).build()` — assert matches `createSimple` fixture IR
+- `create — with friends`: `CreateBuilder.from(Person).set({name: 'Test', friends: [entity('p2'), {name: 'New Friend'}]}).build()` — assert matches `createWithFriends` fixture IR
+- `create — with fixed id`: `CreateBuilder.from(Person).set({name: 'Fixed'}).withId(tmpEntityBase + 'fixed-id').build()` — assert `data.id` equals the fixed id
+- `update — simple`: `UpdateBuilder.from(Person).for(entity('p1')).set({hobby: 'Chess'}).build()` — assert matches `updateSimple` fixture IR
+- `update — add/remove multi`: `UpdateBuilder.from(Person).for(entity('p1')).set({friends: {add: [...], remove: [...]}}).build()` — assert matches fixture
+- `update — nested with predefined id`: assert matches `updateNestedWithPredefinedId` fixture
+- `delete — single`: `DeleteBuilder.from(Person, entity('to-delete')).build()` — assert matches `deleteSingle` fixture IR
+- `delete — multiple`: `DeleteBuilder.from(Person, [entity('to-delete-1'), entity('to-delete-2')]).build()` — assert matches `deleteMultiple` fixture IR
+
+**Immutability tests:**
+- `CreateBuilder — .set() returns new instance`: assert original and result are different objects
+- `UpdateBuilder — .for() returns new instance`: assert original and result are different objects
+
+**Guard tests:**
+- `UpdateBuilder — .build() without .for() throws`: assert throws with descriptive message
+
+**PromiseLike test:**
+- `CreateBuilder has .then()`: assert `.then` is a function
+
+**Existing mutation golden tests must still pass:**
+- `ir-mutation-parity.test.ts` — all inline snapshots unchanged
+- `sparql-mutation-golden.test.ts` — all SPARQL output unchanged
+- `sparql-mutation-algebra.test.ts` — all algebra tests pass
+
+**Validation commands:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+
+---
+
+### Phase 4 — Serialization + integration
+
+Add `toJSON()` / `fromJSON()` to QueryBuilder and FieldSet. Final integration: verify all public API exports, remove dead code.
+
+**Depends on:** Phase 3a (FieldSet) and Phase 3b (mutation builders)
+
+#### Tasks
+
+**4.1 — FieldSet serialization**
+- `.toJSON(): FieldSetJSON` — produces `{ shape: string, fields: Array<{ path: string, as?: string }> }` where `shape` is the NodeShape id and `path` is dot-separated labels
+- `static fromJSON(json, shapeRegistry?): FieldSet` — resolves shape id via `getShapeClass()`, resolves field paths via `walkPropertyPath()`
+
+**4.2 — QueryBuilder serialization**
+- `.toJSON(): QueryBuilderJSON` — produces the JSON format specified in the plan contracts section
+- `static fromJSON(json): QueryBuilder` — reconstructs builder from JSON, resolves shape and paths
+
+**4.3 — Update `src/index.ts` with full public API**
+- Export `QueryBuilder`, `FieldSet`, `PropertyPath`, `walkPropertyPath`
+- Export `CreateBuilder`, `UpdateBuilder`, `DeleteBuilder`
+- Export `WhereCondition`, `WhereOperator`
+- Remove `nextTick` re-export (no longer needed)
+- Keep `SelectQueryFactory` export for backward compatibility but mark deprecated
+
+**4.4 — Dead code cleanup**
+- Remove `PatchedQueryPromise` type from SelectQuery.ts
+- Remove `patchResultPromise()` from SelectQueryFactory
+- Remove `onQueriesReady` / DOMContentLoaded logic from SelectQuery.ts
+- Remove `next-tick` from `package.json` dependencies if no longer imported anywhere
+- Remove empty `abstract class QueryFactory` from QueryFactory.ts if nothing extends it after mutation builder refactor
+
+**4.5 — Integration verification**
+- Run all existing golden tests (select + mutation) to confirm no regressions
+- Verify `QueryBuilder` and old DSL produce identical IR for every fixture in `query-fixtures.ts`
+- Verify mutation builders produce identical IR for every mutation fixture
+
+#### Validation — `src/tests/serialization.test.ts`
+
+**FieldSet round-trip tests:**
+- `FieldSet.toJSON — simple fields`: `FieldSet.for(Person.shape, ['name', 'hobby']).toJSON()` — assert shape is Person's id, fields array has 2 entries with `path: 'name'` and `path: 'hobby'`
+- `FieldSet.fromJSON — round-trip`: `FieldSet.fromJSON(fieldSet.toJSON())` — assert `.labels()` equals original `.labels()`
+- `FieldSet.toJSON — nested`: `FieldSet.for(Person.shape, ['friends.name']).toJSON()` — assert field path is `'friends.name'`
+
+**QueryBuilder round-trip tests:**
+- `QueryBuilder.toJSON — select + where + limit`: build a query, serialize, assert JSON has expected shape/fields/where/limit
+- `QueryBuilder.fromJSON — round-trip IR equivalence`: serialize a QueryBuilder, deserialize, build IR from both, assert identical IR
+- `QueryBuilder.toJSON — orderBy`: assert orderBy appears in JSON with correct path and direction
+
+**Integration tests:**
+- `full pipeline — QueryBuilder from JSON produces valid SPARQL`: deserialize a QueryBuilder from JSON, build IR, convert to SPARQL algebra, convert to SPARQL string, assert string contains expected clauses
+
+**Validation commands:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+- `npm run build` (if available) — clean build with no errors
 
 ---
 
