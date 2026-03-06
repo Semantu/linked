@@ -274,17 +274,6 @@ export type QueryController = {
   setPage: (page: number) => void;
 };
 
-export type PatchedQueryPromise<ResultType, ShapeType extends Shape> = {
-  where(
-    validation: WhereClause<ShapeType>,
-  ): PatchedQueryPromise<ResultType, ShapeType>;
-  limit(lim: number): PatchedQueryPromise<ResultType, ShapeType>;
-  sortBy(
-    sortParam: any,
-    direction?: 'ASC' | 'DESC',
-  ): PatchedQueryPromise<ResultType, ShapeType>;
-  one(): PatchedQueryPromise<SingleResult<ResultType>, ShapeType>;
-} & Promise<ResultType>;
 
 export type GetCustomObjectKeys<T> = T extends QueryWrapperObject
   ? {
@@ -1858,37 +1847,6 @@ export class SelectQueryFactory<
     //TODO: Differentiate between the result of Shape.query and the internal query in Shape.select?
     // so that Shape.query can never be executed. Its just a template
     return this.clone().setSubject(subject).exec();
-  }
-
-  patchResultPromise<ResultType>(
-    p: Promise<ResultType>,
-  ): PatchedQueryPromise<any, S> {
-    let pAdjusted = p as PatchedQueryPromise<ResultType, S>;
-    p['where'] = (
-      validation: WhereClause<S>,
-    ): PatchedQueryPromise<ResultType, S> => {
-      // preventExec();
-      this.where(validation);
-      return pAdjusted;
-    };
-    p['limit'] = (lim: number): PatchedQueryPromise<ResultType, S> => {
-      this.setLimit(lim);
-      return pAdjusted;
-    };
-    p['sortBy'] = (
-      sortFn: QueryBuildFn<S, any>,
-      direction: string = 'ASC',
-    ): PatchedQueryPromise<ResultType, S> => {
-      this.sortBy(sortFn, direction);
-      return pAdjusted;
-    };
-    p['one'] = (): PatchedQueryPromise<ResultType, S> => {
-      this.setLimit(1);
-      this.singleResult = true;
-      return pAdjusted;
-    };
-
-    return p as any as PatchedQueryPromise<SingleResult<ResultType>, S>;
   }
 
   sortBy<R>(sortFn: QueryBuildFn<S, R>, direction) {

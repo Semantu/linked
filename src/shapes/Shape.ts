@@ -3,12 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-import nextTick from 'next-tick';
 import type {ICoreIterable} from '../interfaces/ICoreIterable.js';
 import type {NodeShape, PropertyShape} from './SHACL.js';
 import {
   GetQueryResponseType,
-  PatchedQueryPromise,
   QResult,
   QShape,
   QueryBuildFn,
@@ -17,12 +15,8 @@ import {
   SelectAllQueryResponse,
   SelectQueryFactory,
 } from '../queries/SelectQuery.js';
-import {getQueryDispatch} from '../queries/queryDispatch.js';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
-import {CreateQueryFactory, CreateResponse} from '../queries/CreateQuery.js';
-import {DeleteQueryFactory, DeleteResponse} from '../queries/DeleteQuery.js';
+import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
 import {NodeId} from '../queries/MutationQuery.js';
-import {UpdateQueryFactory} from '../queries/UpdateQuery.js';
 import {QueryBuilder} from '../queries/QueryBuilder.js';
 import {CreateBuilder} from '../queries/CreateBuilder.js';
 import {UpdateBuilder} from '../queries/UpdateBuilder.js';
@@ -244,24 +238,24 @@ export abstract class Shape {
     this: {new (...args: any[]): ShapeType; },
     id: string | NodeReferenceValue | QShape<ShapeType>,
     updateObjectOrFn?: U,
-  ): UpdateBuilder<ShapeType> {
-    let builder = UpdateBuilder.from(this as any) as UpdateBuilder<ShapeType>;
+  ): UpdateBuilder<ShapeType, U> {
+    let builder = UpdateBuilder.from(this as any) as UpdateBuilder<ShapeType, any>;
     builder = builder.for(id as any);
     if (updateObjectOrFn) {
       builder = builder.set(updateObjectOrFn);
     }
-    return builder;
+    return builder as unknown as UpdateBuilder<ShapeType, U>;
   }
 
   static create<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
     this: {new (...args: any[]): ShapeType; },
     updateObjectOrFn?: U,
-  ): CreateBuilder<ShapeType> {
-    let builder = CreateBuilder.from(this as any) as CreateBuilder<ShapeType>;
+  ): CreateBuilder<ShapeType, U> {
+    let builder = CreateBuilder.from(this as any) as CreateBuilder<ShapeType, any>;
     if (updateObjectOrFn) {
       builder = builder.set(updateObjectOrFn);
     }
-    return builder;
+    return builder as unknown as CreateBuilder<ShapeType, U>;
   }
 
   static delete<ShapeType extends Shape>(

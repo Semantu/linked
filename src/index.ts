@@ -44,9 +44,6 @@ import * as FieldSetModule from './queries/FieldSet.js';
 import * as CreateBuilderModule from './queries/CreateBuilder.js';
 import * as UpdateBuilderModule from './queries/UpdateBuilder.js';
 import * as DeleteBuilderModule from './queries/DeleteBuilder.js';
-import nextTick from 'next-tick';
-export {nextTick};
-
 // New dynamic query building API (Phase 2)
 export {QueryBuilder} from './queries/QueryBuilder.js';
 export {PropertyPath, walkPropertyPath} from './queries/PropertyPath.js';
