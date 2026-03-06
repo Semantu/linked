@@ -37,8 +37,16 @@ import * as lincd from './ontologies/lincd.js';
 import * as owl from './ontologies/owl.js';
 import * as npm from './ontologies/npm.js';
 import * as Sparql from './sparql/index.js';
+import * as QueryBuilderModule from './queries/QueryBuilder.js';
+import * as PropertyPathModule from './queries/PropertyPath.js';
+import * as WhereConditionModule from './queries/WhereCondition.js';
 import nextTick from 'next-tick';
 export {nextTick};
+
+// New dynamic query building API (Phase 2)
+export {QueryBuilder} from './queries/QueryBuilder.js';
+export {PropertyPath, walkPropertyPath} from './queries/PropertyPath.js';
+export type {WhereCondition, WhereOperator} from './queries/WhereCondition.js';
 
 export function initModularApp() {
   let publicFiles = {
@@ -76,6 +84,9 @@ export function initModularApp() {
     owl,
     npm,
     Sparql,
+    QueryBuilderModule,
+    PropertyPathModule,
+    WhereConditionModule,
   };
   var lincdExport = {};
   for (let fileKey in publicFiles) {

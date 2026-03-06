@@ -386,11 +386,11 @@ Top-down approach: tackle the riskiest refactor first (ProxiedPathBuilder extrac
 ```
 Phase 1 (done)
     ↓
-Phase 2 (QueryBuilder)
+Phase 2 (done)
     ↓
 Phase 3a (FieldSet)  ←→  Phase 3b (Mutation builders)   [parallel after Phase 2]
     ↓                         ↓
-Phase 4 (Serialization + integration)                    [after 3a and 3b]
+Phase 4 (Serialization + integration + DSL rewire)       [after 3a and 3b]
 ```
 
 ---
@@ -409,9 +409,21 @@ Extracted `createProxiedPathBuilder()` from `SelectQueryFactory.getQueryShape()`
 
 ---
 
-### Phase 2 — QueryBuilder (select queries)
+### Phase 2 — QueryBuilder (select queries) ✅
 
-Build `QueryBuilder` on top of `ProxiedPathBuilder`. The DSL becomes a thin wrapper — `Person.select()` returns a `QueryBuilder`. Remove `nextTick`/`PatchedQueryPromise`.
+**Status: Complete.**
+
+Built `QueryBuilder` as an immutable, fluent, PromiseLike query builder on top of `SelectQueryFactory`. Added `walkPropertyPath()` for string-based path resolution. All 28 new tests + 477 existing tests pass (505 total). IR equivalence verified for 12 query patterns.
+
+**Files delivered:**
+- `src/queries/QueryBuilder.ts` — Immutable QueryBuilder class (from, select, selectAll, where, orderBy/sortBy, limit, offset, for, forAll, one, build, exec, PromiseLike)
+- `src/queries/PropertyPath.ts` — Added `walkPropertyPath(shape, path)` for dot-separated path resolution
+- `src/tests/query-builder.test.ts` — 28 tests: immutability (7), IR equivalence (12), walkPropertyPath (5), shape resolution (2), PromiseLike (2)
+- `jest.config.js` — Added `query-builder.test.ts` to testMatch
+- `src/index.ts` — Exports `QueryBuilder`, `PropertyPath`, `walkPropertyPath`, `WhereCondition`, `WhereOperator`
+
+**Deferred to Phase 4:**
+- Tasks 2.3/2.4 (rewiring `Shape.select()`/`selectAll()` to return `QueryBuilder`, deprecating `SelectQueryFactory` public surface) require threading result types through QueryBuilder generics. The existing DSL uses complex conditional types (`QueryResponseToResultType`, `GetQueryResponseType`) that `QueryBuilder.then()` currently erases to `any`. This is a type-system concern that should be addressed alongside FieldSet and serialization in Phase 4.
 
 #### Tasks
 

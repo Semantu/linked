@@ -1,4 +1,5 @@
 import type {PropertyShape, NodeShape} from '../shapes/SHACL.js';
+import {getShapeClass} from '../utils/ShapeClass.js';
 
 /**
  * A value object representing a sequence of property traversals from a root shape.
@@ -42,4 +43,49 @@ export class PropertyPath {
     if (this.segments.length !== other.segments.length) return false;
     return this.segments.every((s, i) => s.id === other.segments[i].id);
   }
+}
+
+/**
+ * Resolve a dot-separated property path string into a PropertyPath.
+ *
+ * Walks the shape's property shapes by label, following valueShape references
+ * to traverse into nested shapes.
+ *
+ * Example: `walkPropertyPath(PersonShape, 'friends.name')` resolves
+ * [friendsPropertyShape, namePropertyShape].
+ *
+ * @throws If any segment cannot be resolved.
+ */
+export function walkPropertyPath(shape: NodeShape, path: string): PropertyPath {
+  const labels = path.split('.');
+  const segments: PropertyShape[] = [];
+  let currentShape = shape;
+
+  for (const label of labels) {
+    const propertyShape = currentShape.getPropertyShape(label);
+    if (!propertyShape) {
+      throw new Error(
+        `Property '${label}' not found on shape '${currentShape.label || currentShape.id}' while resolving path '${path}'`,
+      );
+    }
+    segments.push(propertyShape);
+
+    // If there are more segments to resolve, follow the valueShape
+    if (segments.length < labels.length) {
+      if (!propertyShape.valueShape) {
+        throw new Error(
+          `Property '${label}' on shape '${currentShape.label || currentShape.id}' has no valueShape; cannot traverse further in path '${path}'`,
+        );
+      }
+      const shapeClass = getShapeClass(propertyShape.valueShape);
+      if (!shapeClass || !shapeClass.shape) {
+        throw new Error(
+          `Cannot resolve valueShape '${propertyShape.valueShape.id}' for property '${label}' in path '${path}'`,
+        );
+      }
+      currentShape = shapeClass.shape;
+    }
+  }
+
+  return new PropertyPath(shape, segments);
 }

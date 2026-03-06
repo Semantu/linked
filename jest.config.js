@@ -26,6 +26,7 @@ module.exports = {
     '**/sparql-mutation-golden.test.ts',
     '**/sparql-negative.test.ts',
     '**/sparql-fuseki.test.ts',
+    '**/query-builder.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {
