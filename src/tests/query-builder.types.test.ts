@@ -178,4 +178,12 @@ describe.skip('QueryBuilder result type inference (compile only)', () => {
     const single = null as unknown as Result;
     expectType<string | null | undefined>(single.name);
   });
+
+  test('selectAll returns typed results', () => {
+    const qb = QueryBuilder.from(Person).selectAll();
+    type Result = Awaited<typeof qb>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | undefined>(first.id);
+    expectType<string | null | undefined>(first.name);
+  });
 });

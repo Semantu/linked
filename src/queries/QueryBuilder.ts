@@ -7,6 +7,7 @@ import {
   WhereClause,
   QResult,
   QueryResponseToResultType,
+  SelectAllQueryResponse,
 } from './SelectQuery.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
@@ -159,7 +160,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   }
 
   /** Select all decorated properties of the shape. */
-  selectAll(): QueryBuilder<S> {
+  selectAll(): QueryBuilder<S, any, QueryResponseToResultType<SelectAllQueryResponse<S>, S>[]> {
     const propertyLabels = (this._shape as any)
       .shape.getUniquePropertyShapes()
       .map((ps: any) => ps.label) as string[];
