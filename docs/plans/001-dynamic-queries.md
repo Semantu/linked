@@ -733,7 +733,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   implements PromiseLike<Result>, Promise<Result>
 ```
 Update `QueryBuilderInit` to carry `Result` if needed, or just propagate via generics.
-**Verify:** `npx tsc --noEmit` + `npm test` — zero changes expected.
+**Tests:** No new type tests (Result = any). Validation: `npx tsc --noEmit` + `npm test` — all existing tests pass unchanged.
 
 **Step 2 — Wire `then()`, `catch()`, `finally()`, `exec()` to use `Result`:**
 ```ts
@@ -748,7 +748,7 @@ catch<TResult = never>(...): Promise<Result | TResult> { ... }
 finally(...): Promise<Result> { ... }
 ```
 Since `Result` still defaults to `any`, this is a no-op change at runtime and compile time.
-**Verify:** `npx tsc --noEmit` + `npm test`.
+**Tests:** No new type tests (Result = any). Validation: `npx tsc --noEmit` + `npm test`.
 
 **Step 3 — Wire `select()` to compute `Result` via `QueryResponseToResultType`:**
 This is the key step. Import `QueryResponseToResultType` and update the callback overload:
@@ -759,12 +759,63 @@ select<NewR>(fn: QueryBuildFn<S, NewR>): QueryBuilder<S, NewR, QueryResponseToRe
 select(labels: string[]): QueryBuilder<S>;
 select(fieldSet: FieldSet): QueryBuilder<S>;
 ```
-**Verify:** `npx tsc --noEmit` — the existing tests use `any` result so they should compile. Add the first `query-builder.types.test.ts` smoke test to confirm types resolve:
+**Tests — add to `query-builder.types.test.ts` (compile-only, `describe.skip`):**
 ```ts
-const promise = QueryBuilder.from(Person).select(p => p.name);
-type Result = Awaited<typeof promise>;
-expectType<string | null | undefined>((null as unknown as Result)[0].name);
+test('select literal property', () => {
+  const promise = QueryBuilder.from(Person).select(p => p.name);
+  type Result = Awaited<typeof promise>;
+  const first = (null as unknown as Result)[0];
+  expectType<string | null | undefined>(first.name);
+  expectType<string | undefined>(first.id);
+});
+test('select object property (set)', () => {
+  const promise = QueryBuilder.from(Person).select(p => p.friends);
+  type Result = Awaited<typeof promise>;
+  expectType<string | undefined>((null as unknown as Result)[0].friends[0].id);
+});
+test('select multiple paths', () => {
+  const promise = QueryBuilder.from(Person).select(p => [p.name, p.friends, p.bestFriend.name]);
+  type Result = Awaited<typeof promise>;
+  const first = (null as unknown as Result)[0];
+  expectType<string | null | undefined>(first.name);
+  expectType<string | undefined>(first.friends[0].id);
+  expectType<string | null | undefined>(first.bestFriend.name);
+});
+test('select date type', () => {
+  const promise = QueryBuilder.from(Person).select(p => p.birthDate);
+  type Result = Awaited<typeof promise>;
+  expectType<Date | null | undefined>((null as unknown as Result)[0].birthDate);
+});
+test('select boolean type', () => {
+  const promise = QueryBuilder.from(Person).select(p => p.isRealPerson);
+  type Result = Awaited<typeof promise>;
+  expectType<boolean | null | undefined>((null as unknown as Result)[0].isRealPerson);
+});
+test('sub-select plural custom object', () => {
+  const promise = QueryBuilder.from(Person).select(p =>
+    p.friends.select(f => ({name: f.name, hobby: f.hobby})),
+  );
+  type Result = Awaited<typeof promise>;
+  expectType<string | null | undefined>((null as unknown as Result)[0].friends[0].name);
+  expectType<string | null | undefined>((null as unknown as Result)[0].friends[0].hobby);
+});
+test('count', () => {
+  const promise = QueryBuilder.from(Person).select(p => p.friends.size());
+  type Result = Awaited<typeof promise>;
+  expectType<number>((null as unknown as Result)[0].friends);
+});
+test('custom result object', () => {
+  const promise = QueryBuilder.from(Person).select(p => ({numFriends: p.friends.size()}));
+  type Result = Awaited<typeof promise>;
+  expectType<number>((null as unknown as Result)[0].numFriends);
+});
+test('string path — no type inference (any)', () => {
+  const promise = QueryBuilder.from('my:PersonShape').select(['name']);
+  type Result = Awaited<typeof promise>;
+  expectType<any>(null as unknown as Result);
+});
 ```
+Validation: `npx tsc --noEmit` + `npm test`.
 
 **Step 4 — Update fluent methods to preserve `Result`:**
 Change `where()`, `orderBy()`, `limit()`, `offset()`, `for()`, `sortBy()` return types from `QueryBuilder<S, R>` to `QueryBuilder<S, R, Result>`:
@@ -779,7 +830,35 @@ private clone(overrides: Partial<QueryBuilderInit<S, any>> = {}): QueryBuilder<S
   return new QueryBuilder<S, R, Result>({...});
 }
 ```
-**Verify:** `npx tsc --noEmit` + type test confirming `.select().where().limit()` preserves result type.
+**Tests — add to `query-builder.types.test.ts`:**
+```ts
+test('select with chaining preserves types', () => {
+  const promise = QueryBuilder.from(Person)
+    .select(p => [p.name, p.friends])
+    .where(p => p.name.equals('x'))
+    .limit(5);
+  type Result = Awaited<typeof promise>;
+  const first = (null as unknown as Result)[0];
+  expectType<string | null | undefined>(first.name);
+  expectType<string | undefined>(first.friends[0].id);
+});
+test('select with .for() preserves types', () => {
+  const promise = QueryBuilder.from(Person)
+    .select(p => p.name)
+    .for({id: 'p1'});
+  type Result = Awaited<typeof promise>;
+  const first = (null as unknown as Result)[0];
+  expectType<string | null | undefined>(first.name);
+});
+test('orderBy preserves types', () => {
+  const promise = QueryBuilder.from(Person)
+    .select(p => p.name)
+    .orderBy(p => p.name);
+  type Result = Awaited<typeof promise>;
+  expectType<string | null | undefined>((null as unknown as Result)[0].name);
+});
+```
+Validation: `npx tsc --noEmit` + `npm test`.
 
 **Step 5 — Wire `one()` to unwrap array:**
 ```ts
@@ -787,14 +866,44 @@ one(): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result> {
   return this.clone({limit: 1, singleResult: true}) as any;
 }
 ```
-**Verify:** Type test: `Awaited<typeof builder.select(p => p.name).one()>` resolves to single object, not array.
+**Tests — add to `query-builder.types.test.ts`:**
+```ts
+test('select with .one() unwraps array', () => {
+  const promise = QueryBuilder.from(Person).select(p => p.name).one();
+  type Result = Awaited<typeof promise>;
+  const single = null as unknown as Result;
+  expectType<string | null | undefined>(single.name);
+  expectType<string | undefined>(single.id);
+});
+test('.one() after chaining', () => {
+  const promise = QueryBuilder.from(Person)
+    .select(p => [p.name, p.friends])
+    .where(p => p.name.equals('x'))
+    .one();
+  type Result = Awaited<typeof promise>;
+  const single = null as unknown as Result;
+  expectType<string | null | undefined>(single.name);
+  expectType<string | undefined>(single.friends[0].id);
+});
+```
+Validation: `npx tsc --noEmit` + `npm test`.
 
 **Step 6 — Wire `selectAll()` result type:**
 ```ts
 selectAll(): QueryBuilder<S, any, QueryResponseToResultType<SelectAllQueryResponse<S>, S>[]> { ... }
 ```
 This requires importing `SelectAllQueryResponse` from SelectQuery.ts.
-**Verify:** Type test for selectAll.
+**Tests — add to `query-builder.types.test.ts`:**
+```ts
+test('selectAll returns typed results', () => {
+  const promise = QueryBuilder.from(Person).selectAll();
+  type Result = Awaited<typeof promise>;
+  const first = (null as unknown as Result)[0];
+  expectType<string | undefined>(first.id);
+  expectType<string | null | undefined>(first.name);
+});
+```
+Validation: `npx tsc --noEmit` + `npm test`.
 
 **Validation (full, after all steps):**
 - `npx tsc --noEmit` passes

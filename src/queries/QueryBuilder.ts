@@ -56,8 +56,8 @@ interface QueryBuilderInit<S extends Shape, R> {
  * @internal The internal delegation to SelectQueryFactory is an implementation
  * detail that will be removed in a future phase.
  */
-export class QueryBuilder<S extends Shape = Shape, R = any>
-  implements PromiseLike<any>, Promise<any>
+export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
+  implements PromiseLike<Result>, Promise<Result>
 {
   private readonly _shape: ShapeType<S>;
   private readonly _selectFn?: QueryBuildFn<S, R>;
