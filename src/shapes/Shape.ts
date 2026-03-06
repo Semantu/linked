@@ -24,6 +24,9 @@ import {DeleteQueryFactory, DeleteResponse} from '../queries/DeleteQuery.js';
 import {NodeId} from '../queries/MutationQuery.js';
 import {UpdateQueryFactory} from '../queries/UpdateQuery.js';
 import {QueryBuilder} from '../queries/QueryBuilder.js';
+import {CreateBuilder} from '../queries/CreateBuilder.js';
+import {UpdateBuilder} from '../queries/UpdateBuilder.js';
+import {DeleteBuilder} from '../queries/DeleteBuilder.js';
 import {getPropertyShapeByLabel} from '../utils/ShapeClass.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
 
@@ -241,35 +244,31 @@ export abstract class Shape {
     this: {new (...args: any[]): ShapeType; },
     id: string | NodeReferenceValue | QShape<ShapeType>,
     updateObjectOrFn?: U,
-  ): Promise<AddId<U>> {
-    const factory = new UpdateQueryFactory<ShapeType, U>(
-      this as any as typeof Shape,
-      id,
-      updateObjectOrFn,
-    );
-    return getQueryDispatch().updateQuery(factory.build());
+  ): UpdateBuilder<ShapeType> {
+    let builder = UpdateBuilder.from(this as any) as UpdateBuilder<ShapeType>;
+    builder = builder.for(id as any);
+    if (updateObjectOrFn) {
+      builder = builder.set(updateObjectOrFn);
+    }
+    return builder;
   }
 
   static create<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
     this: {new (...args: any[]): ShapeType; },
     updateObjectOrFn?: U,
-  ): Promise<CreateResponse<U>> {
-    const factory = new CreateQueryFactory<ShapeType, U>(
-      this as any as typeof Shape,
-      updateObjectOrFn,
-    );
-    return getQueryDispatch().createQuery(factory.build());
+  ): CreateBuilder<ShapeType> {
+    let builder = CreateBuilder.from(this as any) as CreateBuilder<ShapeType>;
+    if (updateObjectOrFn) {
+      builder = builder.set(updateObjectOrFn);
+    }
+    return builder;
   }
 
-  static delete<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
+  static delete<ShapeType extends Shape>(
     this: {new (...args: any[]): ShapeType; },
     id: NodeId | NodeId[] | NodeReferenceValue[],
-  ): Promise<DeleteResponse> {
-    const factory = new DeleteQueryFactory<Shape, {}>(
-      this as any as typeof Shape,
-      id,
-    );
-    return getQueryDispatch().deleteQuery(factory.build());
+  ): DeleteBuilder<ShapeType> {
+    return DeleteBuilder.from(this as any, id as any) as DeleteBuilder<ShapeType>;
   }
 
   static mapPropertyShapes<ShapeType extends Shape, ResponseType = unknown>(
