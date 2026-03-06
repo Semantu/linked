@@ -1281,11 +1281,11 @@ The `@_linked/react` `linkedComponent` wrapper should expose:
 
 This is a contract that `@_linked/react` implements. Core defines the interface.
 
-**3. `Shape.query()` returns QueryBuilder**
+**3. `Shape.query()` is removed — use `QueryBuilder.from()` directly**
 
-After Phase 4.4b rewires `Shape.select()` to return `QueryBuilder`, `Shape.query()` should also return `QueryBuilder` (as a template, not executed). This makes `linkedComponent(Person.query(p => ({name: p.name})), Component)` produce a component with a `QueryBuilder` on `.query`.
+`Shape.query()` was a convenience that returned a `SelectQueryFactory` as a "template". With QueryBuilder available, the equivalent is `QueryBuilder.from(Person).select(p => ({name: p.name}))`. `linkedComponent` in `@_linked/react` should accept a `QueryBuilder` directly instead of relying on `Shape.query()`.
 
-If `Shape.query()` is removed in Phase 4.4e, the equivalent is `QueryBuilder.from(Person).select(p => ({name: p.name}))` — `linkedComponent` simply accepts a `QueryBuilder` directly.
+`Shape.query()` is removed in Phase 4.4e as originally planned. `@_linked/react` must update `linkedComponent` to accept `QueryBuilder` before that happens (see `@_linked/react` migration note below).
 
 **4. `preloadFor` on PropertyPath for QueryBuilder API**
 
@@ -1413,22 +1413,56 @@ export interface LinkedComponentInterface<S extends Shape = Shape, R = any> {
 
 This is what `linkedComponent()` in `@_linked/react` should produce. Export from `src/index.ts`.
 
-**5.6 — Keep `Shape.query()` alive (adjust Phase 4.4e)**
+**5.6 — Remove `Shape.query()` (confirm Phase 4.4e removal)**
 
-**File:** `src/shapes/Shape.ts`
+`Shape.query()` is removed as planned in Phase 4.4e. No changes needed here — just confirm the removal doesn't break preloadFor tests (the test fixtures in `query-fixtures.ts` should be updated to use `QueryBuilder.from(Person).select(...)` instead of `Person.query(...)`).
 
-Phase 4.4e planned to remove `Shape.query()`. Instead, rewire it to return `QueryBuilder`:
+#### `@_linked/react` Migration Note
 
-```ts
-static query<S extends Shape, R = unknown>(
-  this: {new (...args: any[]): S; targetClass: any},
-  queryFn: QueryBuildFn<S, R>,
-): QueryBuilder<S, R> {
-  return QueryBuilder.from(this as any).select(queryFn);
-}
-```
+When `@_linked/core` completes Phase 5, `@_linked/react` must update its `linkedComponent` implementation:
 
-This preserves the `Person.query(p => ({name: p.name}))` pattern used by `linkedComponent`.
+1. **Accept `QueryBuilder` instead of `SelectQueryFactory`:**
+   ```ts
+   // Before (current)
+   function linkedComponent<S extends Shape, R>(
+     query: SelectQueryFactory<S, R>,
+     component: React.ComponentType<R>,
+   ): LinkedComponent<S, R>;
+
+   // After
+   function linkedComponent<S extends Shape, R>(
+     query: QueryBuilder<S, any, R>,
+     component: React.ComponentType<R>,
+   ): LinkedComponent<S, R>;
+   ```
+
+2. **Expose `.fields` on the returned component:**
+   ```ts
+   const result = linkedComponent(query, Component);
+   // result.query = the QueryBuilder passed in
+   // result.fields = query.fields()  ← derive FieldSet from the QueryBuilder
+   ```
+
+3. **Satisfy `LinkedComponentInterface`** (exported from `@_linked/core`):
+   The returned component must implement:
+   ```ts
+   interface LinkedComponentInterface<S, R> {
+     query: QueryBuilder<S, any, R>;
+     fields?: FieldSet;
+   }
+   ```
+
+4. **Update `linkedComponent` call sites** from `Person.query(...)` to `QueryBuilder.from(Person).select(...)`:
+   ```ts
+   // Before
+   const PersonCard = linkedComponent(Person.query(p => ({name: p.name})), CardComponent);
+   // After
+   const PersonCard = linkedComponent(QueryBuilder.from(Person).select(p => ({name: p.name})), CardComponent);
+   ```
+
+5. **`linkedSetComponent`** follows the same pattern — accept `QueryBuilder` or `Record<string, QueryBuilder>` instead of `SelectQueryFactory`.
+
+These changes are required before `Shape.query()` is removed in Phase 4.4e.
 
 #### Validation — `src/tests/preload-component.test.ts`
 
@@ -1443,10 +1477,6 @@ This preserves the `Person.query(p => ({name: p.name}))` pattern used by `linked
 
 **QueryBuilder.preload() tests:**
 - `QueryBuilder.preload()` — `QueryBuilder.from(Person).select(p => [p.name]).preload('bestFriend', {query: personCardQuery})` produces equivalent IR to DSL `preloadFor`
-
-**Shape.query() returns QueryBuilder:**
-- `Shape.query() returns QueryBuilder` — `Person.query(p => ({name: p.name}))` returns instance of QueryBuilder
-- `preloadFor with Shape.query() QueryBuilder` — works end-to-end
 
 **Validation commands:**
 - `npx tsc --noEmit` exits 0
