@@ -1484,6 +1484,118 @@ These changes are required before `Shape.query()` is removed in Phase 4.4e.
 
 ---
 
+### Phase 6: `forAll(ids)` — multi-ID subject filtering
+
+**Goal:** Make `Person.select(...).forAll([id1, id2])` actually filter by the given IDs instead of silently ignoring them.
+
+**Current problem:** Both branches of `forAll()` (with and without `ids`) do the exact same thing: `clone({subject: undefined, singleResult: false})`. The IDs parameter is discarded.
+
+**Approach: `VALUES` clause (Option A)**
+
+Use a `VALUES ?subject { <id1> <id2> }` binding, consistent with how `.for(id)` already works for single subjects.
+
+#### Implementation
+
+1. **Add `_subjects` field to `QueryBuilder`:**
+   - New `private readonly _subjects?: NodeReferenceValue[]` field alongside existing `_subject`
+   - Update `QueryBuilderInit` and `clone()` to carry `_subjects`
+   - `forAll(ids)` stores normalized IDs in `_subjects`, clears `_subject`
+   - `for(id)` clears `_subjects` (mutually exclusive)
+
+2. **Update `buildFactory()` to pass subjects array:**
+   - When `_subjects` is set, pass to `SelectQueryFactory` (new parameter or method)
+   - Factory generates `VALUES ?subject { <id1> <id2> ... }` in the SPARQL output
+
+3. **Update `SelectQueryFactory.toRawInput()`:**
+   - Accept plural `subjects` in the raw input
+   - Generate appropriate `VALUES` clause or `FILTER(?subject IN (...))` depending on what the IR pipeline supports
+
+4. **Serialization:**
+   - `toJSON()` — serialize `_subjects` as string array
+   - `fromJSON()` — restore `_subjects` and call `.forAll(ids)`
+
+#### Validation
+
+- Test: `Person.select(p => [p.name]).forAll([id1, id2])` produces IR with VALUES binding for both IDs
+- Test: `.forAll()` without IDs still selects all (no subject filter)
+- Test: `.for(id)` after `.forAll(ids)` clears the multi-subject (and vice versa)
+- Test: serialization round-trip preserves subjects array
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+
+---
+
+### Phase 7: Unified callback tracing — FieldSet & toJSON serialization
+
+**Goal:** Make `toJSON()` work for callback-based selections, and unify FieldSet's callback tracing with the existing `QueryShape`/`ProxiedPathBuilder` proxy so nested paths, where clauses, and orderBy all work consistently.
+
+**Current problem:**
+
+`FieldSet.traceFieldsFromCallback()` uses a **simple proxy** that only captures top-level string keys:
+```ts
+// Current: only captures 'friends', not 'friends.name'
+const proxy = new Proxy({}, {
+  get(_target, key) { accessed.push(key); return key; }
+});
+```
+
+Meanwhile, `createProxiedPathBuilder()` → `QueryShape.create()` uses the **full QueryShape proxy** that:
+- Resolves each key to its `PropertyShape` via `getPropertyShapeByLabel()`
+- Returns nested `QueryBuilderObject` instances for traversal (`p.friends.name` works)
+- Supports `.where()`, `.count()`, `.preloadFor()`, etc.
+- Already handles both single-value (`QueryShape`) and set-value (`QueryShapeSet`) properties
+
+These should be the same code path. The DSL already solves nested path tracing — FieldSet just isn't using it.
+
+**Approach: Reuse `createProxiedPathBuilder` in FieldSet**
+
+#### Phase 7a: Unify FieldSet callback tracing with ProxiedPathBuilder
+
+1. **Replace `traceFieldsFromCallback` with `createProxiedPathBuilder`:**
+   - Instead of the dumb string-capturing proxy, use `createProxiedPathBuilder(shape)` to get a full `QueryShape` proxy
+   - Pass it through the callback: `fn(proxy)` returns `QueryBuilderObject[]`
+   - Extract `PropertyPath` from each `QueryBuilderObject` by walking its `.property` / `.subject` chain
+   - This immediately enables nested paths: `FieldSet.for(Person, p => [p.friends.name])`
+
+2. **Add `QueryBuilderObject → PropertyPath` conversion:**
+   - Walk the `QueryBuilderObject` chain (each has `.property: PropertyShape` and `.subject: QueryBuilderObject`)
+   - Collect segments into a `PropertyPath`
+   - This is the bridge between the DSL's tracing world and FieldSet's `PropertyPath` world
+
+3. **Carry `R` type through FieldSet:**
+   - When a FieldSet is built from a callback, the callback's return type can be captured as a generic: `FieldSet.for<R>(shape, fn: (p) => R)` → `FieldSet<R>`
+   - Wire this through to QueryBuilder so `.select(fieldSet)` preserves the type information from the original callback
+   - This gives typed results even when going through FieldSet intermediary
+
+#### Phase 7b: `toJSON()` for callback-based selections
+
+1. **Pre-evaluate callbacks in `fields()`:**
+   - When `_selectFn` is set but `_fieldSet` is not, run the callback through `createProxiedPathBuilder` to produce a `FieldSet`
+   - Cache the result (the callback is pure — same proxy always produces same paths)
+   - `toJSON()` then naturally works because `fields()` always returns a `FieldSet`
+
+2. **`fromJSON()` restores `orderDirection`:**
+   - Fix the existing bug: read `json.orderDirection` and store it
+   - Since the sort *key* callback isn't serializable, store direction separately — when a sort key is later re-applied, the direction is preserved
+
+3. **Where/orderBy callback serialization (exploration):**
+   - `where()` callbacks use the same `QueryShape` proxy — the result is a `QueryPath` with conditions
+   - `orderBy()` callbacks produce a single `QueryBuilderObject` identifying the sort property
+   - Both could be pre-evaluated through the proxy and serialized as path expressions
+   - **Scope decision needed:** Is serializing where/orderBy required now, or can it wait? The `FieldSet.scopedFilter` field already exists for per-field where conditions — this could be the serialization target
+
+#### Validation
+
+- Test: `FieldSet.for(Person, p => [p.friends.name])` produces correct nested PropertyPath
+- Test: `QueryBuilder.from(Person).select(p => [p.name]).toJSON()` produces fields even with callback select
+- Test: round-trip through `toJSON()`/`fromJSON()` preserves callback-derived fields
+- Test: FieldSet built from callback carries type `R` through to QueryBuilder result type
+- Test: `orderDirection` survives `fromJSON()` round-trip
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+
+---
+
 ## Scope boundaries
 
 **In scope (this plan):**
@@ -1497,6 +1609,8 @@ These changes are required before `Shape.query()` is removed in Phase 4.4e.
 - Shape resolution by prefixed IRI string (for `.from('my:PersonShape')` and JSON deserialization)
 - `Person.selectAll({ depth })` — FieldSet.all with depth exposed on DSL
 - Tests verifying DSL and builders produce identical IR
+- `forAll(ids)` — multi-ID subject filtering via VALUES clause (Phase 6)
+- Unified callback tracing — FieldSet reuses ProxiedPathBuilder for nested paths, typed FieldSets, toJSON for callbacks (Phase 7)
 
 **Out of scope (separate plans, already have ideation docs):**
 - `FieldSet.summary()` — CMS-layer concern, not core
