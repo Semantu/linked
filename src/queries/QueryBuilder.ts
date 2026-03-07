@@ -242,6 +242,10 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
    * // QueryBuilder style
    * QueryBuilder.from(Person).select(p => [p.name]).preload('bestFriend', PersonCard)
    * ```
+   *
+   * NOTE: Preloads hold live component references and are not serializable.
+   * They are injected into the selectFn at build time (see buildFactory()),
+   * so changes to preload handling must account for the selectFn wrapping logic.
    */
   preload<CS extends Shape, CR>(
     path: string,
