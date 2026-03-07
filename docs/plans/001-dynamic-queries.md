@@ -1958,3 +1958,371 @@ p.friends.select(fn)
 - Computed expressions / L module → 006
 - Raw IR helpers (Option A) → future
 - CONSTRUCT / MINUS query types → 004, 007
+
+---
+
+## Task Breakdown (Phases 6–11)
+
+### Dependency Graph
+
+```
+Phase 6              [independent — can run in parallel with 7a/7b]
+Phase 7a             [independent — pure data model]
+    ↓
+Phase 7b             [depends on 7a — uses new entry fields]
+    ↓
+Phase 7c             [depends on 7b — uses ShapeClass overloads]
+    ↓
+Phase 7d ←→ Phase 7e [both depend on 7c, independent of each other — can run in parallel]
+    ↓         ↓
+Phase 8              [depends on 7c+7d+7e — needs FieldSet with full info + serialization + types]
+    ↓
+Phase 9              [depends on 8 — FieldSet replaces factory in DSL proxy]
+    ↓
+Phase 10             [depends on 9 — all paths off factory]
+    ↓
+Phase 11             [depends on 10 — cleanup pass]
+```
+
+**Parallel opportunities:**
+- Phase 6, 7a can run in parallel (no shared code)
+- Phase 7d, 7e can run in parallel after 7c (7d = serialization, 7e = types — no overlap)
+
+---
+
+### Phase 6: forAll(ids) — multi-ID subject filtering
+
+#### Tasks
+
+1. Add `_subjects: string[]` field to QueryBuilder internal state
+2. Implement `.forAll(ids?: (string | {id: string})[])` method — normalizes inputs, returns clone
+3. Implement mutual exclusion with `.for()` — `.for()` clears `_subjects`, `.forAll()` clears `_subject`
+4. Update `toRawInput()` — pass `subjects` array to `RawSelectInput`
+5. Update IR pipeline — add `VALUES` clause or `FILTER(?subject IN (...))` for multi-subject
+6. `toJSON()` — serialize `_subjects` as string array
+7. `fromJSON()` — restore `_subjects` and populate builder
+
+#### Validation
+
+**Test file:** `src/tests/query-builder.test.ts` (new `QueryBuilder — forAll` describe block)
+
+| Test case | Assertion |
+|---|---|
+| `forAll([id1, id2])` produces IR with subjects | Assert IR has `subjects` array of length 2 containing both IRIs |
+| `forAll()` without IDs produces no subject filter | Assert IR has no `subject` and no `subjects` field |
+| `for(id)` after `forAll(ids)` clears multi-subject | Assert IR has single `subject`, no `subjects` |
+| `forAll(ids)` after `for(id)` clears single subject | Assert IR has `subjects`, no `subject` |
+| `forAll() immutability` | Assert original builder unchanged after `.forAll()` |
+| `forAll accepts {id} references` | Assert `forAll([{id: 'urn:x'}, 'urn:y'])` normalizes both to strings |
+
+**Test file:** `src/tests/serialization.test.ts` (add to `QueryBuilder — serialization`)
+
+| Test case | Assertion |
+|---|---|
+| `toJSON — with subjects` | Assert `json.subjects` is string array of length 2 |
+| `fromJSON — round-trip forAll` | Assert round-trip IR equivalence for multi-subject query |
+
+**Non-test validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+
+---
+
+### Phase 7a: Extend FieldSetEntry data model
+
+#### Tasks
+
+1. Add optional fields to `FieldSetEntry` type: `subSelect?: FieldSet`, `aggregation?: 'count'`, `customKey?: string`
+2. Update `FieldSetJSON` / `FieldSetFieldJSON` types to include `subSelect?: FieldSetJSON`, `aggregation?: string`, `customKey?: string`
+3. Update `toJSON()` — serialize new fields (subSelect recursively via `subSelect.toJSON()`, aggregation as string, customKey as string)
+4. Update `fromJSON()` — deserialize new fields (subSelect recursively via `FieldSet.fromJSON()`, aggregation, customKey)
+5. Update `merge()` — include new fields in deduplication key (entries with same path but different subSelect/aggregation are distinct)
+6. Verify `add()`, `remove()`, `pick()` preserve new fields on entries (they already operate on whole entries — just verify)
+
+#### Validation
+
+**Test file:** `src/tests/field-set.test.ts` (new `FieldSet — extended entries` describe block)
+
+| Test case | Assertion |
+|---|---|
+| `entry with subSelect preserved through add()` | Create FieldSet with entry that has `subSelect` field manually set. Call `.add(['hobby'])`. Assert original entry still has `subSelect` field intact |
+| `entry with aggregation preserved through pick()` | Create FieldSet with entry that has `aggregation: 'count'`. Call `.pick([label])`. Assert picked entry has `aggregation: 'count'` |
+| `entry with customKey preserved through merge()` | Merge two FieldSets where one entry has `customKey: 'numFriends'`. Assert merged result contains the entry with `customKey` |
+| `entries with same path but different aggregation are distinct in merge()` | Merge FieldSet with `friends` (plain) and FieldSet with `friends` + `aggregation: 'count'`. Assert merged has 2 entries, not 1 |
+
+**Test file:** `src/tests/serialization.test.ts` (new `FieldSet — extended serialization` describe block)
+
+| Test case | Assertion |
+|---|---|
+| `toJSON — entry with subSelect` | Create entry with `subSelect` FieldSet containing `['name']`. Assert `json.fields[0].subSelect` is a valid FieldSetJSON with 1 field |
+| `toJSON — entry with aggregation` | Create entry with `aggregation: 'count'`. Assert `json.fields[0].aggregation === 'count'` |
+| `toJSON — entry with customKey` | Create entry with `customKey: 'numFriends'`. Assert `json.fields[0].customKey === 'numFriends'` |
+| `fromJSON — round-trip subSelect` | Round-trip entry with subSelect. Assert restored entry has `subSelect` FieldSet with correct shape and labels |
+| `fromJSON — round-trip aggregation` | Round-trip entry with `aggregation: 'count'`. Assert restored entry has `aggregation === 'count'` |
+| `fromJSON — round-trip customKey` | Round-trip entry with `customKey`. Assert restored entry has matching customKey |
+
+**Non-test validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all existing tests pass unchanged (new fields are optional, no behavior change)
+
+---
+
+### Phase 7b: FieldSet.for() accepts ShapeClass + NodeShape overloads
+
+#### Tasks
+
+1. Add overload signatures to `FieldSet.for()` accepting `ShapeType<S>` (shape class like `Person`)
+2. Update `resolveShape()` to handle ShapeClass input — extract `.shape` property to get NodeShape
+3. Add same overload to `FieldSet.all()` — accept ShapeClass
+4. Store ShapeClass reference on FieldSet instance (private `_shapeClass?: ShapeType<any>`) for later use in 7c
+5. Update `FieldSet.merge()` to propagate `_shapeClass` when all inputs share the same one
+
+#### Validation
+
+**Test file:** `src/tests/field-set.test.ts` (new `FieldSet — ShapeClass overloads` describe block)
+
+| Test case | Assertion |
+|---|---|
+| `FieldSet.for(Person, ['name'])` produces same FieldSet as NodeShape | Assert `FieldSet.for(Person, ['name']).labels()` equals `FieldSet.for(personShape, ['name']).labels()` |
+| `FieldSet.for(Person, ['name'])` has correct shape | Assert `.shape` is the same NodeShape instance as `personShape` |
+| `FieldSet.for(Person, p => [p.name])` callback works | Assert produces FieldSet with 1 entry, label `'name'` (still uses simple proxy for now) |
+| `FieldSet.all(Person)` produces same as FieldSet.all(personShape)` | Assert `.labels()` are identical |
+| `FieldSet.for(Person, ['friends.name'])` nested path works | Assert entry path toString equals `'friends.name'` |
+
+**Non-test validation:**
+- `npx tsc --noEmit` exits 0 — overloads compile correctly, `Person` accepted without cast
+- `npm test` — all existing tests pass unchanged
+
+---
+
+### Phase 7c: Replace traceFieldsFromCallback with ProxiedPathBuilder
+
+**This is the core phase.** FieldSet callbacks now go through the real `createProxiedPathBuilder` proxy, enabling nested paths, where, aggregation, and sub-selects.
+
+#### Tasks
+
+1. Add `queryBuilderObjectToFieldSetEntry()` conversion utility:
+   - Walk `QueryBuilderObject` chain (`.subject` → `.property`) to collect `PropertyPath` segments
+   - Extract `.wherePath` → `scopedFilter` on the entry
+   - Detect `SetSize` instance → `aggregation: 'count'`
+   - Detect sub-`SelectQueryFactory` or sub-select result → `subSelect: FieldSet` (recursive)
+   - Handle custom object results → `customKey` on each entry
+2. Replace `traceFieldsFromCallback()` body:
+   - When `_shapeClass` is available (set in 7b), use `createProxiedPathBuilder(shapeClass)` to get full proxy
+   - When only NodeShape available, look up ShapeClass via registry; fall back to current simple proxy if not found
+   - Pass proxy through callback, convert returned `QueryBuilderObject[]` via step 1
+3. Delete old simple proxy code (the `new Proxy({}, { get(_target, key) { accessed.push(key) } })` block)
+4. Update `FieldSet.for(Person, callback)` path to flow through new proxy
+
+**Stubs needed for parallel execution:** None — 7c depends on 7a+7b, and 7d+7e depend on 7c.
+
+#### Validation
+
+**Test file:** `src/tests/field-set.test.ts` (new `FieldSet — callback tracing (ProxiedPathBuilder)` describe block)
+
+These tests are the FieldSet-native equivalents of assertions that currently only exist in the QueryBuilder/DSL test suites. They validate that FieldSet itself — not just the downstream IR — correctly captures the rich query information.
+
+| Test case | Assertion |
+|---|---|
+| `flat callback still works` | `FieldSet.for(Person, p => [p.name, p.hobby])` → 2 entries, labels `['name', 'hobby']` |
+| `nested path via callback` | `FieldSet.for(Person, p => [p.friends.name])` → 1 entry, `path.toString() === 'friends.name'`, `path.segments.length === 2` |
+| `deep nested path via callback` | `FieldSet.for(Person, p => [p.friends.bestFriend.name])` → 1 entry, `path.segments.length === 3`, `path.toString() === 'friends.bestFriend.name'` |
+| `where condition captured on entry` | `FieldSet.for(Person, p => [p.friends.where(f => f.name.equals('Moa'))])` → 1 entry with `scopedFilter` defined and non-null |
+| `aggregation captured on entry` | `FieldSet.for(Person, p => [p.friends.size()])` → 1 entry with `aggregation === 'count'` |
+| `sub-select captured on entry` | `FieldSet.for(Person, p => [p.friends.select(f => [f.name, f.hobby])])` → 1 entry with `subSelect` instanceof FieldSet, `subSelect.labels()` equals `['name', 'hobby']` |
+| `sub-select with custom object` | `FieldSet.for(Person, p => [p.friends.select(f => ({name: f.name, hobby: f.hobby}))])` → 1 entry with `subSelect` FieldSet and `customKey` values on sub-entries |
+| `multiple mixed selections` | `FieldSet.for(Person, p => [p.name, p.friends.name, p.bestFriend.hobby])` → 3 entries with correct paths |
+
+**IR equivalence tests** (in `src/tests/field-set.test.ts`, new `FieldSet — IR equivalence with callback` describe block):
+
+These prove that FieldSet-constructed queries produce the same IR as direct callback queries. They mirror existing tests in `query-builder.test.ts` but go through the FieldSet path.
+
+| Test case | Assertion |
+|---|---|
+| `nested path IR equivalence` | `QueryBuilder.from(Person).select(fieldSet)` where fieldSet built from `FieldSet.for(Person, p => [p.friends.name])` produces same IR as `QueryBuilder.from(Person).select(p => p.friends.name).build()` |
+| `where condition IR equivalence` | FieldSet with where → same IR as callback with where |
+| `aggregation IR equivalence` | FieldSet with `.size()` → same IR as callback with `.size()` |
+| `sub-select IR equivalence` | FieldSet with `.select()` → same IR as callback with `.select()` |
+
+**Non-test validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass including all existing query-builder and golden tests (regression)
+- Existing `FieldSet.for — callback` test in construction block still passes (backward compatible)
+
+---
+
+### Phase 7d: toJSON for callback-based selections
+
+#### Tasks
+
+1. Update `QueryBuilder.fields()` — when `_selectFn` is set but `_fieldSet` is not, eagerly evaluate the callback through `createProxiedPathBuilder` to produce and cache a FieldSet
+2. `toJSON()` then works naturally because `fields()` always returns a FieldSet
+3. Fix `fromJSON()` — read and restore `orderDirection` from JSON (currently ignored)
+4. Assess where/orderBy callback serialization scope — document decision in plan
+
+#### Validation
+
+**Test file:** `src/tests/serialization.test.ts` (add to `QueryBuilder — serialization`)
+
+| Test case | Assertion |
+|---|---|
+| `toJSON — callback select` | `QueryBuilder.from(Person).select(p => [p.name]).toJSON()` → `json.fields` has 1 entry with `path === 'name'` |
+| `toJSON — callback select nested` | `QueryBuilder.from(Person).select(p => [p.friends.name]).toJSON()` → `json.fields[0].path === 'friends.name'` |
+| `toJSON — callback select with aggregation` | `QueryBuilder.from(Person).select(p => [p.friends.size()]).toJSON()` → `json.fields[0].aggregation === 'count'` |
+| `toJSON — callback select with subSelect` | `QueryBuilder.from(Person).select(p => [p.friends.select(f => [f.name])]).toJSON()` → `json.fields[0].subSelect` is valid FieldSetJSON |
+| `fromJSON — round-trip callback select` | Round-trip: callback select → toJSON → fromJSON → build → compare IR to original |
+| `fromJSON — orderDirection preserved` | `QueryBuilder.from(Person).select(['name']).orderBy(p => p.name, 'DESC').toJSON()` → fromJSON → assert `orderDirection` is 'DESC' in rebuilt JSON |
+| `fromJSON — orderDirection round-trip IR` | Full round-trip: orderBy DESC → toJSON → fromJSON → build → assert IR has DESC sort |
+
+**Non-test validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+
+---
+
+### Phase 7e: Typed FieldSet\<R\> — carry callback return type
+
+#### Tasks
+
+1. Add generic parameter `R` to FieldSet class: `class FieldSet<R = any>`
+2. Update `FieldSet.for()` overload for callback form to capture `R`: `static for<S extends Shape, R>(shape: ShapeType<S>, fn: (p: ProxiedShape<S>) => R): FieldSet<R>`
+3. String/label overloads return `FieldSet<any>` (no type inference possible)
+4. Wire through `QueryBuilder.select()`: `select<R>(fieldSet: FieldSet<R>): QueryBuilder<S, R, ...>`
+5. Composition methods (`.add()`, `.remove()`, `.pick()`, `.merge()`) return `FieldSet<any>` (composition breaks type capture)
+
+#### Validation
+
+**Test file:** `src/tests/query-builder.types.test.ts` (add to compile-time type assertions)
+
+| Test case | Assertion |
+|---|---|
+| `FieldSet.for(Person, p => [p.name]) carries type` | `const fs = FieldSet.for(Person, p => [p.name])` — compile-time: `fs` is `FieldSet<QueryBuilderObject[]>` (or the specific return type) |
+| `QueryBuilder.select(typedFieldSet) resolves typed result` | `QueryBuilder.from(Person).select(fs)` — compile-time: result type matches callback return type |
+| `FieldSet.for(personShape, ['name']) is FieldSet<any>` | Compile-time: string-constructed FieldSet has `any` type parameter |
+| `composition degrades to FieldSet<any>` | `fs.add(['hobby'])` — compile-time: result is `FieldSet<any>` |
+
+**Non-test validation:**
+- `npx tsc --noEmit` exits 0 — this is the primary validation (type system correctness)
+- `npm test` — all tests pass (runtime behavior unchanged)
+
+---
+
+### Phase 8: QueryBuilder generates IR directly — bypass SelectQueryFactory
+
+#### Tasks
+
+1. Build `fieldSetToSelectPath()` — converts `FieldSetEntry[]` to `QueryPath[]` (the format `RawSelectInput.select` expects):
+   - PropertyPath segments → `PropertyQueryStep[]`
+   - `entry.scopedFilter` → step `.where`
+   - `entry.subSelect` → nested `QueryPath[]` (recursive)
+   - `entry.aggregation === 'count'` → `SizeStep`
+2. Build `evaluateWhere()` — runs where callback through `createProxiedPathBuilder`, extracts `WherePath`
+3. Build `evaluateSort()` — runs orderBy callback through proxy, extracts sort path + direction
+4. Replace `QueryBuilder.buildFactory()` with direct `toRawInput()` using steps 1–3
+5. Keep `buildFactory()` as deprecated fallback (removed in Phase 10)
+
+#### Validation
+
+**Test file:** `src/tests/query-builder.test.ts` — all existing `IR equivalence with DSL` tests serve as regression validation. No new test file needed — the existing 12 IR equivalence tests (`selectName`, `selectMultiplePaths`, `selectFriendsName`, `selectDeepNested`, `whereFriendsNameEquals`, `whereAnd`, `selectById`, `outerWhereLimit`, `sortByAsc`, `countFriends`, `subSelectPluralCustom`, `selectAllProperties`) must all still pass.
+
+**Additional test cases** (add to `query-builder.test.ts`, new `QueryBuilder — direct IR generation` describe block):
+
+| Test case | Assertion |
+|---|---|
+| `FieldSet with where produces same IR as callback` | `QueryBuilder.from(Person).select(fieldSetWithWhere).build()` equals callback-based IR |
+| `FieldSet with subSelect produces same IR as callback` | Sub-select through FieldSet → same IR |
+| `FieldSet with aggregation produces same IR as callback` | Aggregation through FieldSet → same IR |
+| `buildFactory is no longer called` | Spy/mock `buildFactory` — assert it's never invoked when FieldSet path is used |
+
+**Non-test validation:**
+- All golden SPARQL tests pass (`sparql-select-golden.test.ts` — 50+ tests)
+- All IR golden tests pass (`ir-select-golden.test.ts`)
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+
+---
+
+### Phase 9: Sub-queries through FieldSet — remove SelectQueryFactory from DSL path
+
+#### Tasks
+
+1. Update `QueryShapeSet.select()` — instead of `new SelectQueryFactory(valueShape, fn)`, produce `FieldSet.for(valueShape, fn)` and store as parent `FieldSetEntry.subSelect`
+2. Update `QueryShape.select()` — same change for single-value sub-selections
+3. Update `BoundComponent.getComponentQueryPaths()` — convert component's query to FieldSet, merge into parent sub-selection
+4. Remove SelectQueryFactory creation from proxy handlers
+
+**Stubs for parallel execution:** N/A — this phase is sequential after Phase 8.
+
+#### Validation
+
+**Test file:** `src/tests/query-builder.test.ts` — existing sub-select IR equivalence test (`subSelectPluralCustom`) must pass unchanged.
+
+**Regression tests** — all golden tests that exercise sub-selects must pass:
+
+| Golden test file | Sub-select test cases |
+|---|---|
+| `sparql-select-golden.test.ts` | `subSelectSingleProp`, `subSelectPluralCustom`, `subSelectAllProperties`, `subSelectAllPropertiesSingle`, `subSelectAllPrimitives`, `subSelectArray`, `doubleNestedSubSelect`, `nestedQueries2` |
+| `ir-select-golden.test.ts` | `build preserves nested sub-select projections inside array selections` |
+
+**New integration test** (add to `field-set.test.ts`):
+
+| Test case | Assertion |
+|---|---|
+| `DSL sub-select produces FieldSet entry with subSelect` | After Phase 9, `Person.select(p => p.friends.select(f => [f.name]))` internally creates FieldSet. Verify via `QueryBuilder.from(Person).select(p => p.friends.select(f => [f.name])).fields()` returns a FieldSet with entry that has `subSelect` |
+
+**Non-test validation:**
+- `grep -r 'new SelectQueryFactory' src/` returns 0 hits (excluding the factory's own file and tests)
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+
+---
+
+### Phase 10: Remove SelectQueryFactory
+
+#### Tasks
+
+1. Verify no remaining runtime usages: `grep -r 'SelectQueryFactory' src/` only in definition + type exports
+2. Delete `SelectQueryFactory` class from `SelectQuery.ts` (~600 lines)
+3. Delete `patchResultPromise()` and `PatchedQueryPromise` type (if not already removed)
+4. Remove from barrel exports (`src/index.ts`)
+5. Remove from `QueryFactory.ts` if referenced
+6. Clean up `QueryContext.ts` if only used by SelectQueryFactory
+7. Remove deprecated `QueryBuilder.buildFactory()` method
+8. Update `QueryComponentLike` type — remove SelectQueryFactory variant
+
+#### Validation
+
+| Check | Expected result |
+|---|---|
+| `grep -r 'SelectQueryFactory' src/` | 0 hits (excluding comments/changelog) |
+| `grep -r 'buildFactory' src/` | 0 hits |
+| `grep -r 'patchResultPromise' src/` | 0 hits |
+| `npx tsc --noEmit` | exits 0 |
+| `npm test` | all tests pass |
+| All golden tests | pass unchanged (same IR, same SPARQL output) |
+
+---
+
+### Phase 11: Hardening — API cleanup and robustness
+
+Each item to be discussed with project owner before implementation. This phase is a series of small, independent tasks.
+
+#### Tasks (each reviewed individually)
+
+1. `FieldSet.merge()` shape validation — throw on mismatched shapes?
+2. `CreateBuilder.build()` missing-data guard — throw like UpdateBuilder?
+3. `FieldSet.all()` depth parameter — implement or remove?
+4. `FieldSet.select()` vs `FieldSet.set()` duplication — remove one
+5. Dead import cleanup — `FieldSetJSON` from QueryBuilder.ts, `toNodeReference` from UpdateBuilder.ts
+6. `toJSON()` dead branch — remove unreachable `else if (this._selectAllLabels)`
+7. Reduce `as any` / `as unknown as` casts (target: reduce 28 → <10)
+8. Clone type preservation — `clone()` returns properly typed `QueryBuilder<S, R, T>`
+9. `PropertyPath.segments` defensive copy — `Object.freeze` or `.slice()`
+10. `FieldSet.traceFieldsFromCallback` removal — delete old simple proxy code (should already be gone from 7c)
+
+#### Validation
+
+Per-item validation — each item gets its own commit with:
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+- For item 7 (cast reduction): `grep -c 'as any\|as unknown' src/queries/*.ts` count < 10
