@@ -394,19 +394,20 @@ Phase 4 (done)       [after 3a and 3b]
     ↓
 Phase 5 (done)       [after 4.4a and 3a — preloadFor + component integration]
     ↓
-Phase 6              [forAll multi-ID — independent, can start anytime after Phase 5]
+Phase 6              [forAll multi-ID — independent, small, quick win]
     ↓
-Phase 7              [unified callback tracing — FieldSet becomes canonical query primitive]
+Phase 7              [unified callback tracing — THE foundational refactor]
+  ├─ 7a: FieldSetEntry expansion + ProxiedPathBuilder reuse
+  ├─ 7b: toJSON for callback-based selections
+  └─ 7c: typed FieldSet<R> (was Phase 8 — natural to do while changing FieldSet.for())
     ↓
-Phase 8              [typed FieldSets — FieldSet<R> with callback type capture]
+Phase 8              [QueryBuilder direct IR — bypass SelectQueryFactory]
     ↓
-Phase 9              [QueryBuilder direct IR — bypass SelectQueryFactory]
+Phase 9              [sub-queries through FieldSet — DSL proxy produces FieldSets]
     ↓
-Phase 10             [sub-queries through FieldSet — DSL proxy produces FieldSets]
+Phase 10             [remove SelectQueryFactory]
     ↓
-Phase 11             [remove SelectQueryFactory]
-    ↓
-Phase 12             [hardening — API cleanup, reviewed item by item]
+Phase 11             [hardening — API cleanup, reviewed item by item]
 ```
 
 ---
@@ -1631,7 +1632,7 @@ These should be the same code path. The DSL already solves nested path tracing �
 
 ---
 
-### Phase 8: Typed FieldSets — carry `R` through FieldSet
+### Phase 7c: Typed FieldSets — carry `R` through FieldSet (was Phase 8)
 
 **Goal:** When a FieldSet is built from a callback, capture the callback's return type as a generic parameter so that `QueryBuilder.select(fieldSet)` preserves type safety.
 
@@ -1672,11 +1673,11 @@ These should be the same code path. The DSL already solves nested path tracing �
 
 ---
 
-### Phase 9: QueryBuilder generates IR directly — bypass SelectQueryFactory
+### Phase 8: QueryBuilder generates IR directly — bypass SelectQueryFactory
 
 **Goal:** Remove the `buildFactory()` bridge. QueryBuilder converts its internal state (FieldSet-based) directly to `RawSelectInput`, bypassing `SelectQueryFactory` entirely for top-level queries.
 
-**Depends on:** Phase 7 (FieldSet carries full query information)
+**Depends on:** Phase 7 (FieldSet carries full query information including where/sub-select/aggregation)
 
 **Current state:** `QueryBuilder.buildFactory()` creates a fresh `SelectQueryFactory`, passes the callback + state, lets the factory run the proxy tracing + `getQueryPaths()`, then calls `toRawInput()`. This is the legacy bridge.
 
@@ -1714,7 +1715,7 @@ These should be the same code path. The DSL already solves nested path tracing �
    - `evaluateSort()`: run callback through proxy, extract sort path + direction
    - These are one-shot evaluations (same as what SelectQueryFactory.init() does)
 
-4. **Keep `buildFactory()` as deprecated fallback** (removed in Phase 11)
+4. **Keep `buildFactory()` as deprecated fallback** (removed in Phase 10)
 
 #### Validation
 
@@ -1728,11 +1729,11 @@ These should be the same code path. The DSL already solves nested path tracing �
 
 ---
 
-### Phase 10: Sub-queries through FieldSet — remove SelectQueryFactory from DSL path
+### Phase 9: Sub-queries through FieldSet — remove SelectQueryFactory from DSL path
 
 **Goal:** When the DSL does `p.friends.select(f => [f.name, f.hobby])`, the sub-selection is represented as a nested `FieldSet` instead of a nested `SelectQueryFactory`. This means `QueryShape.select()` and `QueryShapeSet.select()` produce FieldSets, not factories.
 
-**Depends on:** Phase 9 (QueryBuilder generates IR directly from FieldSet)
+**Depends on:** Phase 8 (QueryBuilder generates IR directly from FieldSet)
 
 **Current sub-query flow:**
 ```
@@ -1783,17 +1784,17 @@ p.friends.select(fn)
 
 ---
 
-### Phase 11: Remove SelectQueryFactory
+### Phase 10: Remove SelectQueryFactory
 
 **Goal:** Delete `SelectQueryFactory` and all supporting code that is no longer reachable.
 
-**Depends on:** Phase 10 (all DSL paths use FieldSet, no code creates SelectQueryFactory)
+**Depends on:** Phase 9 (all DSL paths use FieldSet, no code creates SelectQueryFactory)
 
 #### Implementation
 
 1. **Verify no remaining usages:**
    - `grep -r 'SelectQueryFactory' src/` should only find the definition and type-only imports
-   - `grep -r 'buildFactory' src/` should find nothing (removed in Phase 9)
+   - `grep -r 'buildFactory' src/` should find nothing (removed in Phase 8)
    - Confirm `QueryBuilder.buildFactory()` deprecated path is removed
 
 2. **Remove from SelectQuery.ts:**
@@ -1826,11 +1827,11 @@ p.friends.select(fn)
 
 ---
 
-### Phase 12: Hardening — API cleanup and robustness
+### Phase 11: Hardening — API cleanup and robustness
 
 **Goal:** Address remaining review findings. Each item to be discussed with project owner before implementation.
 
-**Depends on:** Phases 6–11 complete
+**Depends on:** Phases 6–10 complete
 
 **Candidate items (to be reviewed individually):**
 
@@ -1870,12 +1871,11 @@ p.friends.select(fn)
 - `Person.selectAll({ depth })` — FieldSet.all with depth exposed on DSL
 - Tests verifying DSL and builders produce identical IR
 - `forAll(ids)` — multi-ID subject filtering via VALUES clause (Phase 6)
-- Unified callback tracing — FieldSet reuses ProxiedPathBuilder, carries where/sub-select/aggregation (Phase 7)
-- Typed FieldSets — `FieldSet<R>` carries callback return type through to QueryBuilder (Phase 8)
-- Direct IR generation — QueryBuilder bypasses SelectQueryFactory, converts FieldSet → RawSelectInput (Phase 9)
-- Sub-queries through FieldSet — DSL proxy produces nested FieldSets instead of nested SelectQueryFactory (Phase 10)
-- SelectQueryFactory removal (Phase 11)
-- Hardening — API cleanup, robustness, cast reduction (Phase 12, items reviewed individually)
+- Unified callback tracing — FieldSet reuses ProxiedPathBuilder, carries where/sub-select/aggregation, typed `FieldSet<R>` (Phase 7)
+- Direct IR generation — QueryBuilder bypasses SelectQueryFactory, converts FieldSet → RawSelectInput (Phase 8)
+- Sub-queries through FieldSet — DSL proxy produces nested FieldSets instead of nested SelectQueryFactory (Phase 9)
+- SelectQueryFactory removal (Phase 10)
+- Hardening — API cleanup, robustness, cast reduction (Phase 11, items reviewed individually)
 
 **Out of scope (separate plans, already have ideation docs):**
 - `FieldSet.summary()` — CMS-layer concern, not core
