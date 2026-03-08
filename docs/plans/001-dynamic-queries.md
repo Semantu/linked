@@ -2255,7 +2255,19 @@ These prove that FieldSet-constructed queries produce the same IR as direct call
 
 ---
 
-### Phase 9: Sub-queries through FieldSet — remove SelectQueryFactory from DSL path
+### Phase 9: Sub-queries through FieldSet — remove SelectQueryFactory from DSL path ✅
+
+**Status: Complete.**
+
+FieldSet now properly handles sub-selects from DSL proxy tracing. Instead of changing `QueryShapeSet.select()` (which would break the legacy path), we enhanced `FieldSet.convertTraceResult()` to extract sub-select FieldSets from the factory's `traceResponse`. Callbacks producing sub-selects now go through the direct FieldSet→RawSelectInput path via try/catch fallback. Callbacks with Evaluation or BoundComponent (preload) results still fall back to the legacy path.
+
+**Files delivered:**
+- `src/queries/FieldSet.ts` — enhanced `convertTraceResult()` for SelectQueryFactory extraction, added `extractSubSelectEntries()`, `createInternal()`, duck-type detectors for Evaluation and BoundComponent
+- `src/queries/SelectQuery.ts` — `fieldSetToSelectPath()` returns `SelectPath` (supports `CustomQueryObject` when all entries have `customKey`), refactored to use `entryToQueryPath()` helper
+- `src/queries/QueryBuilder.ts` — `toRawInput()` uses try/catch for callback direct path, preload guard restored
+- `src/tests/field-set.test.ts` — 4 new tests in "FieldSet — sub-select extraction" block
+
+**Original plan below for reference:**
 
 #### Tasks
 
