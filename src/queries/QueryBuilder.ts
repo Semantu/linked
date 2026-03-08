@@ -263,6 +263,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
    * Returns the current selection as a FieldSet.
    * If the selection was set via a FieldSet, returns that directly.
    * If set via selectAll labels, constructs a FieldSet from them.
+   * If set via a callback, eagerly evaluates it through the proxy to produce a FieldSet.
    */
   fields(): FieldSet | undefined {
     if (this._fieldSet) {
@@ -270,6 +271,11 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     }
     if (this._selectAllLabels) {
       return FieldSet.for((this._shape as any).shape, this._selectAllLabels);
+    }
+    if (this._selectFn) {
+      // Eagerly evaluate the callback through FieldSet.for(ShapeClass, callback)
+      // The callback is pure — same proxy always produces same paths.
+      return FieldSet.for(this._shape, this._selectFn as unknown as (p: any) => any[]);
     }
     return undefined;
   }
@@ -281,12 +287,12 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   /**
    * Serialize this QueryBuilder to a plain JSON object.
    *
-   * Only label-based selections (from FieldSet, string[], or selectAll) are
-   * serializable. Callback-based selections cannot be serialized and will
-   * result in an empty fields array.
+   * Selections are serializable regardless of how they were set (FieldSet,
+   * string[], selectAll, or callback). Callback-based selections are eagerly
+   * evaluated through the proxy to produce a FieldSet.
    *
-   * The `where`, `orderBy`, and other callback-based options are similarly
-   * not serializable in the current phase.
+   * The `where` and `orderBy` callbacks are not serialized (only the direction
+   * is preserved for orderBy).
    */
   toJSON(): QueryBuilderJSON {
     const shapeId = (this._shape as any).shape?.id || '';
@@ -353,6 +359,13 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     }
     if (json.singleResult && !json.subject) {
       builder = builder.one() as QueryBuilder<S>;
+    }
+    // Restore orderDirection. The sort key callback isn't serializable,
+    // so we only store the direction. When a sort key is later re-applied
+    // via .orderBy(), the direction will be available.
+    if (json.orderDirection) {
+      // Access private clone() — safe because fromJSON is in the same class.
+      builder = (builder as any).clone({sortDirection: json.orderDirection}) as QueryBuilder<S>;
     }
 
     return builder;

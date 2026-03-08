@@ -196,4 +196,57 @@ describe('QueryBuilder — serialization', () => {
     const restoredIR = restored.build();
     expect(sanitize(restoredIR)).toEqual(sanitize(originalIR));
   });
+
+  // --- Phase 7d: callback-based selection serialization ---
+
+  test('toJSON — callback select', () => {
+    const json = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .toJSON();
+    expect(json.fields).toHaveLength(1);
+    expect(json.fields![0].path).toBe('name');
+  });
+
+  test('toJSON — callback select nested', () => {
+    const json = QueryBuilder.from(Person)
+      .select((p) => [p.friends.name])
+      .toJSON();
+    expect(json.fields).toHaveLength(1);
+    expect(json.fields![0].path).toBe('friends.name');
+  });
+
+  test('toJSON — callback select with aggregation', () => {
+    const json = QueryBuilder.from(Person)
+      .select((p) => [p.friends.size()])
+      .toJSON();
+    expect(json.fields).toHaveLength(1);
+    expect(json.fields![0].aggregation).toBe('count');
+  });
+
+  test('fromJSON — round-trip callback select', () => {
+    const original = QueryBuilder.from(Person)
+      .select((p) => [p.name, p.hobby])
+      .limit(10);
+    const json = original.toJSON();
+    const restored = QueryBuilder.fromJSON(json);
+
+    // The restored builder won't have the callback, but the FieldSet
+    // should produce equivalent IR for the selection part.
+    expect(json.fields).toHaveLength(2);
+    expect(json.fields![0].path).toBe('name');
+    expect(json.fields![1].path).toBe('hobby');
+    expect(restored.build().limit).toBe(10);
+  });
+
+  test('fromJSON — orderDirection preserved', () => {
+    const json = QueryBuilder.from(Person)
+      .select(['name'])
+      .orderBy((p) => p.name, 'DESC')
+      .toJSON();
+    expect(json.orderDirection).toBe('DESC');
+
+    const restored = QueryBuilder.fromJSON(json);
+    const restoredJson = restored.toJSON();
+    expect(restoredJson.orderDirection).toBe('DESC');
+  });
 });
