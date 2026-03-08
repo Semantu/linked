@@ -892,12 +892,46 @@ export class QueryBuilderObject<
 
 /**
  * Convert a FieldSet's entries to a SelectPath (QueryPath[]).
- * Each FieldSetEntry's PropertyPath segments become QuerySteps.
+ * Handles extended entry fields: scopedFilter → step.where, aggregation → SizeStep,
+ * subSelect → nested QueryPath[].
  */
-function fieldSetToSelectPath(fieldSet: FieldSet): QueryPath[] {
-  return fieldSet.entries.map((entry) =>
-    entry.path.segments.map((segment) => ({property: segment})),
-  );
+export function fieldSetToSelectPath(fieldSet: FieldSet): QueryPath[] {
+  return fieldSet.entries.map((entry) => {
+    const segments = entry.path.segments;
+
+    // Count aggregation → SizeStep
+    if (entry.aggregation === 'count') {
+      // Last segment is the countable, preceding segments form the parent path
+      if (segments.length === 0) return [];
+      const lastSegment = segments[segments.length - 1];
+      const countStep: SizeStep = {
+        count: [{property: lastSegment}],
+        label: entry.customKey || lastSegment.label,
+      };
+      if (segments.length === 1) {
+        return [countStep];
+      }
+      const parentSteps: QueryStep[] = segments.slice(0, -1).map((seg) => ({property: seg}));
+      return [...parentSteps, countStep];
+    }
+
+    // Build property steps, attaching scopedFilter to the last segment
+    const steps: QueryStep[] = segments.map((segment, i) => {
+      const step: PropertyQueryStep = {property: segment};
+      if (entry.scopedFilter && i === segments.length - 1) {
+        step.where = entry.scopedFilter as unknown as WherePath;
+      }
+      return step;
+    });
+
+    // SubSelect → append nested paths as sub-query
+    if (entry.subSelect) {
+      const nestedPaths = fieldSetToSelectPath(entry.subSelect);
+      return [...steps, nestedPaths] as unknown as QueryPath;
+    }
+
+    return steps;
+  });
 }
 
 export class BoundComponent<
@@ -987,7 +1021,7 @@ const convertQueryContext = (shape: QueryShape): ShapeReferenceValue => {
   } as ShapeReferenceValue;
 };
 
-const processWhereClause = (
+export const processWhereClause = (
   validation: WhereClause<any>,
   shape?,
 ): WherePath => {
@@ -999,6 +1033,30 @@ const processWhereClause = (
   } else {
     return (validation as Evaluation).getWherePath();
   }
+};
+
+/**
+ * Evaluate a sort callback through the proxy and extract a SortByPath.
+ * This is a standalone helper that replaces the need for SelectQueryFactory.sortBy().
+ */
+export const evaluateSortCallback = <S extends Shape>(
+  shape: ShapeType<S>,
+  sortFn: (p: any) => any,
+  direction: 'ASC' | 'DESC' = 'ASC',
+): SortByPath => {
+  const proxy = createProxiedPathBuilder(shape);
+  const response = sortFn(proxy);
+  const paths: QueryPath[] = [];
+  if (response instanceof QueryBuilderObject || response instanceof QueryPrimitiveSet) {
+    paths.push(response.getPropertyPath());
+  } else if (Array.isArray(response)) {
+    for (const item of response) {
+      if (item instanceof QueryBuilderObject) {
+        paths.push(item.getPropertyPath());
+      }
+    }
+  }
+  return {paths, direction};
 };
 
 export class QueryShapeSet<

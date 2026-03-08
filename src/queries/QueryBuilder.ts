@@ -9,8 +9,11 @@ import {
   QueryResponseToResultType,
   SelectAllQueryResponse,
   QueryComponentLike,
+  fieldSetToSelectPath,
+  processWhereClause,
+  evaluateSortCallback,
 } from './SelectQuery.js';
-import type {SelectPath} from './SelectQuery.js';
+import type {SelectPath, SortByPath, WherePath} from './SelectQuery.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
@@ -376,10 +379,22 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   // ---------------------------------------------------------------------------
 
   /**
-   * Build the internal SelectQueryFactory with our immutable state,
-   * producing the same RawSelectInput the DSL path produces.
+   * @deprecated Legacy bridge — will be removed in Phase 10.
+   * Falls back to SelectQueryFactory for edge cases (preloads).
    */
-  private buildFactory(): SelectQueryFactory<S, R> {
+  private _buildFactoryRawInput(): RawSelectInput {
+    const raw = this._buildFactory().toRawInput();
+    if (this._subjects && this._subjects.length > 0) {
+      raw.subjects = this._subjects;
+    }
+    return raw;
+  }
+
+  /**
+   * @deprecated Legacy bridge — will be removed in Phase 10.
+   * Build the internal SelectQueryFactory with our immutable state.
+   */
+  private _buildFactory(): SelectQueryFactory<S, R> {
     // If preloads exist, wrap the selectFn to include preloadFor calls
     let selectFn = this._selectFn;
     if (this._preloads && this._preloads.length > 0) {
@@ -424,16 +439,76 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
    * Used by BoundComponent to merge component query paths into a parent query.
    */
   getQueryPaths(): SelectPath {
-    return this.buildFactory().getQueryPaths();
+    return this._buildFactory().getQueryPaths();
   }
 
-  /** Get the raw pipeline input (same as SelectQueryFactory.toRawInput()). */
+  /**
+   * Get the raw pipeline input.
+   *
+   * Constructs RawSelectInput directly from FieldSet + where/sort callbacks,
+   * bypassing SelectQueryFactory. Falls back to buildFactory() for edge cases
+   * (preloads, complex callbacks with sub-selects) that still require the legacy path.
+   */
   toRawInput(): RawSelectInput {
-    const raw = this.buildFactory().toRawInput();
-    if (this._subjects && this._subjects.length > 0) {
-      raw.subjects = this._subjects;
+    // Direct path: when we have an explicit FieldSet, label-based selection,
+    // or no selection at all. These can be converted to RawSelectInput directly.
+    // Arbitrary callbacks may produce BoundComponent, Evaluation, or
+    // SelectQueryFactory results that FieldSet can't convert yet (Phase 9).
+    if (this._fieldSet || this._selectAllLabels || !this._selectFn) {
+      return this._buildDirectRawInput();
     }
-    return raw;
+
+    // Legacy path for callbacks and preloads — delegates to SelectQueryFactory
+    return this._buildFactoryRawInput();
+  }
+
+  /**
+   * Build RawSelectInput directly from FieldSet, bypassing SelectQueryFactory.
+   */
+  private _buildDirectRawInput(): RawSelectInput {
+    const fs = this.fields();
+    const select: SelectPath = fs ? fieldSetToSelectPath(fs) : [];
+
+    // Evaluate where callback
+    let where: WherePath | undefined;
+    if (this._whereFn) {
+      where = processWhereClause(this._whereFn, this._shape);
+    }
+
+    // Evaluate sort callback
+    let sortBy: SortByPath | undefined;
+    if (this._sortByFn) {
+      sortBy = evaluateSortCallback(
+        this._shape,
+        this._sortByFn as unknown as (p: any) => any,
+        (this._sortDirection as 'ASC' | 'DESC') || 'ASC',
+      );
+    }
+
+    const input: RawSelectInput = {
+      select,
+      subject: this._subject,
+      limit: this._limit,
+      offset: this._offset,
+      shape: this._shape,
+      sortBy: sortBy as any,
+      singleResult:
+        this._singleResult ||
+        !!(
+          this._subject &&
+          typeof this._subject === 'object' &&
+          'id' in this._subject
+        ),
+    };
+
+    if (where) {
+      input.where = where;
+    }
+    if (this._subjects && this._subjects.length > 0) {
+      input.subjects = this._subjects;
+    }
+
+    return input;
   }
 
   /** Build the IR (run the full pipeline: desugar → canonicalize → lower). */

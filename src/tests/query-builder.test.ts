@@ -445,3 +445,86 @@ describe('QueryBuilder — forAll', () => {
     expect(ir.subjectIds).toContain(`${tmpEntityBase}p2`);
   });
 });
+
+// =============================================================================
+// Phase 8: Direct IR generation tests
+// =============================================================================
+
+describe('QueryBuilder — direct IR generation', () => {
+  test('FieldSet select produces same IR as callback select', () => {
+    const fs = FieldSet.for(Person, ['name', 'hobby']);
+    const fieldSetIR = QueryBuilder.from(Person).select(fs).build();
+    const callbackIR = QueryBuilder.from(Person).select((p) => [p.name, p.hobby]).build();
+    expect(sanitize(fieldSetIR)).toEqual(sanitize(callbackIR));
+  });
+
+  test('FieldSet select with where produces same IR as callback', () => {
+    const fs = FieldSet.for(Person, ['name']);
+    const fieldSetIR = QueryBuilder.from(Person)
+      .select(fs)
+      .where((p) => p.name.equals('Semmy'))
+      .build();
+    const callbackIR = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .where((p) => p.name.equals('Semmy'))
+      .build();
+    expect(sanitize(fieldSetIR)).toEqual(sanitize(callbackIR));
+  });
+
+  test('FieldSet select with orderBy produces same IR as callback', () => {
+    const fs = FieldSet.for(Person, ['name']);
+    const fieldSetIR = QueryBuilder.from(Person)
+      .select(fs)
+      .orderBy((p) => p.name, 'DESC')
+      .build();
+    const callbackIR = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .orderBy((p) => p.name, 'DESC')
+      .build();
+    expect(sanitize(fieldSetIR)).toEqual(sanitize(callbackIR));
+  });
+
+  test('selectAll uses direct path (no buildFactory)', () => {
+    const ir = QueryBuilder.from(Person).selectAll().limit(5).build();
+    expect(ir.projection.length).toBeGreaterThan(0);
+    expect(ir.limit).toBe(5);
+  });
+
+  test('label-based select uses direct path', () => {
+    const ir = QueryBuilder.from(Person).select(['name', 'hobby']).limit(10).build();
+    expect(ir.projection.length).toBe(2);
+    expect(ir.limit).toBe(10);
+  });
+
+  test('direct path handles where + limit + offset', () => {
+    const fs = FieldSet.for(Person, ['name']);
+    const ir = QueryBuilder.from(Person)
+      .select(fs)
+      .where((p) => p.name.equals('Semmy'))
+      .limit(5)
+      .offset(10)
+      .build();
+    expect(ir.where).toBeDefined();
+    expect(ir.limit).toBe(5);
+    expect(ir.offset).toBe(10);
+  });
+
+  test('direct path handles forAll + subjects', () => {
+    const fs = FieldSet.for(Person, ['name']);
+    const ir = QueryBuilder.from(Person)
+      .select(fs)
+      .forAll([`${tmpEntityBase}p1`, `${tmpEntityBase}p2`])
+      .build();
+    expect(ir.subjectIds).toHaveLength(2);
+  });
+
+  test('direct path handles for (single subject)', () => {
+    const fs = FieldSet.for(Person, ['name']);
+    const ir = QueryBuilder.from(Person)
+      .select(fs)
+      .for({id: `${tmpEntityBase}p1`})
+      .build();
+    expect(ir.subjectId).toBe(`${tmpEntityBase}p1`);
+    expect(ir.singleResult).toBe(true);
+  });
+});
