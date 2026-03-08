@@ -4,12 +4,16 @@ import {getShapeClass} from '../utils/ShapeClass.js';
 import type {WhereCondition} from './WhereCondition.js';
 
 /**
- * A single entry in a FieldSet: a property path with optional alias and scoped filter.
+ * A single entry in a FieldSet: a property path with optional alias, scoped filter,
+ * sub-selection, aggregation, and custom key.
  */
 export type FieldSetEntry = {
   path: PropertyPath;
   alias?: string;
   scopedFilter?: WhereCondition;
+  subSelect?: FieldSet;
+  aggregation?: 'count';
+  customKey?: string;
 };
 
 /**
@@ -30,6 +34,9 @@ export type FieldSetInput =
 export type FieldSetFieldJSON = {
   path: string;
   as?: string;
+  subSelect?: FieldSetJSON;
+  aggregation?: string;
+  customKey?: string;
 };
 
 /** JSON representation of a FieldSet. */
@@ -116,7 +123,10 @@ export class FieldSet {
 
     for (const set of sets) {
       for (const entry of set.entries) {
-        const key = entry.path.toString();
+        // Include aggregation in the dedup key so that 'friends' and 'friends(count)' are distinct
+        const key = entry.aggregation
+          ? `${entry.path.toString()}:${entry.aggregation}`
+          : entry.path.toString();
         if (!seen.has(key)) {
           seen.add(key);
           merged.push(entry);
@@ -201,6 +211,15 @@ export class FieldSet {
         if (entry.alias) {
           field.as = entry.alias;
         }
+        if (entry.subSelect) {
+          field.subSelect = entry.subSelect.toJSON();
+        }
+        if (entry.aggregation) {
+          field.aggregation = entry.aggregation;
+        }
+        if (entry.customKey) {
+          field.customKey = entry.customKey;
+        }
         return field;
       }),
     };
@@ -212,10 +231,22 @@ export class FieldSet {
    */
   static fromJSON(json: FieldSetJSON): FieldSet {
     const resolvedShape = FieldSet.resolveShape(json.shape);
-    const entries: FieldSetEntry[] = json.fields.map((field) => ({
-      path: walkPropertyPath(resolvedShape, field.path),
-      alias: field.as,
-    }));
+    const entries: FieldSetEntry[] = json.fields.map((field) => {
+      const entry: FieldSetEntry = {
+        path: walkPropertyPath(resolvedShape, field.path),
+        alias: field.as,
+      };
+      if (field.subSelect) {
+        entry.subSelect = FieldSet.fromJSON(field.subSelect);
+      }
+      if (field.aggregation) {
+        entry.aggregation = field.aggregation as 'count';
+      }
+      if (field.customKey) {
+        entry.customKey = field.customKey;
+      }
+      return entry;
+    });
     return new FieldSet(resolvedShape, entries);
   }
 

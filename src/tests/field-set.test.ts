@@ -154,6 +154,118 @@ describe('FieldSet — nesting', () => {
 });
 
 // =============================================================================
+// Extended entry fields (Phase 7a)
+// =============================================================================
+
+describe('FieldSet — extended entries', () => {
+  /** Helper: build a FieldSet from JSON with extended fields (subSelect, aggregation, customKey). */
+  const buildExtended = (fields: Array<{path: string; subSelect?: any; aggregation?: string; customKey?: string}>) =>
+    FieldSet.fromJSON({shape: personShape.id, fields});
+
+  test('entry with subSelect preserved through add()', () => {
+    const fs = buildExtended([
+      {path: 'friends', subSelect: {shape: personShape.id, fields: [{path: 'name'}]}},
+    ]);
+    const fs2 = fs.add(['hobby']);
+    expect(fs2.entries.length).toBe(2);
+    expect(fs2.entries[0].subSelect).toBeDefined();
+    expect(fs2.entries[0].subSelect!.labels()).toEqual(['name']);
+  });
+
+  test('entry with aggregation preserved through pick()', () => {
+    const fs = buildExtended([
+      {path: 'friends', aggregation: 'count'},
+      {path: 'name'},
+    ]);
+    const fs2 = fs.pick(['friends']);
+    expect(fs2.entries.length).toBe(1);
+    expect(fs2.entries[0].aggregation).toBe('count');
+  });
+
+  test('entry with customKey preserved through merge()', () => {
+    const fs1 = buildExtended([{path: 'friends', customKey: 'numFriends'}]);
+    const fs2 = FieldSet.for(personShape, ['name']);
+    const merged = FieldSet.merge([fs1, fs2]);
+    expect(merged.entries.length).toBe(2);
+    expect(merged.entries[0].customKey).toBe('numFriends');
+  });
+
+  test('entries with same path but different aggregation are distinct in merge()', () => {
+    const fs1 = FieldSet.for(personShape, ['friends']);
+    const fs2 = buildExtended([{path: 'friends', aggregation: 'count'}]);
+    const merged = FieldSet.merge([fs1, fs2]);
+    expect(merged.entries.length).toBe(2);
+  });
+});
+
+// =============================================================================
+// Extended serialization (Phase 7a)
+// =============================================================================
+
+describe('FieldSet — extended serialization', () => {
+  test('toJSON — entry with subSelect', () => {
+    const inner = FieldSet.for(personShape, ['name']);
+    const fs = FieldSet.fromJSON({
+      shape: personShape.id,
+      fields: [{path: 'friends', subSelect: inner.toJSON()}],
+    });
+    const json = fs.toJSON();
+    expect(json.fields[0].subSelect).toBeDefined();
+    expect(json.fields[0].subSelect!.fields).toHaveLength(1);
+    expect(json.fields[0].subSelect!.fields[0].path).toBe('name');
+  });
+
+  test('toJSON — entry with aggregation', () => {
+    const fs = FieldSet.fromJSON({
+      shape: personShape.id,
+      fields: [{path: 'friends', aggregation: 'count'}],
+    });
+    const json = fs.toJSON();
+    expect(json.fields[0].aggregation).toBe('count');
+  });
+
+  test('toJSON — entry with customKey', () => {
+    const fs = FieldSet.fromJSON({
+      shape: personShape.id,
+      fields: [{path: 'friends', customKey: 'numFriends'}],
+    });
+    const json = fs.toJSON();
+    expect(json.fields[0].customKey).toBe('numFriends');
+  });
+
+  test('fromJSON — round-trip subSelect', () => {
+    const json = {
+      shape: personShape.id,
+      fields: [{path: 'friends', subSelect: {shape: personShape.id, fields: [{path: 'name'}]}}],
+    };
+    const fs = FieldSet.fromJSON(json);
+    const roundTripped = FieldSet.fromJSON(fs.toJSON());
+    expect(roundTripped.entries[0].subSelect).toBeDefined();
+    expect(roundTripped.entries[0].subSelect!.labels()).toEqual(['name']);
+  });
+
+  test('fromJSON — round-trip aggregation', () => {
+    const json = {
+      shape: personShape.id,
+      fields: [{path: 'friends', aggregation: 'count'}],
+    };
+    const fs = FieldSet.fromJSON(json);
+    const roundTripped = FieldSet.fromJSON(fs.toJSON());
+    expect(roundTripped.entries[0].aggregation).toBe('count');
+  });
+
+  test('fromJSON — round-trip customKey', () => {
+    const json = {
+      shape: personShape.id,
+      fields: [{path: 'friends', customKey: 'numFriends'}],
+    };
+    const fs = FieldSet.fromJSON(json);
+    const roundTripped = FieldSet.fromJSON(fs.toJSON());
+    expect(roundTripped.entries[0].customKey).toBe('numFriends');
+  });
+});
+
+// =============================================================================
 // QueryBuilder integration tests
 // =============================================================================
 
