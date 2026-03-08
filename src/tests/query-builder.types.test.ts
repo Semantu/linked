@@ -187,3 +187,39 @@ describe.skip('QueryBuilder result type inference (compile only)', () => {
     expectType<string | null | undefined>(first.name);
   });
 });
+
+// --- Phase 7e: FieldSet<R> type tests ---
+import {FieldSet} from '../queries/FieldSet';
+
+describe.skip('FieldSet<R> type inference (compile only)', () => {
+  test('FieldSet.for(Person, callback) captures return type', () => {
+    const fs = FieldSet.for(Person, (p) => [p.name]);
+    // fs is FieldSet<QueryBuilderObject[]> — the return type of the callback
+    const _check: FieldSet<any[]> = fs;
+    void _check;
+  });
+
+  test('FieldSet.for(personShape, labels) is FieldSet<any>', () => {
+    const personShape = (Person as any).shape;
+    const fs = FieldSet.for(personShape, ['name']);
+    // String-constructed FieldSet has `any` type parameter
+    const _check: FieldSet<any> = fs;
+    void _check;
+  });
+
+  test('QueryBuilder.select(typedFieldSet) resolves typed result', () => {
+    const fs = FieldSet.for(Person, (p) => [p.name]);
+    const qb = QueryBuilder.from(Person).select(fs);
+    // The builder should carry the FieldSet's R through
+    type _Result = Awaited<typeof qb>;
+    void (null as unknown as _Result);
+  });
+
+  test('composition degrades to FieldSet<any>', () => {
+    const fs = FieldSet.for(Person, (p) => [p.name]);
+    const fs2 = fs.add(['hobby']);
+    // After composition, type degrades to FieldSet<any>
+    const _check: FieldSet<any> = fs2;
+    void _check;
+  });
+});

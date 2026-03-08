@@ -87,7 +87,7 @@ export type FieldSetJSON = {
  *
  * Every mutation method returns a new FieldSet — the original is never modified.
  */
-export class FieldSet {
+export class FieldSet<R = any> {
   readonly shape: NodeShape;
   readonly entries: readonly FieldSetEntry[];
 
@@ -107,14 +107,14 @@ export class FieldSet {
    * Fields can be string paths, PropertyPath instances, nested objects,
    * or a callback receiving a proxy for dot-access.
    */
-  static for<S extends Shape>(shape: ShapeType<S>, fields: FieldSetInput[]): FieldSet;
-  static for<S extends Shape>(shape: ShapeType<S>, fn: (p: any) => any[]): FieldSet;
-  static for(shape: NodeShape | string, fields: FieldSetInput[]): FieldSet;
-  static for(shape: NodeShape | string, fn: (p: any) => any[]): FieldSet;
+  static for<S extends Shape>(shape: ShapeType<S>, fields: FieldSetInput[]): FieldSet<any>;
+  static for<S extends Shape, R>(shape: ShapeType<S>, fn: (p: any) => R): FieldSet<R>;
+  static for(shape: NodeShape | string, fields: FieldSetInput[]): FieldSet<any>;
+  static for(shape: NodeShape | string, fn: (p: any) => any): FieldSet<any>;
   static for(
     shape: ShapeType<any> | NodeShape | string,
-    fieldsOrFn: FieldSetInput[] | ((p: any) => any[]),
-  ): FieldSet {
+    fieldsOrFn: FieldSetInput[] | ((p: any) => any),
+  ): FieldSet<any> {
     const resolved = FieldSet.resolveShapeInput(shape);
     const resolvedShape = resolved.nodeShape;
 

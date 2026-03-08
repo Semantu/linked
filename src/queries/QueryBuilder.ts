@@ -159,8 +159,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   /** Set the select projection via a callback, labels, or FieldSet. */
   select<NewR>(fn: QueryBuildFn<S, NewR>): QueryBuilder<S, NewR, QueryResponseToResultType<NewR, S>[]>;
   select(labels: string[]): QueryBuilder<S>;
-  select(fieldSet: FieldSet): QueryBuilder<S>;
-  select<NewR = R>(fnOrLabelsOrFieldSet: QueryBuildFn<S, NewR> | string[] | FieldSet): QueryBuilder<S, NewR, any> {
+  select<NewR>(fieldSet: FieldSet<NewR>): QueryBuilder<S, NewR, QueryResponseToResultType<NewR, S>[]>;
+  select<NewR = R>(fnOrLabelsOrFieldSet: QueryBuildFn<S, NewR> | string[] | FieldSet<any>): QueryBuilder<S, NewR, any> {
     if (fnOrLabelsOrFieldSet instanceof FieldSet) {
       const labels = fnOrLabelsOrFieldSet.labels();
       const selectFn = ((p: any) =>
