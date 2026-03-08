@@ -189,6 +189,66 @@ describe('FieldSet — ShapeClass overloads', () => {
 });
 
 // =============================================================================
+// Callback tracing with ProxiedPathBuilder (Phase 7c)
+// =============================================================================
+
+describe('FieldSet — callback tracing (ProxiedPathBuilder)', () => {
+  test('flat callback still works', () => {
+    const fs = FieldSet.for(Person, (p) => [p.name, p.hobby]);
+    expect(fs.entries.length).toBe(2);
+    expect(fs.labels()).toContain('name');
+    expect(fs.labels()).toContain('hobby');
+  });
+
+  test('nested path via callback', () => {
+    const fs = FieldSet.for(Person, (p) => [p.friends.name]);
+    expect(fs.entries.length).toBe(1);
+    expect(fs.entries[0].path.toString()).toBe('friends.name');
+    expect(fs.entries[0].path.segments.length).toBe(2);
+  });
+
+  test('deep nested path via callback', () => {
+    const fs = FieldSet.for(Person, (p) => [p.friends.bestFriend.name]);
+    expect(fs.entries.length).toBe(1);
+    expect(fs.entries[0].path.segments.length).toBe(3);
+    expect(fs.entries[0].path.toString()).toBe('friends.bestFriend.name');
+  });
+
+  test('where condition captured on entry', () => {
+    const fs = FieldSet.for(Person, (p) => [
+      p.friends.where((f: any) => f.name.equals('Moa')),
+    ]);
+    expect(fs.entries.length).toBe(1);
+    expect(fs.entries[0].scopedFilter).toBeDefined();
+    expect(fs.entries[0].scopedFilter).not.toBeNull();
+  });
+
+  test('aggregation captured on entry', () => {
+    const fs = FieldSet.for(Person, (p) => [p.friends.size()]);
+    expect(fs.entries.length).toBe(1);
+    expect(fs.entries[0].aggregation).toBe('count');
+  });
+
+  test('multiple mixed selections', () => {
+    const fs = FieldSet.for(Person, (p) => [
+      p.name,
+      p.friends.name,
+      p.bestFriend.hobby,
+    ]);
+    expect(fs.entries.length).toBe(3);
+    expect(fs.entries[0].path.toString()).toBe('name');
+    expect(fs.entries[1].path.toString()).toBe('friends.name');
+    expect(fs.entries[2].path.toString()).toBe('bestFriend.hobby');
+  });
+
+  test('single value return (not array) works', () => {
+    const fs = FieldSet.for(Person, (p) => p.friends.name);
+    expect(fs.entries.length).toBe(1);
+    expect(fs.entries[0].path.toString()).toBe('friends.name');
+  });
+});
+
+// =============================================================================
 // Extended entry fields (Phase 7a)
 // =============================================================================
 

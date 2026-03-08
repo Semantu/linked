@@ -3,6 +3,38 @@ import type {Shape, ShapeType} from '../shapes/Shape.js';
 import {PropertyPath, walkPropertyPath} from './PropertyPath.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {WhereCondition} from './WhereCondition.js';
+import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
+
+// Duck-type helpers to avoid circular dependency with SelectQuery.ts.
+// QueryBuilderObject has .property (PropertyShape) and .subject (QueryBuilderObject).
+// SetSize has .subject and extends QueryNumber.
+// SelectQueryFactory has .getQueryPaths() and .parentQueryPath.
+type QueryBuilderObjectLike = {
+  property?: PropertyShape;
+  subject?: QueryBuilderObjectLike;
+  wherePath?: unknown;
+};
+const isQueryBuilderObject = (obj: any): obj is QueryBuilderObjectLike =>
+  obj !== null &&
+  typeof obj === 'object' &&
+  'property' in obj &&
+  'subject' in obj &&
+  typeof obj.getPropertyPath === 'function';
+
+const isSetSize = (obj: any): boolean =>
+  obj !== null &&
+  typeof obj === 'object' &&
+  'subject' in obj &&
+  typeof obj.as === 'function' &&
+  typeof obj.getPropertyPath === 'function' &&
+  // SetSize has a 'countable' field (may be undefined) and 'label' field
+  'label' in obj;
+
+const isSelectQueryFactory = (obj: any): boolean =>
+  obj !== null &&
+  typeof obj === 'object' &&
+  typeof obj.getQueryPaths === 'function' &&
+  'parentQueryPath' in obj;
 
 /**
  * A single entry in a FieldSet: a property path with optional alias, scoped filter,
@@ -87,9 +119,10 @@ export class FieldSet {
     const resolvedShape = resolved.nodeShape;
 
     if (typeof fieldsOrFn === 'function') {
-      // Callback form: create proxy that traces property access to strings
-      const fields = FieldSet.traceFieldsFromCallback(resolvedShape, fieldsOrFn);
-      return new FieldSet(resolvedShape, fields);
+      const fields = resolved.shapeClass
+        ? FieldSet.traceFieldsWithProxy(resolved.nodeShape, resolved.shapeClass, fieldsOrFn)
+        : FieldSet.traceFieldsFromCallback(resolved.nodeShape, fieldsOrFn);
+      return new FieldSet(resolved.nodeShape, fields);
     }
 
     const entries = FieldSet.resolveInputs(resolvedShape, fieldsOrFn);
@@ -335,8 +368,108 @@ export class FieldSet {
   }
 
   /**
-   * Trace fields from a callback that accesses properties on a proxy.
-   * The proxy records each accessed property label and converts to entries.
+   * Trace fields using the full ProxiedPathBuilder proxy (createProxiedPathBuilder).
+   * Handles nested paths, where conditions, aggregations, and sub-selects.
+   */
+  private static traceFieldsWithProxy(
+    nodeShape: NodeShape,
+    shapeClass: ShapeType<any>,
+    fn: (p: any) => any,
+  ): FieldSetEntry[] {
+    const proxy = createProxiedPathBuilder(shapeClass);
+    const result = fn(proxy);
+
+    // Normalize result: could be a single value, array, or custom object
+    if (Array.isArray(result)) {
+      return result.map((item) => FieldSet.convertTraceResult(nodeShape, item));
+    }
+    if (isQueryBuilderObject(result)) {
+      return [FieldSet.convertTraceResult(nodeShape, result)];
+    }
+    if (typeof result === 'object' && result !== null) {
+      // Custom object form: {name: p.name, hobby: p.hobby}
+      const entries: FieldSetEntry[] = [];
+      for (const [key, value] of Object.entries(result)) {
+        const entry = FieldSet.convertTraceResult(nodeShape, value);
+        entry.customKey = key;
+        entries.push(entry);
+      }
+      return entries;
+    }
+    return [];
+  }
+
+  /**
+   * Convert a single proxy trace result (QueryBuilderObject, SetSize, or SelectQueryFactory)
+   * into a FieldSetEntry.
+   */
+  private static convertTraceResult(rootShape: NodeShape, obj: any): FieldSetEntry {
+    // SetSize → aggregation: 'count'
+    if (isSetSize(obj)) {
+      const segments = FieldSet.collectPropertySegments(obj.subject);
+      return {
+        path: new PropertyPath(rootShape, segments),
+        aggregation: 'count',
+      };
+    }
+
+    // SelectQueryFactory → sub-select
+    if (isSelectQueryFactory(obj)) {
+      const parentPath = obj.parentQueryPath;
+      if (parentPath && Array.isArray(parentPath)) {
+        const segments: PropertyShape[] = [];
+        for (const step of parentPath) {
+          if (step && typeof step === 'object' && 'property' in step && step.property) {
+            segments.push(step.property);
+          }
+        }
+        return {
+          path: new PropertyPath(rootShape, segments),
+          // Sub-select conversion deferred to Phase 9
+        };
+      }
+      return {path: new PropertyPath(rootShape, [])};
+    }
+
+    // QueryBuilderObject → walk the chain to collect PropertyPath segments
+    if (isQueryBuilderObject(obj)) {
+      const segments = FieldSet.collectPropertySegments(obj);
+      const entry: FieldSetEntry = {
+        path: new PropertyPath(rootShape, segments),
+      };
+      if (obj.wherePath) {
+        entry.scopedFilter = obj.wherePath as any;
+      }
+      return entry;
+    }
+
+    // Fallback: string label
+    if (typeof obj === 'string') {
+      return {path: walkPropertyPath(rootShape, obj)};
+    }
+
+    throw new Error(`Unknown trace result type: ${obj}`);
+  }
+
+  /**
+   * Walk a QueryBuilderObject-like chain (via .subject) collecting PropertyShape segments
+   * from leaf to root, then reverse to get root-to-leaf order.
+   */
+  private static collectPropertySegments(obj: QueryBuilderObjectLike): PropertyShape[] {
+    const segments: PropertyShape[] = [];
+    let current: QueryBuilderObjectLike | undefined = obj;
+    while (current) {
+      if (current.property) {
+        segments.unshift(current.property);
+      }
+      current = current.subject;
+    }
+    return segments;
+  }
+
+  /**
+   * Trace fields from a callback using a simple string-capturing proxy.
+   * Fallback for when no ShapeClass is available (NodeShape-only path).
    */
   private static traceFieldsFromCallback(
     shape: NodeShape,
@@ -349,7 +482,7 @@ export class FieldSet {
         get(_target, key) {
           if (typeof key === 'string') {
             accessed.push(key);
-            return key; // Return the label for the array
+            return key;
           }
           return undefined;
         },
