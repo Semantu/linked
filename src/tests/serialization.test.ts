@@ -172,4 +172,28 @@ describe('QueryBuilder — serialization', () => {
     expect(ir.limit).toBe(5);
     expect(ir.offset).toBe(10);
   });
+
+  test('toJSON — with subjects', () => {
+    const json = QueryBuilder.from(Person)
+      .select(['name'])
+      .forAll([`${tmpEntityBase}p1`, `${tmpEntityBase}p2`])
+      .toJSON();
+    expect(json.subjects).toHaveLength(2);
+    expect(json.subjects).toContain(`${tmpEntityBase}p1`);
+    expect(json.subjects).toContain(`${tmpEntityBase}p2`);
+    expect(json.subject).toBeUndefined();
+  });
+
+  test('fromJSON — round-trip forAll', () => {
+    const fs = FieldSet.for(personShape, ['name']);
+    const original = QueryBuilder.from(Person)
+      .select(fs)
+      .forAll([`${tmpEntityBase}p1`, `${tmpEntityBase}p2`]);
+    const json = original.toJSON();
+    const restored = QueryBuilder.fromJSON(json);
+
+    const originalIR = original.build();
+    const restoredIR = restored.build();
+    expect(sanitize(restoredIR)).toEqual(sanitize(originalIR));
+  });
 });

@@ -24,6 +24,7 @@ export type RawSelectInput = {
   where?: WherePath;
   sortBy?: SortByPath;
   subject?: unknown;
+  subjects?: unknown[];
   shape?: unknown;
   limit?: number;
   offset?: number;
@@ -122,6 +123,7 @@ export type DesugaredSelectQuery = {
   kind: 'desugared_select';
   shapeId?: string;
   subjectId?: string;
+  subjectIds?: string[];
   singleResult?: boolean;
   limit?: number;
   offset?: number;
@@ -394,10 +396,19 @@ export const desugarSelectQuery = (query: RawSelectInput): DesugaredSelectQuery 
       ? (query.subject as NodeReferenceValue).id
       : undefined;
 
+  const subjectIds = query.subjects
+    ? query.subjects.map((s) =>
+        typeof s === 'object' && s !== null && 'id' in s
+          ? (s as NodeReferenceValue).id
+          : String(s),
+      )
+    : undefined;
+
   return {
     kind: 'desugared_select',
     shapeId: (query.shape as any)?.shape?.id || (query.shape as any)?.id,
     subjectId,
+    subjectIds,
     singleResult: query.singleResult,
     limit: query.limit,
     offset: query.offset,

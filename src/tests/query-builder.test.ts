@@ -382,3 +382,66 @@ describe('QueryBuilder — preload', () => {
     expect((paths as any[]).length).toBeGreaterThan(0);
   });
 });
+
+// =============================================================================
+// forAll — multi-ID subject filtering
+// =============================================================================
+
+describe('QueryBuilder — forAll', () => {
+  test('forAll([id1, id2]) produces IR with subjectIds', () => {
+    const ir = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .forAll([`${tmpEntityBase}p1`, `${tmpEntityBase}p2`])
+      .build();
+    expect(ir.subjectIds).toHaveLength(2);
+    expect(ir.subjectIds).toContain(`${tmpEntityBase}p1`);
+    expect(ir.subjectIds).toContain(`${tmpEntityBase}p2`);
+  });
+
+  test('forAll() without IDs produces no subject filter', () => {
+    const ir = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .forAll()
+      .build();
+    expect(ir.subjectId).toBeUndefined();
+    expect(ir.subjectIds).toBeUndefined();
+  });
+
+  test('for(id) after forAll(ids) clears multi-subject', () => {
+    const ir = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .forAll([`${tmpEntityBase}p1`, `${tmpEntityBase}p2`])
+      .for(`${tmpEntityBase}p3`)
+      .build();
+    expect(ir.subjectId).toBe(`${tmpEntityBase}p3`);
+    expect(ir.subjectIds).toBeUndefined();
+  });
+
+  test('forAll(ids) after for(id) clears single subject', () => {
+    const ir = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .for(`${tmpEntityBase}p1`)
+      .forAll([`${tmpEntityBase}p2`, `${tmpEntityBase}p3`])
+      .build();
+    expect(ir.subjectId).toBeUndefined();
+    expect(ir.subjectIds).toHaveLength(2);
+  });
+
+  test('forAll() returns new instance (immutability)', () => {
+    const base = QueryBuilder.from(Person).select((p) => [p.name]);
+    const withForAll = base.forAll([`${tmpEntityBase}p1`]);
+    expect(base).not.toBe(withForAll);
+    // Original has no subjects
+    expect(base.build().subjectIds).toBeUndefined();
+  });
+
+  test('forAll accepts {id} references', () => {
+    const ir = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .forAll([{id: `${tmpEntityBase}p1`}, `${tmpEntityBase}p2`])
+      .build();
+    expect(ir.subjectIds).toHaveLength(2);
+    expect(ir.subjectIds).toContain(`${tmpEntityBase}p1`);
+    expect(ir.subjectIds).toContain(`${tmpEntityBase}p2`);
+  });
+});

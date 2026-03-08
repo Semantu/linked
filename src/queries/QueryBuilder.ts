@@ -24,6 +24,7 @@ export type QueryBuilderJSON = {
   limit?: number;
   offset?: number;
   subject?: string;
+  subjects?: string[];
   singleResult?: boolean;
   orderDirection?: 'ASC' | 'DESC';
 };
@@ -44,6 +45,7 @@ interface QueryBuilderInit<S extends Shape, R> {
   limit?: number;
   offset?: number;
   subject?: S | QResult<S> | NodeReferenceValue;
+  subjects?: NodeReferenceValue[];
   singleResult?: boolean;
   selectAllLabels?: string[];
   fieldSet?: FieldSet;
@@ -78,6 +80,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   private readonly _limit?: number;
   private readonly _offset?: number;
   private readonly _subject?: S | QResult<S> | NodeReferenceValue;
+  private readonly _subjects?: NodeReferenceValue[];
   private readonly _singleResult?: boolean;
   private readonly _selectAllLabels?: string[];
   private readonly _fieldSet?: FieldSet;
@@ -92,6 +95,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     this._limit = init.limit;
     this._offset = init.offset;
     this._subject = init.subject;
+    this._subjects = init.subjects;
     this._singleResult = init.singleResult;
     this._selectAllLabels = init.selectAllLabels;
     this._fieldSet = init.fieldSet;
@@ -109,6 +113,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       limit: this._limit,
       offset: this._offset,
       subject: this._subject,
+      subjects: this._subjects,
       singleResult: this._singleResult,
       selectAllLabels: this._selectAllLabels,
       fieldSet: this._fieldSet,
@@ -211,17 +216,16 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   /** Target a single entity by ID. Implies singleResult. */
   for(id: string | NodeReferenceValue): QueryBuilder<S, R, Result> {
     const subject = typeof id === 'string' ? {id} : id;
-    return this.clone({subject, singleResult: true}) as unknown as QueryBuilder<S, R, Result>;
+    return this.clone({subject, subjects: undefined, singleResult: true}) as unknown as QueryBuilder<S, R, Result>;
   }
 
-  /** Target multiple entities (or all if no ids given). */
+  /** Target multiple entities by ID, or all if no ids given. */
   forAll(ids?: (string | NodeReferenceValue)[]): QueryBuilder<S, R, Result> {
     if (!ids) {
-      return this.clone({subject: undefined, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
+      return this.clone({subject: undefined, subjects: undefined, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
     }
-    // For multiple IDs we'd need to handle this differently in the future.
-    // For now, this is a placeholder that selects without subject filter.
-    return this.clone({subject: undefined, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
+    const subjects = ids.map((id) => (typeof id === 'string' ? {id} : id));
+    return this.clone({subject: undefined, subjects, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
   }
 
   /** Limit to one result. Unwraps array Result type to single element. */
@@ -307,6 +311,9 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     if (this._subject && typeof this._subject === 'object' && 'id' in this._subject) {
       json.subject = (this._subject as any).id;
     }
+    if (this._subjects && this._subjects.length > 0) {
+      json.subjects = this._subjects.map((s) => s.id);
+    }
     if (this._singleResult) {
       json.singleResult = true;
     }
@@ -340,6 +347,9 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     }
     if (json.subject) {
       builder = builder.for(json.subject) as QueryBuilder<S>;
+    }
+    if (json.subjects && json.subjects.length > 0) {
+      builder = builder.forAll(json.subjects) as QueryBuilder<S>;
     }
     if (json.singleResult && !json.subject) {
       builder = builder.one() as QueryBuilder<S>;
@@ -406,7 +416,11 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
 
   /** Get the raw pipeline input (same as SelectQueryFactory.toRawInput()). */
   toRawInput(): RawSelectInput {
-    return this.buildFactory().toRawInput();
+    const raw = this.buildFactory().toRawInput();
+    if (this._subjects && this._subjects.length > 0) {
+      raw.subjects = this._subjects;
+    }
+    return raw;
   }
 
   /** Build the IR (run the full pipeline: desugar → canonicalize → lower). */

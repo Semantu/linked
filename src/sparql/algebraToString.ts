@@ -207,6 +207,16 @@ export function serializeAlgebraNode(
       const inner = serializeAlgebraNode(node.inner, collector);
       return `GRAPH ${formatUri(node.iri)} {\n${indent(inner)}\n}`;
     }
+
+    case 'values': {
+      const values = node.iris
+        .map((iri) => {
+          if (collector) collectUri(collector, iri);
+          return formatUri(iri);
+        })
+        .join(' ');
+      return `VALUES ?${node.variable} { ${values} }`;
+    }
   }
 }
 
