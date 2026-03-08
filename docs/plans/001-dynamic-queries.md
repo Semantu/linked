@@ -1747,7 +1747,20 @@ These should be the same code path. The DSL already solves nested path tracing �
 
 ---
 
-### Phase 8: QueryBuilder generates IR directly — bypass SelectQueryFactory
+### Phase 8: QueryBuilder generates IR directly — bypass SelectQueryFactory ✅
+
+**Status: Complete.**
+
+QueryBuilder.toRawInput() now constructs RawSelectInput directly from FieldSet when selections are set via FieldSet, labels, or selectAll. Arbitrary callbacks still use the legacy path (via _buildFactory()) until Phase 9.
+
+**Files delivered:**
+- `src/queries/SelectQuery.ts` — exported `fieldSetToSelectPath()` (enhanced: handles aggregation, scopedFilter, subSelect), `processWhereClause()`, `evaluateSortCallback()`
+- `src/queries/QueryBuilder.ts` — new `_buildDirectRawInput()`, `buildFactory` renamed to `_buildFactory()` and marked deprecated
+- `src/tests/query-builder.test.ts` — 8 new tests in "QueryBuilder — direct IR generation" block
+
+**Scope note:** Only FieldSet/label/selectAll selections use the direct path. Arbitrary callbacks (which may produce BoundComponent, Evaluation, or SelectQueryFactory results) fall back to the legacy _buildFactory() path. Phase 9 will handle sub-selects through FieldSet, enabling more callbacks to use the direct path.
+
+**Original plan below for reference:**
 
 **Goal:** Remove the `buildFactory()` bridge. QueryBuilder converts its internal state (FieldSet-based) directly to `RawSelectInput`, bypassing `SelectQueryFactory` entirely for top-level queries.
 
