@@ -36,6 +36,22 @@ const isSelectQueryFactory = (obj: any): boolean =>
   typeof obj.getQueryPaths === 'function' &&
   'parentQueryPath' in obj;
 
+// Evaluation: has .method (WhereMethods), .value (QueryBuilderObject), .getWherePath()
+const isEvaluation = (obj: any): boolean =>
+  obj !== null &&
+  typeof obj === 'object' &&
+  'method' in obj &&
+  'value' in obj &&
+  typeof obj.getWherePath === 'function';
+
+// BoundComponent: has .source (QueryBuilderObject) and .originalValue (component-like)
+const isBoundComponent = (obj: any): boolean =>
+  obj !== null &&
+  typeof obj === 'object' &&
+  'source' in obj &&
+  'originalValue' in obj &&
+  typeof obj.getComponentQueryPaths === 'function';
+
 /**
  * A single entry in a FieldSet: a property path with optional alias, scoped filter,
  * sub-selection, aggregation, and custom key.
@@ -386,6 +402,14 @@ export class FieldSet<R = any> {
     if (isQueryBuilderObject(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
+    // Single SelectQueryFactory (e.g. p.friends.select(f => [f.name]))
+    if (isSelectQueryFactory(result)) {
+      return [FieldSet.convertTraceResult(nodeShape, result)];
+    }
+    // Single SetSize (e.g. p.friends.size())
+    if (isSetSize(result)) {
+      return [FieldSet.convertTraceResult(nodeShape, result)];
+    }
     if (typeof result === 'object' && result !== null) {
       // Custom object form: {name: p.name, hobby: p.hobby}
       const entries: FieldSetEntry[] = [];
@@ -413,22 +437,46 @@ export class FieldSet<R = any> {
       };
     }
 
-    // SelectQueryFactory → sub-select
+    // SelectQueryFactory → sub-select (Phase 9: extract sub-FieldSet from factory's trace)
     if (isSelectQueryFactory(obj)) {
       const parentPath = obj.parentQueryPath;
+      const segments: PropertyShape[] = [];
       if (parentPath && Array.isArray(parentPath)) {
-        const segments: PropertyShape[] = [];
         for (const step of parentPath) {
           if (step && typeof step === 'object' && 'property' in step && step.property) {
             segments.push(step.property);
           }
         }
-        return {
-          path: new PropertyPath(rootShape, segments),
-          // Sub-select conversion deferred to Phase 9
-        };
       }
-      return {path: new PropertyPath(rootShape, [])};
+
+      // Extract sub-select FieldSet from the factory's traced response
+      let subSelect: FieldSet | undefined;
+      const factoryShape = obj.shape;
+      const traceResponse = obj.traceResponse;
+      if (factoryShape && traceResponse !== undefined) {
+        const subNodeShape = factoryShape.shape || factoryShape;
+        const subEntries = FieldSet.extractSubSelectEntries(subNodeShape, traceResponse);
+        if (subEntries.length > 0) {
+          subSelect = FieldSet.createInternal(subNodeShape, subEntries);
+        }
+      }
+
+      return {
+        path: new PropertyPath(rootShape, segments),
+        subSelect,
+      };
+    }
+
+    // Evaluation → where-as-selection (e.g. p.bestFriend.equals(...) used as select)
+    // Cannot be represented as a FieldSetEntry — signal for fallback to legacy path.
+    if (isEvaluation(obj)) {
+      throw new Error('Evaluation selections require the legacy SelectQueryFactory path');
+    }
+
+    // BoundComponent → preload composition (e.g. p.bestFriend.preloadFor(component))
+    // Cannot be represented as a FieldSetEntry — signal for fallback to legacy path.
+    if (isBoundComponent(obj)) {
+      throw new Error('BoundComponent (preload) selections require the legacy SelectQueryFactory path');
     }
 
     // QueryBuilderObject → walk the chain to collect PropertyPath segments
@@ -465,6 +513,42 @@ export class FieldSet<R = any> {
       current = current.subject;
     }
     return segments;
+  }
+
+  /**
+   * Internal factory that bypasses the private constructor for use by static methods.
+   */
+  private static createInternal(shape: NodeShape, entries: FieldSetEntry[]): FieldSet {
+    return new FieldSet(shape, entries);
+  }
+
+  /**
+   * Extract FieldSetEntry[] from a SelectQueryFactory's traceResponse.
+   * The traceResponse is the result of calling the sub-query callback with a proxy,
+   * containing QueryBuilderObjects, arrays, custom objects, etc.
+   */
+  private static extractSubSelectEntries(rootShape: NodeShape, traceResponse: any): FieldSetEntry[] {
+    if (Array.isArray(traceResponse)) {
+      return traceResponse
+        .filter((item) => item !== null && item !== undefined)
+        .map((item) => FieldSet.convertTraceResult(rootShape, item));
+    }
+    if (isQueryBuilderObject(traceResponse)) {
+      return [FieldSet.convertTraceResult(rootShape, traceResponse)];
+    }
+    if (typeof traceResponse === 'object' && traceResponse !== null) {
+      // Custom object form: {name: p.name, hobby: p.hobby}
+      const entries: FieldSetEntry[] = [];
+      for (const [key, value] of Object.entries(traceResponse)) {
+        if (value !== null && value !== undefined) {
+          const entry = FieldSet.convertTraceResult(rootShape, value);
+          entry.customKey = key;
+          entries.push(entry);
+        }
+      }
+      return entries;
+    }
+    return [];
   }
 
   /**

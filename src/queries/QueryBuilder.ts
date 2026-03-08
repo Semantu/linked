@@ -450,16 +450,25 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
    * (preloads, complex callbacks with sub-selects) that still require the legacy path.
    */
   toRawInput(): RawSelectInput {
+    // Preloads require the legacy path — _buildFactory() wraps them into selectFn
+    if (this._preloads && this._preloads.length > 0) {
+      return this._buildFactoryRawInput();
+    }
+
     // Direct path: when we have an explicit FieldSet, label-based selection,
-    // or no selection at all. These can be converted to RawSelectInput directly.
-    // Arbitrary callbacks may produce BoundComponent, Evaluation, or
-    // SelectQueryFactory results that FieldSet can't convert yet (Phase 9).
+    // or no selection at all. These can always be converted directly.
     if (this._fieldSet || this._selectAllLabels || !this._selectFn) {
       return this._buildDirectRawInput();
     }
 
-    // Legacy path for callbacks and preloads — delegates to SelectQueryFactory
-    return this._buildFactoryRawInput();
+    // For callbacks: try direct FieldSet path first.
+    // Falls back to legacy path if the callback produces types that FieldSet
+    // can't convert (Evaluation, BoundComponent/preload).
+    try {
+      return this._buildDirectRawInput();
+    } catch {
+      return this._buildFactoryRawInput();
+    }
   }
 
   /**

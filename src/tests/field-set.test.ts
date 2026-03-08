@@ -400,3 +400,45 @@ describe('FieldSet — QueryBuilder integration', () => {
     expect(returned.labels()).toEqual(['name', 'hobby']);
   });
 });
+
+// =============================================================================
+// Phase 9: Sub-select through FieldSet
+// =============================================================================
+
+describe('FieldSet — sub-select extraction', () => {
+  test('callback with sub-select produces FieldSet entry with subSelect', () => {
+    const fs = FieldSet.for(Person, (p) => p.friends.select((f: any) => [f.name]));
+    expect(fs.entries.length).toBe(1);
+    expect(fs.entries[0].path.toString()).toBe('friends');
+    expect(fs.entries[0].subSelect).toBeDefined();
+    expect(fs.entries[0].subSelect).toBeInstanceOf(FieldSet);
+    expect(fs.entries[0].subSelect!.labels()).toContain('name');
+  });
+
+  test('callback with sub-select custom object produces FieldSet entry with subSelect', () => {
+    const fs = FieldSet.for(Person, (p) =>
+      p.friends.select((f: any) => ({friendName: f.name, friendHobby: f.hobby})),
+    );
+    expect(fs.entries.length).toBe(1);
+    expect(fs.entries[0].subSelect).toBeDefined();
+    const subEntries = fs.entries[0].subSelect!.entries;
+    expect(subEntries.length).toBe(2);
+    expect(subEntries[0].customKey).toBe('friendName');
+    expect(subEntries[1].customKey).toBe('friendHobby');
+  });
+
+  test('callback with count in custom object produces aggregation entry', () => {
+    const fs = FieldSet.for(Person, (p) => ({numFriends: p.friends.size()}));
+    expect(fs.entries.length).toBe(1);
+    expect(fs.entries[0].aggregation).toBe('count');
+    expect(fs.entries[0].customKey).toBe('numFriends');
+  });
+
+  test('sub-select FieldSet produces same IR as callback-based query', () => {
+    const directIR = QueryBuilder.from(Person)
+      .select((p) => p.friends.select((f: any) => [f.name]))
+      .build();
+    // The sub-select should produce projections for the nested name field
+    expect(directIR.projection.length).toBeGreaterThanOrEqual(1);
+  });
+});

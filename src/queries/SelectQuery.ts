@@ -891,47 +891,76 @@ export class QueryBuilderObject<
 }
 
 /**
- * Convert a FieldSet's entries to a SelectPath (QueryPath[]).
+ * Convert a single FieldSetEntry to a QueryPath.
+ */
+function entryToQueryPath(entry: {
+  path: {segments: PropertyShape[]};
+  scopedFilter?: unknown;
+  aggregation?: string;
+  customKey?: string;
+  subSelect?: FieldSet;
+}): QueryPath {
+  const segments = entry.path.segments;
+
+  // Count aggregation → SizeStep
+  if (entry.aggregation === 'count') {
+    if (segments.length === 0) return [];
+    const lastSegment = segments[segments.length - 1];
+    const countStep: SizeStep = {
+      count: [{property: lastSegment}],
+      label: entry.customKey || lastSegment.label,
+    };
+    if (segments.length === 1) {
+      return [countStep];
+    }
+    const parentSteps: QueryStep[] = segments.slice(0, -1).map((seg) => ({property: seg}));
+    return [...parentSteps, countStep];
+  }
+
+  // Build property steps, attaching scopedFilter to the last segment
+  const steps: QueryStep[] = segments.map((segment, i) => {
+    const step: PropertyQueryStep = {property: segment};
+    if (entry.scopedFilter && i === segments.length - 1) {
+      step.where = entry.scopedFilter as unknown as WherePath;
+    }
+    return step;
+  });
+
+  // SubSelect → append nested paths as sub-query
+  if (entry.subSelect) {
+    const nestedPaths = fieldSetToSelectPath(entry.subSelect);
+    return [...steps, nestedPaths] as unknown as QueryPath;
+  }
+
+  return steps;
+}
+
+/**
+ * Convert a FieldSet's entries to a SelectPath.
+ * Returns CustomQueryObject when all entries have customKey, QueryPath[] otherwise.
  * Handles extended entry fields: scopedFilter → step.where, aggregation → SizeStep,
  * subSelect → nested QueryPath[].
  */
-export function fieldSetToSelectPath(fieldSet: FieldSet): QueryPath[] {
-  return fieldSet.entries.map((entry) => {
-    const segments = entry.path.segments;
+export function fieldSetToSelectPath(fieldSet: FieldSet): SelectPath {
+  const entries = fieldSet.entries as unknown as Array<{
+    path: {segments: PropertyShape[]};
+    scopedFilter?: unknown;
+    aggregation?: string;
+    customKey?: string;
+    subSelect?: FieldSet;
+  }>;
 
-    // Count aggregation → SizeStep
-    if (entry.aggregation === 'count') {
-      // Last segment is the countable, preceding segments form the parent path
-      if (segments.length === 0) return [];
-      const lastSegment = segments[segments.length - 1];
-      const countStep: SizeStep = {
-        count: [{property: lastSegment}],
-        label: entry.customKey || lastSegment.label,
-      };
-      if (segments.length === 1) {
-        return [countStep];
-      }
-      const parentSteps: QueryStep[] = segments.slice(0, -1).map((seg) => ({property: seg}));
-      return [...parentSteps, countStep];
+  // If all entries have customKey, produce a CustomQueryObject
+  const allCustom = entries.length > 0 && entries.every((e) => e.customKey);
+  if (allCustom) {
+    const obj: CustomQueryObject = {};
+    for (const entry of entries) {
+      obj[entry.customKey!] = entryToQueryPath(entry);
     }
+    return obj;
+  }
 
-    // Build property steps, attaching scopedFilter to the last segment
-    const steps: QueryStep[] = segments.map((segment, i) => {
-      const step: PropertyQueryStep = {property: segment};
-      if (entry.scopedFilter && i === segments.length - 1) {
-        step.where = entry.scopedFilter as unknown as WherePath;
-      }
-      return step;
-    });
-
-    // SubSelect → append nested paths as sub-query
-    if (entry.subSelect) {
-      const nestedPaths = fieldSetToSelectPath(entry.subSelect);
-      return [...steps, nestedPaths] as unknown as QueryPath;
-    }
-
-    return steps;
-  });
+  return entries.map((entry) => entryToQueryPath(entry));
 }
 
 export class BoundComponent<
