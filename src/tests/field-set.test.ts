@@ -154,6 +154,41 @@ describe('FieldSet — nesting', () => {
 });
 
 // =============================================================================
+// ShapeClass overloads (Phase 7b)
+// =============================================================================
+
+describe('FieldSet — ShapeClass overloads', () => {
+  test('FieldSet.for(Person, [labels]) produces same as NodeShape', () => {
+    const fromClass = FieldSet.for(Person, ['name']);
+    const fromShape = FieldSet.for(personShape, ['name']);
+    expect(fromClass.labels()).toEqual(fromShape.labels());
+  });
+
+  test('FieldSet.for(Person, [labels]) has correct shape', () => {
+    const fs = FieldSet.for(Person, ['name']);
+    expect(fs.shape).toBe(personShape);
+  });
+
+  test('FieldSet.for(Person, callback) works', () => {
+    const fs = FieldSet.for(Person, (p) => [p.name, p.hobby]);
+    expect(fs.entries.length).toBe(2);
+    expect(fs.labels()).toContain('name');
+    expect(fs.labels()).toContain('hobby');
+  });
+
+  test('FieldSet.all(Person) produces same as FieldSet.all(personShape)', () => {
+    const fromClass = FieldSet.all(Person);
+    const fromShape = FieldSet.all(personShape);
+    expect(fromClass.labels()).toEqual(fromShape.labels());
+  });
+
+  test('FieldSet.for(Person, [nested]) works', () => {
+    const fs = FieldSet.for(Person, ['friends.name']);
+    expect(fs.entries[0].path.toString()).toBe('friends.name');
+  });
+});
+
+// =============================================================================
 // Extended entry fields (Phase 7a)
 // =============================================================================
 

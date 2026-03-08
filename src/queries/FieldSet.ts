@@ -1,4 +1,5 @@
 import type {NodeShape, PropertyShape} from '../shapes/SHACL.js';
+import type {Shape, ShapeType} from '../shapes/Shape.js';
 import {PropertyPath, walkPropertyPath} from './PropertyPath.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {WhereCondition} from './WhereCondition.js';
@@ -70,22 +71,20 @@ export class FieldSet {
   /**
    * Create a FieldSet for the given shape with the specified fields.
    *
-   * Accepts string paths (dot-separated), PropertyPath instances,
-   * nested objects, or a callback receiving a proxy for dot-access.
+   * Accepts a ShapeClass (e.g. Person), NodeShape, or shape IRI string.
+   * Fields can be string paths, PropertyPath instances, nested objects,
+   * or a callback receiving a proxy for dot-access.
    */
+  static for<S extends Shape>(shape: ShapeType<S>, fields: FieldSetInput[]): FieldSet;
+  static for<S extends Shape>(shape: ShapeType<S>, fn: (p: any) => any[]): FieldSet;
+  static for(shape: NodeShape | string, fields: FieldSetInput[]): FieldSet;
+  static for(shape: NodeShape | string, fn: (p: any) => any[]): FieldSet;
   static for(
-    shape: NodeShape | string,
-    fields: FieldSetInput[],
-  ): FieldSet;
-  static for(
-    shape: NodeShape | string,
-    fn: (p: any) => any[],
-  ): FieldSet;
-  static for(
-    shape: NodeShape | string,
+    shape: ShapeType<any> | NodeShape | string,
     fieldsOrFn: FieldSetInput[] | ((p: any) => any[]),
   ): FieldSet {
-    const resolvedShape = FieldSet.resolveShape(shape);
+    const resolved = FieldSet.resolveShapeInput(shape);
+    const resolvedShape = resolved.nodeShape;
 
     if (typeof fieldsOrFn === 'function') {
       // Callback form: create proxy that traces property access to strings
@@ -100,8 +99,10 @@ export class FieldSet {
   /**
    * Create a FieldSet containing all decorated properties of the shape.
    */
-  static all(shape: NodeShape | string, opts?: {depth?: number}): FieldSet {
-    const resolvedShape = FieldSet.resolveShape(shape);
+  static all<S extends Shape>(shape: ShapeType<S>, opts?: {depth?: number}): FieldSet;
+  static all(shape: NodeShape | string, opts?: {depth?: number}): FieldSet;
+  static all(shape: ShapeType<any> | NodeShape | string, opts?: {depth?: number}): FieldSet {
+    const resolvedShape = FieldSet.resolveShapeInput(shape).nodeShape;
     const propertyShapes = resolvedShape.getUniquePropertyShapes();
     const entries: FieldSetEntry[] = propertyShapes.map((ps: PropertyShape) => ({
       path: new PropertyPath(resolvedShape, [ps]),
@@ -254,15 +255,29 @@ export class FieldSet {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private static resolveShape(shape: NodeShape | string): NodeShape {
+  /**
+   * Resolves any of the accepted shape input types to a NodeShape and optional ShapeClass.
+   * Accepts: ShapeType (class with .shape), NodeShape, or IRI string.
+   */
+  private static resolveShapeInput(shape: ShapeType<any> | NodeShape | string): {nodeShape: NodeShape; shapeClass?: ShapeType<any>} {
     if (typeof shape === 'string') {
       const shapeClass = getShapeClass(shape);
       if (!shapeClass || !shapeClass.shape) {
         throw new Error(`Cannot resolve shape for '${shape}'`);
       }
-      return shapeClass.shape;
+      return {nodeShape: shapeClass.shape, shapeClass: shapeClass as ShapeType<any>};
     }
-    return shape;
+    // ShapeType: has a static .shape property that is a NodeShape
+    if ('shape' in shape && typeof (shape as any).shape === 'object' && (shape as any).shape !== null && 'id' in (shape as any).shape) {
+      return {nodeShape: (shape as ShapeType<any>).shape, shapeClass: shape as ShapeType<any>};
+    }
+    // NodeShape: has .id directly
+    return {nodeShape: shape as NodeShape};
+  }
+
+  /** @deprecated Use resolveShapeInput instead. Kept for fromJSON which only passes NodeShape|string. */
+  private static resolveShape(shape: NodeShape | string): NodeShape {
+    return FieldSet.resolveShapeInput(shape).nodeShape;
   }
 
   private static resolveInputs(
