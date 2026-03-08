@@ -2302,7 +2302,20 @@ FieldSet now properly handles sub-selects from DSL proxy tracing. Instead of cha
 
 ---
 
-### Phase 10: Remove SelectQueryFactory
+### Phase 10: Remove SelectQueryFactory ⛔ BLOCKED
+
+**Status: Blocked — requires architectural changes beyond simple removal.**
+
+**Remaining dependencies (each is a sub-task):**
+1. `QueryShapeSet.select()` / `QueryShape.select()` — still create `new SelectQueryFactory` for sub-selects during proxy tracing. Need lightweight sub-select wrapper that provides `parentQueryPath`, `traceResponse`, `shape`, `getQueryPaths()`.
+2. `LinkedWhereQuery extends SelectQueryFactory` — used by `processWhereClause()`. Need standalone where evaluator using `createProxiedPathBuilder` + `Evaluation.getWherePath()` directly.
+3. `QueryBuilder._buildFactory()` — still used for preloads and Evaluation/BoundComponent fallbacks. Preloads need FieldSet integration (preload entries as FieldSetEntry with component reference).
+4. Type utilities (`GetQueryResponseType`, `QueryIndividualResultType`, etc.) — ~20 references use `SelectQueryFactory<S, R>` for generic inference. Need to be migrated to `QueryBuilder<S, R>` or a new `QueryResult<S, R>` type.
+5. `Shape.ts` return type annotations reference `SelectQueryFactory` in 4+ overloads.
+
+**Recommended approach:** Split into sub-phases (10a–10e), each removing one dependency cluster with full test regression validation.
+
+**Original plan below for reference:**
 
 #### Tasks
 
