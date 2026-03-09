@@ -136,6 +136,7 @@ type PropertyStepLike = {
   property?: {
     id?: string;
   };
+  where?: unknown;
 };
 
 const isPropertyQueryStep = (step: unknown): step is PropertyStepLike & {property: {id: string}} => {
@@ -179,8 +180,8 @@ const toStep = (step: QueryStep): DesugaredStep => {
       kind: 'property_step',
       propertyShapeId: step.property.id,
     };
-    if ((step as any).where) {
-      result.where = toWhere((step as any).where);
+    if (step.where) {
+      result.where = toWhere(step.where as WherePath);
     }
     return result;
   }

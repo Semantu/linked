@@ -202,6 +202,13 @@ const EXPLICIT_NODE_KIND_SYMBOL = Symbol('explicitNodeKind');
 const EXPLICIT_MIN_COUNT_SYMBOL = Symbol('explicitMinCount');
 const EXPLICIT_MAX_COUNT_SYMBOL = Symbol('explicitMaxCount');
 
+/** Internal symbol-keyed flags on PropertyShape to track which fields were explicitly configured. */
+interface ExplicitFlags {
+  [EXPLICIT_NODE_KIND_SYMBOL]?: boolean;
+  [EXPLICIT_MIN_COUNT_SYMBOL]?: boolean;
+  [EXPLICIT_MAX_COUNT_SYMBOL]?: boolean;
+}
+
 export interface ParameterConfig {
   optional?: number;
 }
@@ -442,13 +449,13 @@ export function registerPropertyShape(
   const inherited = shape.getPropertyShape(propertyShape.label, true);
   const existing = shape.getPropertyShape(propertyShape.label, false);
   if (!existing && inherited) {
-    if (!(propertyShape as any)[EXPLICIT_MIN_COUNT_SYMBOL]) {
+    if (!(propertyShape as unknown as ExplicitFlags)[EXPLICIT_MIN_COUNT_SYMBOL]) {
       propertyShape.minCount = inherited.minCount;
     }
-    if (!(propertyShape as any)[EXPLICIT_MAX_COUNT_SYMBOL]) {
+    if (!(propertyShape as unknown as ExplicitFlags)[EXPLICIT_MAX_COUNT_SYMBOL]) {
       propertyShape.maxCount = inherited.maxCount;
     }
-    if (!(propertyShape as any)[EXPLICIT_NODE_KIND_SYMBOL]) {
+    if (!(propertyShape as unknown as ExplicitFlags)[EXPLICIT_NODE_KIND_SYMBOL]) {
       propertyShape.nodeKind = inherited.nodeKind;
     }
     validateOverrideTightening(shape, inherited, propertyShape);
@@ -565,13 +572,13 @@ export function createPropertyShape<
   } else if (config.minCount !== undefined) {
     propertyShape.minCount = config.minCount;
   }
-  (propertyShape as any)[EXPLICIT_MIN_COUNT_SYMBOL] =
+  (propertyShape as unknown as ExplicitFlags)[EXPLICIT_MIN_COUNT_SYMBOL] =
     config.required === true || config.minCount !== undefined;
 
   if (config.maxCount !== undefined) {
     propertyShape.maxCount = config.maxCount;
   }
-  (propertyShape as any)[EXPLICIT_MAX_COUNT_SYMBOL] =
+  (propertyShape as unknown as ExplicitFlags)[EXPLICIT_MAX_COUNT_SYMBOL] =
     config.maxCount !== undefined;
   if ((config as LiteralPropertyShapeConfig).datatype) {
     propertyShape.datatype = toPlainNodeRef(
@@ -605,7 +612,7 @@ export function createPropertyShape<
   }
 
   propertyShape.nodeKind = normalizeNodeKind(config.nodeKind, defaultNodeKind);
-  (propertyShape as any)[EXPLICIT_NODE_KIND_SYMBOL] =
+  (propertyShape as unknown as ExplicitFlags)[EXPLICIT_NODE_KIND_SYMBOL] =
     config.nodeKind !== undefined;
 
   if (shapeClass) {

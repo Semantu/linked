@@ -180,9 +180,11 @@ export class FieldSet<R = any, Source = any> {
     const traceResponse = fn(proxy as any);
     const entries = FieldSet.extractSubSelectEntries(nodeShape, traceResponse);
     const fs = new FieldSet(nodeShape, entries) as FieldSet<R, Source>;
-    (fs as any).traceResponse = traceResponse;
-    (fs as any).parentQueryPath = parentQueryPath;
-    (fs as any).shapeType = shapeClass;
+    // Writable cast — these readonly fields are initialised once here at construction time
+    const w = fs as {-readonly [K in 'traceResponse' | 'parentQueryPath' | 'shapeType']: FieldSet<R, Source>[K]};
+    w.traceResponse = traceResponse;
+    w.parentQueryPath = parentQueryPath;
+    w.shapeType = shapeClass;
     return fs;
   }
 
@@ -314,7 +316,7 @@ export class FieldSet<R = any, Source = any> {
     return new FieldSet(this.shape, filtered);
   }
 
-  /** Returns a new FieldSet replacing all entries with the given fields. */
+  /** Synonym for replacing all entries — returns a new FieldSet with only the given fields. */
   set(fields: FieldSetInput[]): FieldSet {
     const entries = FieldSet.resolveInputs(this.shape, fields);
     return new FieldSet(this.shape, entries);
@@ -417,7 +419,7 @@ export class FieldSet<R = any, Source = any> {
       return {nodeShape: shapeClass.shape, shapeClass: shapeClass as ShapeType<any>};
     }
     // ShapeType: has a static .shape property that is a NodeShape
-    if ('shape' in shape && typeof (shape as any).shape === 'object' && (shape as any).shape !== null && 'id' in (shape as any).shape) {
+    if ('shape' in shape && typeof shape.shape === 'object' && shape.shape !== null && 'id' in shape.shape) {
       return {nodeShape: (shape as ShapeType<any>).shape, shapeClass: shape as ShapeType<any>};
     }
     // NodeShape: has .id directly
