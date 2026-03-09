@@ -64,6 +64,7 @@ export type FieldSetEntry = {
   aggregation?: 'count';
   customKey?: string;
   evaluation?: {method: string; wherePath: any};
+  preloadQueryPath?: any;
 };
 
 /**
@@ -422,6 +423,10 @@ export class FieldSet<R = any> {
     if (isEvaluation(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
+    // Single BoundComponent (e.g. p.bestFriend.preloadFor(comp))
+    if (isBoundComponent(result)) {
+      return [FieldSet.convertTraceResult(nodeShape, result)];
+    }
     if (typeof result === 'object' && result !== null) {
       // Custom object form: {name: p.name, hobby: p.hobby}
       const entries: FieldSetEntry[] = [];
@@ -490,9 +495,16 @@ export class FieldSet<R = any> {
     }
 
     // BoundComponent → preload composition (e.g. p.bestFriend.preloadFor(component))
-    // Cannot be represented as a FieldSetEntry — signal for fallback to legacy path.
+    // BoundComponent extends QueryBuilderObject and has getPropertyPath() which returns
+    // the full merged path (source chain + component query paths appended).
     if (isBoundComponent(obj)) {
-      throw new Error('BoundComponent (preload) selections require the legacy SelectQueryFactory path');
+      const preloadQueryPath = obj.getPropertyPath();
+      // Extract the source segments for the PropertyPath (the path to the preload point)
+      const segments = FieldSet.collectPropertySegments(obj.source);
+      return {
+        path: new PropertyPath(rootShape, segments),
+        preloadQueryPath,
+      };
     }
 
     // QueryBuilderObject → walk the chain to collect PropertyPath segments
@@ -535,6 +547,13 @@ export class FieldSet<R = any> {
    * Internal factory that bypasses the private constructor for use by static methods.
    */
   private static createInternal(shape: NodeShape, entries: FieldSetEntry[]): FieldSet {
+    return new FieldSet(shape, entries);
+  }
+
+  /**
+   * Create a FieldSet from raw entries. Used by QueryBuilder to merge preload entries.
+   */
+  static createFromEntries(shape: NodeShape, entries: FieldSetEntry[]): FieldSet {
     return new FieldSet(shape, entries);
   }
 

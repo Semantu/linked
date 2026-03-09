@@ -900,8 +900,14 @@ function entryToQueryPath(entry: {
   customKey?: string;
   subSelect?: FieldSet;
   evaluation?: {method: string; wherePath: any};
+  preloadQueryPath?: any;
 }): QueryPath {
   const segments = entry.path.segments;
+
+  // Preload → emit the pre-built query path from BoundComponent.getPropertyPath()
+  if (entry.preloadQueryPath) {
+    return entry.preloadQueryPath;
+  }
 
   // Evaluation → emit the WherePath directly (boolean column projection)
   if (entry.evaluation) {
@@ -955,6 +961,7 @@ export function fieldSetToSelectPath(fieldSet: FieldSet): SelectPath {
     customKey?: string;
     subSelect?: FieldSet;
     evaluation?: {method: string; wherePath: any};
+    preloadQueryPath?: any;
   }>;
 
   // If all entries have customKey, produce a CustomQueryObject
