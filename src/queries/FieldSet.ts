@@ -4,11 +4,9 @@ import {PropertyPath, walkPropertyPath} from './PropertyPath.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {WhereCondition} from './WhereCondition.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
-import type {SubSelectResult} from './SubSelectResult.js';
 
 // Duck-type helpers for runtime detection.
 // These check structural shape since the classes live in SelectQuery.ts (runtime circular dep).
-// SubSelectResult is a type-only interface, so we must duck-type it (no instanceof).
 // QueryBuilderObject has .property (PropertyShape) and .subject (QueryBuilderObject).
 // SetSize has .subject and extends QueryNumber.
 type QueryBuilderObjectLike = {
@@ -108,9 +106,31 @@ export type FieldSetJSON = {
  *
  * Every mutation method returns a new FieldSet — the original is never modified.
  */
-export class FieldSet<R = any> {
+export class FieldSet<R = any, Source = any> {
   readonly shape: NodeShape;
   readonly entries: readonly FieldSetEntry[];
+  /** Phantom field — carries the callback response type for conditional type inference. */
+  declare readonly __response: R;
+  /** Phantom field — carries the source context (QueryShapeSet/QueryShape) for conditional type inference. */
+  declare readonly __source: Source;
+
+  /**
+   * For sub-select FieldSets: the raw callback return value (proxy trace objects).
+   * Stored so conditional types can extract the response type.
+   */
+  readonly traceResponse?: R;
+
+  /**
+   * For sub-select FieldSets: the parent query path leading to this sub-select.
+   * Used by fieldSetToSelectPath() to nest the sub-select under its parent.
+   */
+  readonly parentQueryPath?: any;
+
+  /**
+   * For sub-select FieldSets: the shape class (ShapeType) of the sub-select's target.
+   * Used by getQueryPaths() for compatibility with the old SelectPath pipeline.
+   */
+  readonly shapeType?: any;
 
   private constructor(shape: NodeShape, entries: FieldSetEntry[]) {
     this.shape = shape;
@@ -149,6 +169,34 @@ export class FieldSet<R = any> {
     const entries = FieldSet.resolveInputs(resolvedShape, fieldsOrFn);
     return new FieldSet(resolvedShape, entries);
   }
+
+  /**
+   * Create a typed FieldSet for a sub-select. Traces the callback through the proxy,
+   * stores parentQueryPath and traceResponse for runtime compatibility, and preserves
+   * R and Source generics for conditional type inference.
+   */
+  static forSubSelect<R, Source>(
+    shapeClass: any,
+    fn: (p: any) => R,
+    parentQueryPath: any,
+  ): FieldSet<R, Source> {
+    const nodeShape = shapeClass.shape || shapeClass;
+    // Trace once: get both the raw response (for type carriers) and the entries
+    const proxy = createProxiedPathBuilder(shapeClass);
+    const traceResponse = fn(proxy as any);
+    const entries = FieldSet.extractSubSelectEntries(nodeShape, traceResponse);
+    const fs = new FieldSet(nodeShape, entries) as FieldSet<R, Source>;
+    (fs as any).traceResponse = traceResponse;
+    (fs as any).parentQueryPath = parentQueryPath;
+    (fs as any).shapeType = shapeClass;
+    return fs;
+  }
+
+  /**
+   * Build query paths from this FieldSet's entries. For sub-select FieldSets,
+   * this is set during construction via forSubSelect. Used by the legacy SelectPath pipeline.
+   */
+  getQueryPaths?: () => any;
 
   /**
    * Create a FieldSet containing all decorated properties of the shape.
@@ -413,8 +461,8 @@ export class FieldSet<R = any> {
     if (isQueryBuilderObject(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
-    // Single SubSelectResult (e.g. p.friends.select(f => [f.name]))
-    if (isSubSelectResult(result)) {
+    // Single FieldSet sub-select (e.g. p.friends.select(f => [f.name]))
+    if (result instanceof FieldSet || isSubSelectResult(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
     // Single SetSize (e.g. p.friends.size())
@@ -443,7 +491,7 @@ export class FieldSet<R = any> {
   }
 
   /**
-   * Convert a single proxy trace result (QueryBuilderObject, SetSize, or SubSelectResult)
+   * Convert a single proxy trace result (QueryBuilderObject, SetSize, or FieldSet sub-select)
    * into a FieldSetEntry.
    */
   private static convertTraceResult(rootShape: NodeShape, obj: any): FieldSetEntry {
@@ -456,7 +504,28 @@ export class FieldSet<R = any> {
       };
     }
 
-    // SubSelectResult → sub-select (extract sub-FieldSet from the trace)
+    // FieldSet sub-select — use its entries directly (created by forSubSelect)
+    if (obj instanceof FieldSet && obj.parentQueryPath !== undefined) {
+      const parentPath = obj.parentQueryPath;
+      const segments: PropertyShape[] = [];
+      if (parentPath && Array.isArray(parentPath)) {
+        for (const step of parentPath) {
+          if (step && typeof step === 'object' && 'property' in step && step.property) {
+            segments.push(step.property);
+          }
+        }
+      }
+
+      // The FieldSet already has entries computed during forSubSelect()
+      const subSelect = obj.entries.length > 0 ? obj : undefined;
+
+      return {
+        path: new PropertyPath(rootShape, segments),
+        subSelect: subSelect as FieldSet | undefined,
+      };
+    }
+
+    // Legacy sub-select result (duck-typed) — extract entries from traceResponse
     if (isSubSelectResult(obj)) {
       const parentPath = obj.parentQueryPath;
       const segments: PropertyShape[] = [];
@@ -468,7 +537,6 @@ export class FieldSet<R = any> {
         }
       }
 
-      // Extract sub-select FieldSet from the factory's traced response
       let subSelect: FieldSet | undefined;
       const factoryShape = obj.shape;
       const traceResponse = obj.traceResponse;
@@ -568,7 +636,7 @@ export class FieldSet<R = any> {
   }
 
   /**
-   * Extract FieldSetEntry[] from a SubSelectResult's traceResponse.
+   * Extract FieldSetEntry[] from a sub-select's traceResponse.
    * The traceResponse is the result of calling the sub-query callback with a proxy,
    * containing QueryBuilderObjects, arrays, custom objects, etc.
    */

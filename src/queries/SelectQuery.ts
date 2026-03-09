@@ -11,7 +11,6 @@ import type {IRSelectQuery} from './IntermediateRepresentation.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 import {FieldSet} from './FieldSet.js';
 import type {QueryBuilder} from './QueryBuilder.js';
-import type {SubSelectResult} from './SubSelectResult.js';
 
 /**
  * The canonical SelectQuery type — an IR AST node representing a select query.
@@ -57,7 +56,7 @@ export type QueryBuildFn<T extends Shape, ResponseType> = (
 ) => ResponseType;
 
 export type QueryWrapperObject<ShapeType extends Shape = any> = {
-  [key: string]: SubSelectResult<ShapeType>;
+  [key: string]: FieldSet<any, any>;
 };
 export type CustomQueryObject = {[key: string]: QueryPath};
 
@@ -286,15 +285,15 @@ export type QueryController = {
 
 export type GetCustomObjectKeys<T> = T extends QueryWrapperObject
   ? {
-      [P in keyof T]: T[P] extends SubSelectResult<any>
+      [P in keyof T]: T[P] extends FieldSet<any, any>
         ? ToQueryResultSet<T[P]>
         : never;
     }
   : [];
 
 export type ToQueryResultSet<T> =
-  T extends SubSelectResult<infer ShapeType, infer ResponseType>
-    ? QueryResponseToResultType<ResponseType, ShapeType>[]
+  T extends FieldSet<infer ResponseType, any>
+    ? QueryResponseToResultType<ResponseType>[]
     : null;
 
 /**
@@ -307,7 +306,7 @@ export type QueryResponseToResultType<
   // PreserveArray = false,
 > = T extends QueryBuilderObject
   ? GetQueryObjectResultType<T, {}, false, HasName>
-  : T extends SubSelectResult<any, infer Response, infer Source>
+  : T extends FieldSet<infer Response, infer Source>
     ? GetNestedQueryResultType<Response, Source>
     : T extends Array<infer Type>
       ? UnionToIntersection<QueryResponseToResultType<Type>>
@@ -393,21 +392,13 @@ export type GetShapesResultTypeWithSource<Source> =
 type GetQueryObjectProperty<T> =
   T extends QueryBuilderObject<any, any, infer Property>
     ? Property
-    : T extends SubSelectResult<
-          infer SubShapeType,
-          infer SubResponse,
-          infer SubSource
-        >
+    : T extends FieldSet<infer SubResponse, infer SubSource>
       ? GetQueryObjectProperty<SubSource>
       : never;
 type GetQueryObjectOriginal<T> =
   T extends QueryBuilderObject<infer Original>
     ? Original
-    : T extends SubSelectResult<
-          infer SubShapeType,
-          infer SubResponse,
-          infer SubSource
-        >
+    : T extends FieldSet<infer SubResponse, infer SubSource>
       ? GetNestedQueryResultType<SubResponse, SubSource>
       : never;
 /**
@@ -596,11 +587,11 @@ type ResponseToObject<R> =
     : Prettify<ObjectToPlainResult<R>>;
 
 export type GetQueryResponseType<Q> =
-  Q extends SubSelectResult<any, infer ResponseType> ? ResponseType : Q;
+  Q extends FieldSet<infer ResponseType, any> ? ResponseType : Q;
 
 export type GetQueryShapeType<Q> =
-  Q extends SubSelectResult<infer ShapeType, infer ResponseType>
-    ? ShapeType
+  Q extends FieldSet<infer ResponseType, any>
+    ? never  // Shape type not directly carried by FieldSet; use .shape at runtime
     : never;
 
 /**
@@ -964,7 +955,7 @@ export class BoundComponent<
 
   /**
    * Extract the component's query paths from whatever query type was provided.
-   * Handles SubSelectResult, QueryBuilder (duck-typed), FieldSet, and Record forms.
+   * Handles FieldSet (sub-select), QueryBuilder (duck-typed), and Record forms.
    */
   getComponentQueryPaths(): SelectPath {
     // If component exposes a FieldSet via .fields, prefer it
@@ -1307,31 +1298,26 @@ export class QueryShapeSet<
 
   select<QF = unknown>(
     subQueryFn: QueryBuildFn<S, QF>,
-  ): SubSelectResult<S, QF, QueryShapeSet<S, Source, Property>> {
+  ): FieldSet<QF, QueryShapeSet<S, Source, Property>> {
     const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
-    const proxy = createProxiedPathBuilder(leastSpecificShape);
-    const traceResponse = subQueryFn(proxy as any);
     const parentPath = this.getPropertyPath();
-    return {
-      parentQueryPath: parentPath,
-      traceResponse,
-      shape: leastSpecificShape,
-      getQueryPaths() {
-        // Build query paths from FieldSet conversion
-        const subNodeShape = leastSpecificShape.shape || leastSpecificShape;
-        const subEntries = FieldSet.extractSubSelectEntriesPublic(subNodeShape, traceResponse);
-        const subFs = FieldSet.createFromEntries(subNodeShape, subEntries);
-        const subPaths = fieldSetToSelectPath(subFs);
-        if (parentPath) {
-          return (parentPath as any[]).concat([subPaths]);
-        }
-        return subPaths;
-      },
-    } as any;
+    const fs = FieldSet.forSubSelect<QF, QueryShapeSet<S, Source, Property>>(
+      leastSpecificShape,
+      subQueryFn as any,
+      parentPath,
+    );
+    // Attach getQueryPaths for legacy SelectPath pipeline compatibility
+    fs.getQueryPaths = () => {
+      const subPaths = fieldSetToSelectPath(fs);
+      if (parentPath) {
+        return (parentPath as any[]).concat([subPaths]);
+      }
+      return subPaths;
+    };
+    return fs;
   }
 
-  selectAll(): SubSelectResult<
-    S,
+  selectAll(): FieldSet<
     SelectAllQueryResponse<S>,
     QueryShapeSet<S, Source, Property>
   > {
@@ -1490,33 +1476,28 @@ export class QueryShape<
 
   select<QF = unknown>(
     subQueryFn: QueryBuildFn<S, QF>,
-  ): SubSelectResult<S, QF, QueryShape<S, Source, Property>> {
+  ): FieldSet<QF, QueryShape<S, Source, Property>> {
     const leastSpecificShape = getShapeClass(
       (this.getOriginalValue() as Shape).nodeShape.id,
     );
-    const proxy = createProxiedPathBuilder(leastSpecificShape as ShapeType);
-    const traceResponse = subQueryFn(proxy as any);
     const parentPath = this.getPropertyPath();
-    return {
-      parentQueryPath: parentPath,
-      traceResponse,
-      shape: leastSpecificShape,
-      getQueryPaths() {
-        // Build query paths from FieldSet conversion
-        const subNodeShape = (leastSpecificShape as any).shape || leastSpecificShape;
-        const subEntries = FieldSet.extractSubSelectEntriesPublic(subNodeShape, traceResponse);
-        const subFs = FieldSet.createFromEntries(subNodeShape, subEntries);
-        const subPaths = fieldSetToSelectPath(subFs);
-        if (parentPath) {
-          return (parentPath as any[]).concat([subPaths]);
-        }
-        return subPaths;
-      },
-    } as any;
+    const fs = FieldSet.forSubSelect<QF, QueryShape<S, Source, Property>>(
+      leastSpecificShape,
+      subQueryFn as any,
+      parentPath,
+    );
+    // Attach getQueryPaths for legacy SelectPath pipeline compatibility
+    fs.getQueryPaths = () => {
+      const subPaths = fieldSetToSelectPath(fs);
+      if (parentPath) {
+        return (parentPath as any[]).concat([subPaths]);
+      }
+      return subPaths;
+    };
+    return fs;
   }
 
-  selectAll(): SubSelectResult<
-    S,
+  selectAll(): FieldSet<
     SelectAllQueryResponse<S>,
     QueryShape<S, Source, Property>
   > {
