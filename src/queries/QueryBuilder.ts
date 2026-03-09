@@ -1,7 +1,6 @@
 import {Shape, ShapeType} from '../shapes/Shape.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import {
-  SelectQueryFactory,
   SelectQuery,
   QueryBuildFn,
   WhereClause,
@@ -66,11 +65,7 @@ interface QueryBuilderInit<S extends Shape, R> {
  * const results = await QueryBuilder.from(Person).select(p => p.name);
  * ```
  *
- * Internally delegates to SelectQueryFactory for IR generation,
- * guaranteeing identical output to the existing DSL.
- *
- * @internal The internal delegation to SelectQueryFactory is an implementation
- * detail that will be removed in a future phase.
+ * Generates IR directly via FieldSet, guaranteeing identical output to the existing DSL.
  */
 export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   implements PromiseLike<Result>, Promise<Result>
@@ -379,95 +374,25 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   // ---------------------------------------------------------------------------
 
   /**
-   * @deprecated Legacy bridge — will be removed in Phase 10.
-   * Falls back to SelectQueryFactory for edge cases (preloads).
-   */
-  private _buildFactoryRawInput(): RawSelectInput {
-    const raw = this._buildFactory().toRawInput();
-    if (this._subjects && this._subjects.length > 0) {
-      raw.subjects = this._subjects;
-    }
-    return raw;
-  }
-
-  /**
-   * @deprecated Legacy bridge — will be removed in Phase 10.
-   * Build the internal SelectQueryFactory with our immutable state.
-   */
-  private _buildFactory(): SelectQueryFactory<S, R> {
-    // If preloads exist, wrap the selectFn to include preloadFor calls
-    let selectFn = this._selectFn;
-    if (this._preloads && this._preloads.length > 0) {
-      const originalFn = selectFn;
-      const preloads = this._preloads;
-      selectFn = ((p: any, q: any) => {
-        const original = originalFn ? originalFn(p, q) : [];
-        const results = Array.isArray(original) ? [...original] : [original];
-        for (const entry of preloads) {
-          results.push(p[entry.path].preloadFor(entry.component));
-        }
-        return results;
-      }) as any;
-    }
-
-    const factory = new SelectQueryFactory<S, R>(
-      this._shape,
-      selectFn,
-      this._subject as any,
-    );
-
-    if (this._whereFn) {
-      factory.where(this._whereFn);
-    }
-    if (this._sortByFn) {
-      factory.sortBy(this._sortByFn, this._sortDirection);
-    }
-    if (this._limit !== undefined) {
-      factory.setLimit(this._limit);
-    }
-    if (this._offset !== undefined) {
-      factory.setOffset(this._offset);
-    }
-    if (this._singleResult) {
-      factory.singleResult = true;
-    }
-    return factory;
-  }
-
-  /**
    * Get the select paths for this query.
    * Used by BoundComponent to merge component query paths into a parent query.
    */
   getQueryPaths(): SelectPath {
-    return this._buildFactory().getQueryPaths();
+    const fs = this.fields();
+    return fs ? fieldSetToSelectPath(fs) : [];
   }
 
   /**
    * Get the raw pipeline input.
    *
-   * Constructs RawSelectInput directly from FieldSet + where/sort callbacks,
-   * bypassing SelectQueryFactory. Falls back to buildFactory() for edge cases
-   * (preloads, complex callbacks with sub-selects) that still require the legacy path.
+   * Constructs RawSelectInput directly from FieldSet + where/sort callbacks.
    */
   toRawInput(): RawSelectInput {
-    // Direct path: when we have an explicit FieldSet, label-based selection,
-    // or no selection at all. These can always be converted directly.
-    if (this._fieldSet || this._selectAllLabels || !this._selectFn) {
-      return this._buildDirectRawInput();
-    }
-
-    // For callbacks: try direct FieldSet path first.
-    // Falls back to legacy path if the callback produces types that FieldSet
-    // can't convert (unexpected result types).
-    try {
-      return this._buildDirectRawInput();
-    } catch {
-      return this._buildFactoryRawInput();
-    }
+    return this._buildDirectRawInput();
   }
 
   /**
-   * Build RawSelectInput directly from FieldSet, bypassing SelectQueryFactory.
+   * Build RawSelectInput directly from FieldSet.
    */
   private _buildDirectRawInput(): RawSelectInput {
     let fs = this.fields();
