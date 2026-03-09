@@ -6,14 +6,12 @@
 import type {ICoreIterable} from '../interfaces/ICoreIterable.js';
 import type {NodeShape, PropertyShape} from './SHACL.js';
 import {
-  GetQueryResponseType,
   QResult,
   QShape,
   QueryBuildFn,
   QueryResponseToResultType,
   QueryShape,
   SelectAllQueryResponse,
-  SelectQueryFactory,
 } from '../queries/SelectQuery.js';
 import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
 import {NodeId} from '../queries/MutationQuery.js';
@@ -107,20 +105,14 @@ export abstract class Shape {
   static select<
     ShapeType extends Shape,
     S = unknown,
-    ResultType = QueryResponseToResultType<
-      GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
-      ShapeType
-    >[],
+    ResultType = QueryResponseToResultType<S, ShapeType>[],
   >(
     this: {new (...args: any[]): ShapeType},
   ): QueryBuilder<ShapeType, S, ResultType>;
   static select<
     ShapeType extends Shape,
     S = unknown,
-    ResultType = QueryResponseToResultType<
-      GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
-      ShapeType
-    >,
+    ResultType = QueryResponseToResultType<S, ShapeType>,
   >(
     this: {new (...args: any[]): ShapeType; },
     subjects?: ShapeType | QResult<ShapeType>,
@@ -129,10 +121,7 @@ export abstract class Shape {
   static select<
     ShapeType extends Shape,
     S = unknown,
-    ResultType = QueryResponseToResultType<
-      GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
-      ShapeType
-    >[],
+    ResultType = QueryResponseToResultType<S, ShapeType>[],
   >(
     this: {new (...args: any[]): ShapeType; },
     subjects?: ICoreIterable<ShapeType> | QResult<ShapeType>[],
@@ -141,10 +130,7 @@ export abstract class Shape {
   static select<
     ShapeType extends Shape,
     S = unknown,
-    ResultType = QueryResponseToResultType<
-      GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
-      ShapeType
-    >[],
+    ResultType = QueryResponseToResultType<S, ShapeType>[],
   >(
     this: {new (...args: any[]): ShapeType; },
     targetOrSelectFn?: ShapeType | QueryBuildFn<ShapeType, S>,

@@ -9,7 +9,6 @@ import {Person, Dog, Pet} from '../test-helpers/query-fixtures';
 import {
   QueryResponseToResultType,
   QueryBuildFn,
-  SelectQueryFactory,
   SingleResult,
 } from '../queries/SelectQuery';
 import {Shape} from '../shapes/Shape';
