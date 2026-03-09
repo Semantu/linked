@@ -3187,7 +3187,25 @@ Conducted after Phases 11–12 and follow-up fix-ups. This section captures what
 
 ---
 
-## Proposed Phases: Type System Cleanup
+## Proposed Phases: Type System Cleanup + Pipeline Improvements
+
+### Phase Dependency Graph
+
+```
+Phase 13 (Dead code removal)           — independent
+Phase 14 (Type safety quick wins)      — independent
+Phase 15 (QueryPrimitive consolidation) — independent
+Phase 16 (CreateQResult simplification) — independent, benefits from 14
+Phase 17 (getQueryPaths cleanup)        — depends on 13 (cleaner codebase)
+Phase 18 (FieldSet → desugar direct)    — depends on 17 (getQueryPaths resolved)
+Phase 19 (Shape factory + as any)       — depends on 14 (RawSelectInput typed)
+
+Parallel group A: 13, 14, 15 can run in parallel
+Parallel group B: 16, 17 can run after group A
+Sequential: 18 after 17, 19 after 14
+```
+
+---
 
 ### Phase 13: Dead Code Removal
 
@@ -3195,7 +3213,7 @@ Conducted after Phases 11–12 and follow-up fix-ups. This section captures what
 
 Remove all commented-out dead code identified in the review. No functional changes.
 
-| # | Item |
+| # | Task |
 |---|---|
 | 13.1 | Remove commented `where()` method (SelectQuery.ts:1365–1370) |
 | 13.2 | Remove commented property resolution / TestNode / convertOriginal (SelectQuery.ts:1402–1428) |
@@ -3203,63 +3221,229 @@ Remove all commented-out dead code identified in the review. No functional chang
 | 13.4 | Remove debug `console.error` and old proxy return (SelectQuery.ts:1441, 1462) |
 | 13.5 | Remove old countable logic (SelectQuery.ts:1729–1740) |
 | 13.6 | Remove commented validation (MutationQuery.ts:266–269) |
-| 13.7 | Remove `ensureShapeConstructor` body — keep the function signature, replace body with just `return shape;` if not already (ShapeClass.ts:137–161) |
+| 13.7 | Clean up `ensureShapeConstructor` — body is entirely commented out, function just does `return shape;`. Remove the commented body or the entire function if unused (ShapeClass.ts:137–161) |
 
-**Validation:** `npx tsc --noEmit` + `npm test` — no functional change expected.
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass, no regressions
+- `grep -rn '// *const\|// *if\|// *let\|// *return\|// *throw\|console.error' src/queries/SelectQuery.ts src/queries/MutationQuery.ts src/utils/ShapeClass.ts` — confirm targeted blocks are gone
+
+**Open questions:**
+1. **`ensureShapeConstructor` — remove entirely or keep stub?** The function body is fully commented out, leaving just `return shape;`. If nothing calls it, remove entirely. If callers exist, keep the passthrough stub. **Recommendation:** Check callers; if any exist, keep the stub with a `// no-op: shape validation removed` comment. If none, delete.
+2. **SelectQuery.ts:1147 "strange bug" comment** — there's a comment about a strange bug near line 1147. Should we investigate and fix, or just remove the comment? **Recommendation:** Investigate briefly. If the bug is no longer reproducible, remove the comment. If it reveals a real issue, file it as a separate task.
+
+---
 
 ### Phase 14: Type Safety Quick Wins
 
 **Effort: Low–Medium | Impact: Type safety, DX**
 
-| # | Item | Detail |
+| # | Task | Detail |
 |---|---|---|
-| 14.1 | Type `RawSelectInput.shape` properly | Change from `unknown` to `ShapeType \| NodeShape` — eliminates `as any` in IRDesugar |
-| 14.2 | Constrain `QResult`'s second generic | `Object extends Record<string, unknown> = {}` — catches shape mismatches at compile time |
-| 14.3 | Add branded error types for `never` fallthrough | Replace silent `: never` in `QueryResponseToResultType`, `GetQueryObjectResultType`, `ToQueryPrimitive` with `never & { __error: 'descriptive message' }` — better DX when types break |
+| 14.1 | Type `RawSelectInput.shape` properly | Change from `unknown` to `ShapeType \| NodeShape` in IRDesugar.ts:28. Eliminates the `(query.shape as any)?.shape?.id` cast in desugarSelectQuery. Import ShapeType from Shape.ts and NodeShape from SHACL.ts. |
+| 14.2 | Constrain `QResult`'s second generic | Change `Object = {}` to `Object extends Record<string, unknown> = {}` at SelectQuery.ts:270. Catches shape mismatches at compile time. |
+| 14.3 | Add branded error types for `never` fallthrough | Replace silent `: never` in `QueryResponseToResultType` (line 316), `GetQueryObjectResultType` (line 370), `ToQueryPrimitive` (line 207) with `never & { __error: 'descriptive message' }`. Better DX when types break. |
 
-**Validation:** `npx tsc --noEmit` + type probe tests + `npm test`.
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- Type probe files (`type-probe-4.4a.ts`, `type-probe-deep-nesting.ts`) compile unchanged
+- `npm test` — all tests pass
+- Manual check: hover over a deliberately wrong type in IDE to verify branded error message appears
+
+**Open questions:**
+1. **`RawSelectInput.shape` type — `ShapeType | NodeShape` or narrower?** The runtime value is always a ShapeType or NodeShape, but typing it narrows what callers can pass. **Recommendation:** Use `ShapeType | NodeShape` — matches actual runtime usage and eliminates the `as any` in desugar.
+2. **`QResult` constraint — `Record<string, unknown>` or `object`?** `Record<string, unknown>` is stricter (only string-keyed objects). `object` allows any non-primitive. **Recommendation:** `Record<string, unknown>` — QResult merges properties by key, so string-keyed constraint is correct.
+3. **Branded error messages — verbose or terse?** E.g. `never & { __error: 'QueryResponseToResultType: no matching branch for input type' }` vs `never & { __typeError: 'unmatched_response_type' }`. **Recommendation:** Verbose with full type name — developers will see these in IDE hover tooltips and need context.
+
+---
 
 ### Phase 15: QueryPrimitive Consolidation
 
 **Effort: Medium | Impact: Less code, simpler type surface**
 
-Merge `QueryString`, `QueryNumber`, `QueryBoolean`, `QueryDate` into `QueryPrimitive<T>` (already noted as TODO at SelectQuery.ts:1615–1616). The UPDATE comment says "some of this has started — Query response to result conversion is using QueryPrimitive only".
+Merge `QueryString`, `QueryNumber`, `QueryBoolean`, `QueryDate` into `QueryPrimitive<T>` (TODO at SelectQuery.ts:1615–1616). The UPDATE comment notes "some of this has started — Query response to result conversion is using QueryPrimitive only".
 
-| # | Item |
+| # | Task |
 |---|---|
-| 15.1 | Audit all usages of `QueryString`, `QueryNumber`, `QueryBoolean`, `QueryDate` in src/ and tests |
-| 15.2 | Update call sites to use `QueryPrimitive<string>`, `QueryPrimitive<number>`, etc. |
-| 15.3 | Remove the 4 empty subclasses |
+| 15.1 | Audit all usages of `QueryString`, `QueryNumber`, `QueryBoolean`, `QueryDate` in src/ and tests — list every call site |
+| 15.2 | Replace each subclass usage with `QueryPrimitive<string>`, `QueryPrimitive<number>`, `QueryPrimitive<boolean>`, `QueryPrimitive<Date>` |
+| 15.3 | Remove the 4 empty subclass definitions |
 | 15.4 | Update type probes to verify inference still works |
+| 15.5 | Update any `instanceof QueryString` etc. checks to use `instanceof QueryPrimitive` with type narrowing |
 
-**Validation:** Type probes + full test suite.
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- Type probe files compile and produce identical inferred types
+- `npm test` — all tests pass
+- `grep -rn 'QueryString\|QueryNumber\|QueryBoolean\|QueryDate' src/` — zero hits (only in comments/changelogs if any)
+
+**Open questions:**
+1. **Remove subclasses entirely, or keep as type aliases?** We could keep `type QueryString<S, P> = QueryPrimitive<string, S, P>` for backward compat. **Recommendation:** Remove entirely — they're internal classes, not part of the public API. Any external usage would already be through the proxy, not direct class references.
+2. **`instanceof` checks — are there any?** If code uses `instanceof QueryString`, consolidation breaks it. **Recommendation:** Audit first (task 15.5). If found, switch to property-based checks (`typeof value === 'string'`).
+
+---
 
 ### Phase 16: CreateQResult Simplification
 
 **Effort: Medium–High | Impact: Readability, maintainability**
 
-Break the 12-level conditional `CreateQResult` (SelectQuery.ts:415–493) into 2–3 smaller helper types. This is the riskiest change but the type probes provide a safety net.
+Break the 12-level conditional `CreateQResult` (SelectQuery.ts:415–493) into 2–3 smaller helper types. This is the riskiest change but type probes provide a safety net.
 
-| # | Item |
+| # | Task |
 |---|---|
-| 16.1 | Map out which branches of `CreateQResult` handle which input patterns |
+| 16.1 | Map out which branches of `CreateQResult` handle which input patterns (document the decision tree) |
 | 16.2 | Extract helper types: e.g. `ResolveQResultPrimitive`, `ResolveQResultObject`, `ResolveQResultArray` |
-| 16.3 | Recompose `CreateQResult` from the helpers |
-| 16.4 | Verify all type probes produce identical inferred types |
+| 16.3 | Recompose `CreateQResult` from the helpers — must be semantically equivalent |
+| 16.4 | Verify all type probes produce identical inferred types (diff the `.d.ts` output before/after) |
 
-**Validation:** Type probes (primary), `npx tsc --noEmit`, full test suite.
+**Validation:**
+- Type probes (primary) — `npx tsc --noEmit` on probe files, diff inferred types
+- `npx tsc --noEmit` exits 0 on full project
+- `npm test` — all tests pass
+- Snapshot: generate `.d.ts` for SelectQuery.ts before and after, diff must show only the helper type extractions
+
+**Open questions:**
+1. **How many helper types to extract?** The 12-level conditional could be split into 2 (primitive vs object) or 3 (primitive, plain object, array/set). **Recommendation:** Start with 3 helpers — `ResolveQResultPrimitive`, `ResolveQResultObject`, `ResolveQResultCollection`. This matches the natural decision points in the conditional.
+2. **Should `GetQueryObjectResultType` be simplified in the same phase?** It has 10+ branches and is closely related. **Recommendation:** Yes, tackle both together — they share the same decomposition pattern and the type probes test them jointly.
 
 ---
 
-### Future TODO (out of scope for now)
+### Phase 17: getQueryPaths Monkey-Patch Cleanup
 
-These items are either feature work, require deeper architectural changes, or are too disruptive to tackle alongside the type cleanup:
+**Effort: Medium | Impact: Code health, enables Phase 18**
+
+Factor the `getQueryPaths` monkey-patch into the FieldSet class properly. Currently assigned externally at SelectQuery.ts:1301–1307 and 1481–1487.
+
+**Current state:**
+- `FieldSet` declares `getQueryPaths?: () => any` (FieldSet.ts:195)
+- Two call sites in `BoundComponent.select()` and `BoundShapeComponent.select()` monkey-patch it onto the instance after `FieldSet.forSubSelect()`
+- Consumed via duck-type check: `typeof (query as any).getQueryPaths === 'function'` (SelectQuery.ts:964)
+- Delegates to `fieldSetToSelectPath(fs)` with parent path prepended
+
+| # | Task |
+|---|---|
+| 17.1 | Add `parentQueryPath` as a proper stored property on FieldSet (already partially there via `forSubSelect` constructor) |
+| 17.2 | Implement `getQueryPaths()` as a real method on FieldSet — computes from `fieldSetToSelectPath(this)` + `parentQueryPath` |
+| 17.3 | Remove the monkey-patch assignments at SelectQuery.ts:1301–1307 and 1481–1487 |
+| 17.4 | Remove the optional property declaration `getQueryPaths?: () => any` from FieldSet |
+| 17.5 | Update the duck-type checks at SelectQuery.ts:964–965 to use `instanceof FieldSet` or call the method directly |
+
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+- `grep -rn 'fs.getQueryPaths =' src/` — zero hits (monkey-patch gone)
+- `grep -rn 'getQueryPaths\b' src/queries/` — only method definition and legitimate call sites remain
+
+**Open questions:**
+1. **Compute `getQueryPaths()` lazily or eagerly?** Lazily (compute on call from entries) is cleaner. Eagerly (store in constructor) avoids repeat computation. **Recommendation:** Lazily — `getQueryPaths()` is called at most once per FieldSet, and computing from entries is cheap. No need to store extra state.
+2. **Keep `getQueryPaths` on QueryBuilder too?** QueryBuilder.ts:366 has its own `getQueryPaths()`. After this phase, should it delegate to `this.fields().getQueryPaths()`? **Recommendation:** Yes — single source of truth. QueryBuilder's `getQueryPaths()` should just call `this.fields().getQueryPaths()`.
+
+---
+
+### Phase 18: FieldSet → Desugar Direct Pipeline
+
+**Effort: Medium–High | Impact: Architecture — eliminates SelectPath bridge**
+
+Make `desugarSelectQuery()` accept FieldSet directly, eliminating the `fieldSetToSelectPath()` bridge. This collapses the pipeline from `FieldSet → SelectPath → desugar → IRSelectQuery` to `FieldSet → desugar → IRSelectQuery`.
+
+**Current pipeline:**
+```
+QueryBuilder._buildDirectRawInput()
+  → fieldSetToSelectPath(fs)  // converts FieldSet entries to SelectPath
+  → constructs RawSelectInput { select: SelectPath, ... }
+  → desugarSelectQuery(rawInput)
+  → IRSelectQuery
+```
+
+**Target pipeline:**
+```
+QueryBuilder._buildDirectRawInput()
+  → constructs RawFieldSetInput { fieldSet: FieldSet, ... }
+  → desugarFieldSetQuery(rawFieldSetInput)
+  → IRSelectQuery
+```
+
+| # | Task |
+|---|---|
+| 18.1 | Create `RawFieldSetInput` type — same as `RawSelectInput` but with `fieldSet: FieldSet` instead of `select: SelectPath` |
+| 18.2 | Implement `desugarFieldSetQuery()` — walks FieldSet entries directly to produce `DesugaredSelectQuery`, bypassing SelectPath entirely |
+| 18.3 | Each FieldSetEntry already has `path.segments`, `scopedFilter`, `subSelect`, `aggregation`, `customKey` — map these directly to `DesugaredPropertyStep`, `DesugaredCountStep`, etc. |
+| 18.4 | Update `QueryBuilder._buildDirectRawInput()` to call the new path |
+| 18.5 | Keep `fieldSetToSelectPath()` and `desugarSelectQuery()` available for backward compat — deprecate but don't remove yet |
+| 18.6 | Add tests that verify FieldSet-direct and SelectPath-bridge produce identical `DesugaredSelectQuery` output for all existing test cases |
+
+**Stubs for parallel execution:** If running before Phase 17, the FieldSet `getQueryPaths` monkey-patch can be ignored — this phase only needs FieldSet entries, not `getQueryPaths`.
+
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+- New test: for every existing `desugarSelectQuery` test case, assert `desugarFieldSetQuery` produces an identical `DesugaredSelectQuery`
+- `fieldSetToSelectPath()` call count in QueryBuilder reduced to 0 (only used in deprecated/compat paths)
+
+**Open questions:**
+1. **Deprecate `fieldSetToSelectPath()` or remove?** It's used in 10 places currently. After this phase, QueryBuilder won't need it, but it may still be useful for debugging/inspection. **Recommendation:** Deprecate with `@deprecated` JSDoc — keep available but mark for future removal. Remove from QueryBuilder's imports.
+2. **New function name: `desugarFieldSetQuery` or overload `desugarSelectQuery`?** An overload keeps one entry point. A new function is clearer about the two code paths. **Recommendation:** New function `desugarFieldSetQuery()` — clearer separation, easier to trace, and the old function stays untouched for backward compat.
+3. **Should FieldSet carry `where`, `sortBy`, `limit`, `offset` directly?** Currently these live on QueryBuilder, not FieldSet. The new `RawFieldSetInput` still needs these from QueryBuilder. **Recommendation:** Keep them on QueryBuilder for now — FieldSet is the "what to select", QueryBuilder is the "how to query". Don't conflate concerns.
+
+---
+
+### Phase 19: Shape Factory Redesign + `as any` Reduction
+
+**Effort: High | Impact: Type safety — addresses root cause of ~44 `as any` casts**
+
+The root cause: `ShapeType<S>` (a class constructor `{ new(...args): S }`) and `typeof Shape` (the abstract base with static methods) don't align. Every `Shape.select()`, `.update()`, `.create()`, `.delete()` static method starts with `this as any` because TypeScript's `this` parameter in static methods doesn't carry the concrete subclass constructor type properly into the Builder generics.
+
+**Current pattern (Shape.ts:148):**
+```ts
+static select<ShapeType extends Shape>(
+  this: { new (...args: any[]): ShapeType },
+  ...
+) {
+  let builder = QueryBuilder.from(this as any) as QueryBuilder<ShapeType, any, any>;
+}
+```
+
+The `this as any` is needed because `this` is typed as `{ new(...args): ShapeType }` but `QueryBuilder.from()` expects `ShapeType<S>` which may have additional constraints.
+
+**Cast clusters to address:**
+- Shape.ts: 11 casts — all in static methods (`select`, `selectAll`, `update`, `create`, `delete`, `forShape`)
+- SelectQuery.ts: 22 casts — proxy construction, generic coercion, shape instantiation
+- QueryBuilder.ts: 12 casts — shape/subject/select coercion
+- CreateBuilder.ts, UpdateBuilder.ts, DeleteBuilder.ts: 5 casts — `this._shape as any as typeof Shape`
+
+| # | Task |
+|---|---|
+| 19.1 | Define a unified `ShapeConstructor<S>` type that satisfies both the Builder `from()` methods and the Shape static `this` parameter — e.g. `type ShapeConstructor<S extends Shape> = { new (...args: any[]): S } & { shape?: NodeShape }` |
+| 19.2 | Update `QueryBuilder.from()`, `UpdateBuilder.from()`, `CreateBuilder.from()`, `DeleteBuilder.from()` to accept `ShapeConstructor<S>` |
+| 19.3 | Update Shape static methods to use `ShapeConstructor` as the `this` type — eliminate `this as any` casts |
+| 19.4 | Address SelectQuery.ts casts: categorize each cast as (a) fixable with better generics, (b) inherent to proxy/dynamic patterns, (c) noise from the Shape misalignment |
+| 19.5 | Fix category (a) and (c) casts. Document category (b) casts with `// SAFETY:` comments explaining why the cast is necessary |
+| 19.6 | Target: reduce from ~44 to ≤15 `as any` casts, all with SAFETY comments |
+
+**Risks:**
+- This touches the most foundational type in the system — every Shape subclass is affected
+- Proxy construction (`new (shape as any)()`) may be inherently untyped — some casts are unavoidable
+- Shape class hierarchy with decorators adds complexity
+
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all tests pass
+- Type probe files compile unchanged
+- `grep -c 'as any' src/queries/*.ts src/shapes/Shape.ts` — total ≤ 15, each with `// SAFETY:` comment
+- No new `@ts-ignore` or `@ts-expect-error` introduced
+
+**Open questions:**
+1. **`ShapeConstructor<S>` — single unified type or intersection?** We could define `ShapeConstructor<S> = { new (...args: any[]): S } & { shape?: NodeShape }` or use a more elaborate mapped type. **Recommendation:** Simple intersection — the `new` signature plus `shape` accessor is all the Builders need. Don't over-engineer.
+2. **Target cast count — ≤15 or ≤10?** Some casts are inherently unavoidable (proxy construction via `new (shape as any)()`). **Recommendation:** Target ≤15 with SAFETY comments. Getting below 10 would require runtime type guards that add overhead for no real benefit.
+3. **Tackle all Builder `from()` methods at once or one at a time?** QueryBuilder, UpdateBuilder, CreateBuilder, DeleteBuilder all have the same pattern. **Recommendation:** All at once — they share the same `ShapeConstructor` type and changing one without the others creates inconsistency.
+
+---
+
+### Future TODO (deferred — not part of current plan)
 
 | Item | Reason to defer |
 |---|---|
-| **~44 `as any` casts** (Shape.ts factory pattern) | Root cause is `ShapeType` vs `typeof Shape` misalignment. Fixing requires redesigning the Shape static method factory pattern — high risk, cross-cutting |
-| **MutationQuery update functions** (MutationQuery.ts:33) | Feature work, not cleanup |
-| **QueryContext NullQueryShape** (QueryContext.ts:8) | Feature work — needs design decision on what NullQueryShape returns |
-| **Async shape loading** (SelectQuery.ts:693–697) | Speculative — comment itself says "not sure if that's even possible". Needs shapes-only architecture first |
+| **MutationQuery update functions** (MutationQuery.ts:33) — callback-style updates like `Shape.update(entity, e => { e.name = 'Bob' })` | Feature work, not cleanup. UpdateBuilder already handles object-style updates. The callback pattern needs a proxy-tracing approach similar to select(). Consider as separate feature plan. |
+| **QueryContext NullQueryShape** (QueryContext.ts:8) | Feature work — needs design decision on what default/null query behavior should look like |
+| **Async shape loading** (SelectQuery.ts:693–697) | Speculative — comment says "not sure if that's even possible with dynamic import paths known only at runtime". Needs shapes-only architecture first |
 | **Generic naming consistency** (`QShapeType` vs `ShapeType` vs `T`) | Opportunistic — address during other refactors, not worth a dedicated pass |
-| **`getQueryPaths` monkey-patch** (see item 6 in Risks section above) | Legacy glue — factor into FieldSet class when touching that area next |
