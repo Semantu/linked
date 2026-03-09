@@ -1334,10 +1334,26 @@ export class QueryShapeSet<
   select<QF = unknown>(
     subQueryFn: QueryBuildFn<S, QF>,
   ): SelectQueryFactory<S, QF, QueryShapeSet<S, Source, Property>> {
-    let leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
-    let subQuery = new SelectQueryFactory(leastSpecificShape, subQueryFn);
-    subQuery.parentQueryPath = this.getPropertyPath();
-    return subQuery as any;
+    const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
+    const proxy = createProxiedPathBuilder(leastSpecificShape);
+    const traceResponse = subQueryFn(proxy as any, null as any);
+    const parentPath = this.getPropertyPath();
+    return {
+      parentQueryPath: parentPath,
+      traceResponse,
+      shape: leastSpecificShape,
+      getQueryPaths() {
+        // Build query paths from FieldSet conversion for legacy compatibility
+        const subNodeShape = leastSpecificShape.shape || leastSpecificShape;
+        const subEntries = FieldSet.extractSubSelectEntriesPublic(subNodeShape, traceResponse);
+        const subFs = FieldSet.createFromEntries(subNodeShape, subEntries);
+        const subPaths = fieldSetToSelectPath(subFs);
+        if (parentPath) {
+          return (parentPath as any[]).concat([subPaths]);
+        }
+        return subPaths;
+      },
+    } as any;
   }
 
   selectAll(): SelectQueryFactory<
@@ -1501,15 +1517,28 @@ export class QueryShape<
   select<QF = unknown>(
     subQueryFn: QueryBuildFn<S, QF>,
   ): SelectQueryFactory<S, QF, QueryShape<S, Source, Property>> {
-    let leastSpecificShape = getShapeClass(
+    const leastSpecificShape = getShapeClass(
       (this.getOriginalValue() as Shape).nodeShape.id,
     );
-    let subQuery = new SelectQueryFactory(
-      leastSpecificShape as ShapeType,
-      subQueryFn,
-    );
-    subQuery.parentQueryPath = this.getPropertyPath();
-    return subQuery as any;
+    const proxy = createProxiedPathBuilder(leastSpecificShape as ShapeType);
+    const traceResponse = subQueryFn(proxy as any, null as any);
+    const parentPath = this.getPropertyPath();
+    return {
+      parentQueryPath: parentPath,
+      traceResponse,
+      shape: leastSpecificShape,
+      getQueryPaths() {
+        // Build query paths from FieldSet conversion for legacy compatibility
+        const subNodeShape = (leastSpecificShape as any).shape || leastSpecificShape;
+        const subEntries = FieldSet.extractSubSelectEntriesPublic(subNodeShape, traceResponse);
+        const subFs = FieldSet.createFromEntries(subNodeShape, subEntries);
+        const subPaths = fieldSetToSelectPath(subFs);
+        if (parentPath) {
+          return (parentPath as any[]).concat([subPaths]);
+        }
+        return subPaths;
+      },
+    } as any;
   }
 
   selectAll(): SelectQueryFactory<
@@ -1910,17 +1939,17 @@ export class SelectQueryFactory<
       response.forEach((endValue) => {
         if (endValue instanceof QueryBuilderObject) {
           queryPaths.push(endValue.getPropertyPath());
-        } else if (endValue instanceof SelectQueryFactory) {
+        } else if (endValue instanceof SelectQueryFactory || (endValue && typeof endValue === 'object' && typeof endValue.getQueryPaths === 'function' && 'parentQueryPath' in endValue)) {
           queryPaths.push(
-            (endValue as SelectQueryFactory<any>).getQueryPaths() as any,
+            endValue.getQueryPaths() as any,
           );
         }
       });
     } else if (response instanceof Evaluation) {
       queryPaths.push(response.getWherePath());
-    } else if (response instanceof SelectQueryFactory) {
+    } else if (response instanceof SelectQueryFactory || (response && typeof response === 'object' && typeof (response as any).getQueryPaths === 'function' && 'parentQueryPath' in (response as any))) {
       queryPaths.push(
-        (response as SelectQueryFactory<any, any>).getQueryPaths() as any,
+        (response as any).getQueryPaths() as any,
       );
     } else if (!response) {
       //that's totally fine. For example Person.select().where(p => p.name.equals('John'))

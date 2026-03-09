@@ -558,6 +558,14 @@ export class FieldSet<R = any> {
   }
 
   /**
+   * Extract FieldSetEntry[] from a sub-query's traceResponse.
+   * Public alias for use by lightweight sub-select wrappers.
+   */
+  static extractSubSelectEntriesPublic(rootShape: NodeShape, traceResponse: any): FieldSetEntry[] {
+    return FieldSet.extractSubSelectEntries(rootShape, traceResponse);
+  }
+
+  /**
    * Extract FieldSetEntry[] from a SelectQueryFactory's traceResponse.
    * The traceResponse is the result of calling the sub-query callback with a proxy,
    * containing QueryBuilderObjects, arrays, custom objects, etc.
@@ -569,6 +577,18 @@ export class FieldSet<R = any> {
         .map((item) => FieldSet.convertTraceResult(rootShape, item));
     }
     if (isQueryBuilderObject(traceResponse)) {
+      return [FieldSet.convertTraceResult(rootShape, traceResponse)];
+    }
+    // Single sub-select factory or lightweight wrapper — convert directly
+    if (isSelectQueryFactory(traceResponse)) {
+      return [FieldSet.convertTraceResult(rootShape, traceResponse)];
+    }
+    // Single SetSize
+    if (isSetSize(traceResponse)) {
+      return [FieldSet.convertTraceResult(rootShape, traceResponse)];
+    }
+    // Single Evaluation
+    if (isEvaluation(traceResponse)) {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
     if (typeof traceResponse === 'object' && traceResponse !== null) {
