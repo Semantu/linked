@@ -357,4 +357,89 @@ export const queryFactories = {
   queryBuilderPreload: () =>
     QueryBuilder.from(Person).select((p) => [p.name]).preload('bestFriend', componentLike),
   selectAllEmployeeProperties: () => Employee.selectAll(),
+
+  // --- Deep nesting boundary tests (Phase 12 validation) ---
+
+  // Triple-nested sub-selects: 3 levels of .select()
+  tripleNestedSubSelect: () =>
+    Person.select((p) =>
+      p.friends.select((f) =>
+        f.bestFriend.select((bf) =>
+          bf.friends.select((ff) => ({name: ff.name, hobby: ff.hobby})),
+        ),
+      ),
+    ),
+
+  // Double nested: singular → plural
+  doubleNestedSingularPlural: () =>
+    Person.select((p) =>
+      p.bestFriend.select((bf) =>
+        bf.friends.select((f) => ({name: f.name, hobby: f.hobby})),
+      ),
+    ),
+
+  // Double nested: plural → singular
+  doubleNestedPluralSingular: () =>
+    Person.select((p) =>
+      p.friends.select((f) =>
+        f.bestFriend.select((bf) => ({name: bf.name, isReal: bf.isRealPerson})),
+      ),
+    ),
+
+  // Sub-select returning array of paths (not custom object)
+  subSelectArrayOfPaths: () =>
+    Person.select((p) =>
+      p.friends.select((f) => [f.name, f.hobby, f.birthDate]),
+    ),
+
+  // Sub-select on singular returning array of paths
+  subSelectSingularArrayPaths: () =>
+    Person.select((p) =>
+      p.bestFriend.select((bf) => [bf.name, bf.hobby, bf.isRealPerson]),
+    ),
+
+  // Sub-select with count in custom object
+  subSelectWithCount: () =>
+    Person.select((p) =>
+      p.friends.select((f) => ({
+        name: f.name,
+        numFriends: f.friends.size(),
+      })),
+    ),
+
+  // Mixed: plain path + sub-select in array
+  mixedPathAndSubSelect: () =>
+    Person.select((p) => [
+      p.name,
+      p.friends.select((f) => ({name: f.name, hobby: f.hobby})),
+    ]),
+
+  // Multiple sub-selects in array
+  multipleSubSelectsInArray: () =>
+    Person.select((p) => [
+      p.friends.select((f) => ({name: f.name})),
+      p.bestFriend.select((bf) => ({hobby: bf.hobby})),
+    ]),
+
+  // Sub-select + one() unwrap
+  subSelectWithOne: () =>
+    Person.select((p) =>
+      p.friends.select((f) => ({name: f.name, hobby: f.hobby})),
+    )
+      .where((p) => p.equals(entity('p1')))
+      .one(),
+
+  // selectAll() on sub-select plural
+  subSelectAllPlural: () =>
+    Person.select((p) => p.friends.selectAll()),
+
+  // selectAll() on sub-select singular
+  subSelectAllSingular: () =>
+    Person.select((p) => p.bestFriend.selectAll()),
+
+  // Employee sub-select (inheritance)
+  employeeSubSelect: () =>
+    Employee.select((e) =>
+      e.bestFriend.select((bf) => ({name: bf.name, dept: bf.department})),
+    ),
 };

@@ -583,4 +583,109 @@ describe.skip('query result type inference (compile only)', () => {
     const updated = null as unknown as Result;
     expectType<Date | undefined>(updated.birthDate);
   });
+
+  // =========================================================================
+  // Deep nesting boundary tests (Phase 12 — FieldSet<R, Source> validation)
+  // =========================================================================
+
+  test('triple nested sub-select (3 levels of .select())', () => {
+    const promise = queryFactories.tripleNestedSubSelect();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.friends[0].bestFriend.friends[0].name);
+    expectType<string | null | undefined>(first.friends[0].bestFriend.friends[0].hobby);
+  });
+
+  test('double nested: singular → plural', () => {
+    const promise = queryFactories.doubleNestedSingularPlural();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.bestFriend.friends[0].name);
+    expectType<string | null | undefined>(first.bestFriend.friends[0].hobby);
+  });
+
+  test('double nested: plural → singular', () => {
+    const promise = queryFactories.doubleNestedPluralSingular();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.friends[0].bestFriend.name);
+    expectType<boolean | null | undefined>(first.friends[0].bestFriend.isReal);
+  });
+
+  test('sub-select returning array of paths', () => {
+    const promise = queryFactories.subSelectArrayOfPaths();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.friends[0].name);
+    expectType<string | null | undefined>(first.friends[0].hobby);
+    expectType<Date | null | undefined>(first.friends[0].birthDate);
+  });
+
+  test('sub-select on singular returning array of paths', () => {
+    const promise = queryFactories.subSelectSingularArrayPaths();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.bestFriend.name);
+    expectType<string | null | undefined>(first.bestFriend.hobby);
+    expectType<boolean | null | undefined>(first.bestFriend.isRealPerson);
+  });
+
+  test('sub-select with count in custom object', () => {
+    const promise = queryFactories.subSelectWithCount();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.friends[0].name);
+    expectType<number>(first.friends[0].numFriends);
+  });
+
+  test('mixed: plain path + sub-select in array', () => {
+    const promise = queryFactories.mixedPathAndSubSelect();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.name);
+    expectType<string | null | undefined>(first.friends[0].name);
+    expectType<string | null | undefined>(first.friends[0].hobby);
+  });
+
+  test('multiple sub-selects in array', () => {
+    const promise = queryFactories.multipleSubSelectsInArray();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.friends[0].name);
+    expectType<string | null | undefined>(first.bestFriend.hobby);
+  });
+
+  test('sub-select + one() unwrap', () => {
+    const promise = queryFactories.subSelectWithOne();
+    type Result = Awaited<typeof promise>;
+    const single = null as unknown as Result;
+    expectType<string | null | undefined>(single.friends[0].name);
+    expectType<string | null | undefined>(single.friends[0].hobby);
+  });
+
+  test('selectAll() on sub-select plural', () => {
+    const promise = queryFactories.subSelectAllPlural();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | undefined>(first.friends[0].id);
+    expectType<string | null | undefined>(first.friends[0].name);
+    expectType<string | null | undefined>(first.friends[0].hobby);
+  });
+
+  test('selectAll() on sub-select singular', () => {
+    const promise = queryFactories.subSelectAllSingular();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | undefined>(first.bestFriend.id);
+    expectType<string | null | undefined>(first.bestFriend.name);
+    expectType<string | null | undefined>(first.bestFriend.hobby);
+  });
+
+  test('employee sub-select (inheritance)', () => {
+    const promise = queryFactories.employeeSubSelect();
+    type Result = Awaited<typeof promise>;
+    const first = (null as unknown as Result)[0];
+    expectType<string | null | undefined>(first.bestFriend.name);
+    expectType<string | null | undefined>(first.bestFriend.dept);
+  });
 });
