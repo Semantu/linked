@@ -14,7 +14,7 @@ import {getShapeClass} from '../utils/ShapeClass.js';
 export class PropertyPath {
   constructor(
     readonly rootShape: NodeShape,
-    readonly segments: PropertyShape[],
+    readonly segments: readonly PropertyShape[],
   ) {}
 
   /** Append a property traversal hop, returning a new PropertyPath. */
