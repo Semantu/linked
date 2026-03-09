@@ -3135,3 +3135,131 @@ Strictly sequential — each phase builds on the previous.
 5. **Backward compatibility** — The deprecated `SelectQueryFactory` alias can be updated to point to `FieldSet` with matching generics: `type SelectQueryFactory<S, R, Source> = FieldSet<R, Source>`. Shape parameter `S` is lost but may be acceptable for deprecated usage.
 
 6. **`getQueryPaths` monkey-patch cleanup** — In `SelectQuery.ts` (BoundComponent.select and BoundShapeComponent.select), `getQueryPaths` is assigned onto the FieldSet instance via runtime monkey-patch after construction (lines ~1301-1307 and ~1481-1487). This is legacy glue from the old SubSelectResult setup. It should be factored into the FieldSet class itself (e.g. as a method on `forSubSelect`) so that the assignment happens inside the class rather than externally.
+
+---
+
+## Type System Review
+
+Conducted after Phases 11–12 and follow-up fix-ups. This section captures what's good, what's concerning, and what's bad in the current type system state.
+
+### What's Good
+
+- **Phantom types in FieldSet** — `declare readonly __response: R` carries type info with zero runtime cost. Clean pattern.
+- **Proxy-based path tracing** — `ProxiedPathBuilder.ts` cleanly captures `p.friends.bestFriend.name` chains.
+- **QueryBuilder generic flow** — `S` (shape), `R` (response), `Result` stay consistent through `.select()`, `.one()`, `.where()`, `.limit()`.
+- **PromiseLike integration** — `await builder` works without losing types.
+- **Type probe tests** — `type-probe-4.4a.ts` and `type-probe-deep-nesting.ts` cover 4+ levels of nesting, sub-selects, custom objects, inheritance. Solid coverage.
+
+### What's Concerning
+
+- **CreateQResult** (SelectQuery.ts:415–493) — 12+ levels of conditional nesting. There's a TODO comment saying "this must be simplified and rewritten" and "likely the most complex part of the type system". It recursively self-calls.
+- **GetQueryObjectResultType** (SelectQuery.ts:324–370) — 10+ conditional branches. Hard to trace.
+- **Silent `never` fallthrough** — `QueryResponseToResultType`, `GetQueryObjectResultType`, `ToQueryPrimitive` all end with `: never`. If a type doesn't match any branch, it silently becomes `never` instead of giving a useful error.
+- **QResult's second generic** — `QResult<ShapeType, Object = {}>` is completely unconstrained. Any garbage object type gets merged in.
+- **Generic naming** — mostly consistent (`S`, `R`, `Source`, `Property`) but `QShapeType` vs `ShapeType` vs `T` appear inconsistently in the conditional types.
+
+### What's Bad
+
+- **~44 `as any` casts in production code** — the biggest cluster is `Shape.ts` (10 casts for static method factory bridging) and `SelectQuery.ts` (20+ casts for proxy construction, generic coercion, shape instantiation).
+  - **Root cause:** `ShapeType` (the class constructor type) and `typeof Shape` (the abstract base) don't align. Every `Shape.select()`, `Shape.update()`, `Shape.create()`, `Shape.delete()` starts with `this as any`. This is the single biggest type gap.
+- **IRDesugar shape resolution** — `(query.shape as any)?.shape?.id` because `RawSelectInput.shape` is typed as `unknown`. The runtime value is actually always a `ShapeType` or `NodeShape`.
+
+### Commented-Out Dead Code (still present)
+
+| Location | What |
+|---|---|
+| SelectQuery.ts:1365–1370 | Old `where()` method |
+| SelectQuery.ts:1402–1428 | Old property resolution, TestNode, convertOriginal |
+| SelectQuery.ts:733–746 | Abandoned TestNode approach |
+| SelectQuery.ts:1441, 1462 | Debug `console.error`, old proxy return |
+| SelectQuery.ts:1729–1740 | Old countable logic |
+| MutationQuery.ts:266–269 | Commented validation |
+| ShapeClass.ts:137–161 | `ensureShapeConstructor()` entirely commented out |
+
+### Incomplete Features (TODOs)
+
+| Location | What |
+|---|---|
+| MutationQuery.ts:33 | "Update functions not implemented yet" |
+| QueryContext.ts:8 | "should return NullQueryShape" |
+| SelectQuery.ts:693–697 | Async shape loading |
+| SelectQuery.ts:1615–1616 | Consolidate QueryString/Number/Boolean/Date into QueryPrimitive |
+
+---
+
+## Proposed Phases: Type System Cleanup
+
+### Phase 13: Dead Code Removal
+
+**Effort: Low | Impact: Clarity**
+
+Remove all commented-out dead code identified in the review. No functional changes.
+
+| # | Item |
+|---|---|
+| 13.1 | Remove commented `where()` method (SelectQuery.ts:1365–1370) |
+| 13.2 | Remove commented property resolution / TestNode / convertOriginal (SelectQuery.ts:1402–1428) |
+| 13.3 | Remove abandoned TestNode approach (SelectQuery.ts:733–746) |
+| 13.4 | Remove debug `console.error` and old proxy return (SelectQuery.ts:1441, 1462) |
+| 13.5 | Remove old countable logic (SelectQuery.ts:1729–1740) |
+| 13.6 | Remove commented validation (MutationQuery.ts:266–269) |
+| 13.7 | Remove `ensureShapeConstructor` body — keep the function signature, replace body with just `return shape;` if not already (ShapeClass.ts:137–161) |
+
+**Validation:** `npx tsc --noEmit` + `npm test` — no functional change expected.
+
+### Phase 14: Type Safety Quick Wins
+
+**Effort: Low–Medium | Impact: Type safety, DX**
+
+| # | Item | Detail |
+|---|---|---|
+| 14.1 | Type `RawSelectInput.shape` properly | Change from `unknown` to `ShapeType \| NodeShape` — eliminates `as any` in IRDesugar |
+| 14.2 | Constrain `QResult`'s second generic | `Object extends Record<string, unknown> = {}` — catches shape mismatches at compile time |
+| 14.3 | Add branded error types for `never` fallthrough | Replace silent `: never` in `QueryResponseToResultType`, `GetQueryObjectResultType`, `ToQueryPrimitive` with `never & { __error: 'descriptive message' }` — better DX when types break |
+
+**Validation:** `npx tsc --noEmit` + type probe tests + `npm test`.
+
+### Phase 15: QueryPrimitive Consolidation
+
+**Effort: Medium | Impact: Less code, simpler type surface**
+
+Merge `QueryString`, `QueryNumber`, `QueryBoolean`, `QueryDate` into `QueryPrimitive<T>` (already noted as TODO at SelectQuery.ts:1615–1616). The UPDATE comment says "some of this has started — Query response to result conversion is using QueryPrimitive only".
+
+| # | Item |
+|---|---|
+| 15.1 | Audit all usages of `QueryString`, `QueryNumber`, `QueryBoolean`, `QueryDate` in src/ and tests |
+| 15.2 | Update call sites to use `QueryPrimitive<string>`, `QueryPrimitive<number>`, etc. |
+| 15.3 | Remove the 4 empty subclasses |
+| 15.4 | Update type probes to verify inference still works |
+
+**Validation:** Type probes + full test suite.
+
+### Phase 16: CreateQResult Simplification
+
+**Effort: Medium–High | Impact: Readability, maintainability**
+
+Break the 12-level conditional `CreateQResult` (SelectQuery.ts:415–493) into 2–3 smaller helper types. This is the riskiest change but the type probes provide a safety net.
+
+| # | Item |
+|---|---|
+| 16.1 | Map out which branches of `CreateQResult` handle which input patterns |
+| 16.2 | Extract helper types: e.g. `ResolveQResultPrimitive`, `ResolveQResultObject`, `ResolveQResultArray` |
+| 16.3 | Recompose `CreateQResult` from the helpers |
+| 16.4 | Verify all type probes produce identical inferred types |
+
+**Validation:** Type probes (primary), `npx tsc --noEmit`, full test suite.
+
+---
+
+### Future TODO (out of scope for now)
+
+These items are either feature work, require deeper architectural changes, or are too disruptive to tackle alongside the type cleanup:
+
+| Item | Reason to defer |
+|---|---|
+| **~44 `as any` casts** (Shape.ts factory pattern) | Root cause is `ShapeType` vs `typeof Shape` misalignment. Fixing requires redesigning the Shape static method factory pattern — high risk, cross-cutting |
+| **MutationQuery update functions** (MutationQuery.ts:33) | Feature work, not cleanup |
+| **QueryContext NullQueryShape** (QueryContext.ts:8) | Feature work — needs design decision on what NullQueryShape returns |
+| **Async shape loading** (SelectQuery.ts:693–697) | Speculative — comment itself says "not sure if that's even possible". Needs shapes-only architecture first |
+| **Generic naming consistency** (`QShapeType` vs `ShapeType` vs `T`) | Opportunistic — address during other refactors, not worth a dedicated pass |
+| **`getQueryPaths` monkey-patch** (see item 6 in Risks section above) | Legacy glue — factor into FieldSet class when touching that area next |
