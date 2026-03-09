@@ -1871,7 +1871,9 @@ p.friends.select(fn)
 
 ---
 
-### Phase 10: Remove SelectQueryFactory
+### Phase 10: Remove SelectQueryFactory ✅
+
+**Status: COMPLETE** — All 7 sub-phases (10a–10g) implemented and committed.
 
 **Goal:** Delete `SelectQueryFactory` and all supporting code that is no longer reachable.
 
@@ -2309,7 +2311,7 @@ FieldSet now properly handles sub-selects from DSL proxy tracing. Instead of cha
 
 ---
 
-### Phase 10a: Evaluation support in FieldSetEntry
+### Phase 10a: Evaluation support in FieldSetEntry ✅
 
 **Goal:** Remove the `throw` for Evaluation selections in `FieldSet.convertTraceResult()`. Evaluation-as-selection (e.g. `p.bestFriend.equals(someValue)` used inside a select callback) becomes a proper `FieldSetEntry` variant.
 
@@ -2394,7 +2396,7 @@ Uses `Person` shape from `query-fixtures`. `personShape = (Person as any).shape`
 
 ---
 
-### Phase 10b: BoundComponent (preload) support in FieldSetEntry
+### Phase 10b: BoundComponent (preload) support in FieldSetEntry ✅
 
 **Goal:** Remove the `throw` for BoundComponent in `FieldSet.convertTraceResult()`. Preloads become a proper `FieldSetEntry` variant. Remove `_buildFactory()` preload guard in `toRawInput()`.
 
@@ -2477,7 +2479,7 @@ Uses `Person` shape and a mock component. The existing preload tests at query-bu
 
 ---
 
-### Phase 10c: Replace LinkedWhereQuery with standalone where evaluation
+### Phase 10c: Replace LinkedWhereQuery with standalone where evaluation ✅
 
 **Goal:** `processWhereClause()` no longer instantiates `SelectQueryFactory` (via `LinkedWhereQuery extends SelectQueryFactory`). Use `createProxiedPathBuilder` directly.
 
@@ -2554,7 +2556,7 @@ The replacement in `processWhereClause()` does the same thing directly:
 
 ---
 
-### Phase 10d: Lightweight sub-select wrapper — replace SelectQueryFactory in proxy handlers
+### Phase 10d: Lightweight sub-select wrapper — replace SelectQueryFactory in proxy handlers ✅
 
 **Goal:** `QueryShapeSet.select()` and `QueryShape.select()` no longer create `new SelectQueryFactory`. Replace with a lightweight duck-typed object that satisfies the `isSelectQueryFactory` check in `FieldSet.convertTraceResult()`.
 
@@ -2636,7 +2638,7 @@ select<QF = unknown>(subQueryFn: QueryBuildFn<S, QF>) {
 
 ---
 
-### Phase 10e: Remove `_buildFactory()` and remaining SelectQueryFactory runtime usage
+### Phase 10e: Remove `_buildFactory()` and remaining SelectQueryFactory runtime usage ✅
 
 **Goal:** Delete `QueryBuilder._buildFactory()` and `_buildFactoryRawInput()`. All runtime paths now go through FieldSet / `_buildDirectRawInput()`. SelectQueryFactory is only referenced by types and its own definition.
 
@@ -2687,7 +2689,7 @@ select<QF = unknown>(subQueryFn: QueryBuildFn<S, QF>) {
 
 ---
 
-### Phase 10f: Migrate type utilities away from SelectQueryFactory
+### Phase 10f: Migrate type utilities away from SelectQueryFactory ✅
 
 **Goal:** All type utilities (`GetQueryResponseType`, `QueryIndividualResultType`, `QueryResponseToResultType`, etc.) and `Shape.ts` overloads reference `QueryBuilder<S, R>` instead of `SelectQueryFactory<S, R>`.
 
@@ -2770,11 +2772,15 @@ All probes must pass `npx tsc --noEmit` with 0 errors.
 
 ---
 
-### Phase 10g: Delete SelectQueryFactory class and final cleanup
+### Phase 10g: Delete SelectQueryFactory class and final cleanup ✅
 
-**Goal:** Delete the `SelectQueryFactory` class (~600 lines) and all supporting dead code. Final cleanup commit.
+**Status: COMPLETE** — Commit `d4e0d34`
+
+**Goal:** Delete the `SelectQueryFactory` class (~362 lines) and all supporting dead code. Final cleanup commit.
 
 **Depends on:** Phase 10f (all references migrated)
+
+**Outcome:** Replaced the class with a type-only interface stub preserving the 3 generic parameters (S, ResponseType, Source) for conditional type inference. Deleted 365 lines, added 17. Removed dead imports: `QueryFactory`, `buildSelectQuery`, `getQueryDispatch`, `RawSelectInput`. All 614 tests pass, TypeScript compiles cleanly.
 
 **Files expected to change:**
 - `src/queries/SelectQuery.ts` — delete `SelectQueryFactory` class, `patchResultPromise()`, `PatchedQueryPromise`, helper methods only used by factory
