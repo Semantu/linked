@@ -899,8 +899,14 @@ function entryToQueryPath(entry: {
   aggregation?: string;
   customKey?: string;
   subSelect?: FieldSet;
+  evaluation?: {method: string; wherePath: any};
 }): QueryPath {
   const segments = entry.path.segments;
+
+  // Evaluation → emit the WherePath directly (boolean column projection)
+  if (entry.evaluation) {
+    return entry.evaluation.wherePath;
+  }
 
   // Count aggregation → SizeStep
   if (entry.aggregation === 'count') {
@@ -948,6 +954,7 @@ export function fieldSetToSelectPath(fieldSet: FieldSet): SelectPath {
     aggregation?: string;
     customKey?: string;
     subSelect?: FieldSet;
+    evaluation?: {method: string; wherePath: any};
   }>;
 
   // If all entries have customKey, produce a CustomQueryObject

@@ -527,4 +527,14 @@ describe('QueryBuilder — direct IR generation', () => {
     expect(ir.subjectId).toBe(`${tmpEntityBase}p1`);
     expect(ir.singleResult).toBe(true);
   });
+
+  test('evaluation selection (equals) produces same IR as DSL', async () => {
+    const dslIR = await captureDslIR(() =>
+      Person.select((p) => ({isBestFriend: p.bestFriend.equals({id: `${tmpEntityBase}p3`})})),
+    );
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => ({isBestFriend: p.bestFriend.equals({id: `${tmpEntityBase}p3`})}))
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
 });

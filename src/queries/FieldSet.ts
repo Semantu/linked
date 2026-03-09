@@ -63,6 +63,7 @@ export type FieldSetEntry = {
   subSelect?: FieldSet;
   aggregation?: 'count';
   customKey?: string;
+  evaluation?: {method: string; wherePath: any};
 };
 
 /**
@@ -86,6 +87,7 @@ export type FieldSetFieldJSON = {
   subSelect?: FieldSetJSON;
   aggregation?: string;
   customKey?: string;
+  evaluation?: {method: string; wherePath: any};
 };
 
 /** JSON representation of a FieldSet. */
@@ -270,6 +272,9 @@ export class FieldSet<R = any> {
         if (entry.customKey) {
           field.customKey = entry.customKey;
         }
+        if (entry.evaluation) {
+          field.evaluation = entry.evaluation;
+        }
         return field;
       }),
     };
@@ -294,6 +299,9 @@ export class FieldSet<R = any> {
       }
       if (field.customKey) {
         entry.customKey = field.customKey;
+      }
+      if (field.evaluation) {
+        entry.evaluation = field.evaluation;
       }
       return entry;
     });
@@ -410,6 +418,10 @@ export class FieldSet<R = any> {
     if (isSetSize(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
+    // Single Evaluation (e.g. p.bestFriend.equals(...))
+    if (isEvaluation(result)) {
+      return [FieldSet.convertTraceResult(nodeShape, result)];
+    }
     if (typeof result === 'object' && result !== null) {
       // Custom object form: {name: p.name, hobby: p.hobby}
       const entries: FieldSetEntry[] = [];
@@ -468,9 +480,13 @@ export class FieldSet<R = any> {
     }
 
     // Evaluation → where-as-selection (e.g. p.bestFriend.equals(...) used as select)
-    // Cannot be represented as a FieldSetEntry — signal for fallback to legacy path.
+    // The Evaluation's .value is the QueryBuilderObject chain leading to the comparison.
     if (isEvaluation(obj)) {
-      throw new Error('Evaluation selections require the legacy SelectQueryFactory path');
+      const segments = FieldSet.collectPropertySegments(obj.value);
+      return {
+        path: new PropertyPath(rootShape, segments),
+        evaluation: {method: obj.method, wherePath: obj.getWherePath()},
+      };
     }
 
     // BoundComponent → preload composition (e.g. p.bestFriend.preloadFor(component))
