@@ -274,19 +274,16 @@ expectType<string | null | undefined>(_t16[0].bestFriend.hobby);
 // TEST 17: Deep chain — property path + sub-select at 4th level
 // Person → friends → bestFriend → friends.select → name
 //
-// KNOWN LIMITATION: When a deep property chain (3+ levels) precedes a .select(),
-// the result type loses structure at the innermost level. The type system
-// resolves the property chain correctly up to 2 levels (friends[0].bestFriend)
-// but the 3rd level sub-select result doesn't properly integrate.
+// Deep property chains (3+ levels) before .select() now correctly resolve
+// by continuing to unwind the source chain through CreateShapeSetQResult.
 // =============================================================================
 const t17 = promiseFrom(Person).select((p) =>
   p.friends.bestFriend.friends.select((ff) => ({name: ff.name})),
 );
 type T17Result = Awaited<typeof t17>;
 const _t17: T17Result = null as any;
-// First two levels of the property chain work
+// All levels of the property chain resolve correctly
 expectType<string | undefined>(_t17[0].friends[0].id);
-// @ts-expect-error — LIMITATION: 3-deep property chain + sub-select loses structure
 expectType<string | null | undefined>(_t17[0].friends[0].bestFriend.friends[0].name);
 
 // =============================================================================

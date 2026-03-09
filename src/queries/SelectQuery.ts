@@ -525,10 +525,19 @@ export type CreateShapeSetQResult<
       //NOTE: this notation check if 2 statements are true: HasName is true, and ParentSource is null
       [HasName, ParentSource] extends [true, null]
       ? CreateQResult<Source, null, null>[]
-      : QResult<
-          SourceShapeType,
-          {[P in Property]: CreateQResult<Source, null, null, SubProperties>[]}
-        >
+      : ParentSource extends null
+        ? QResult<
+            SourceShapeType,
+            {[P in Property]: CreateQResult<Source, null, null, SubProperties>[]}
+          >
+        : //when ParentSource is not null, we need to continue unwinding the source chain
+          //Pass the inner ShapeSet items as SubProperties so they stay at the correct nesting level
+          CreateQResult<
+            Source,
+            null,
+            null,
+            {[P in Property]: (ShapeType extends Shape ? QResult<ShapeType, SubProperties> : QResult<Shape, SubProperties>)[]}
+          >
     : Source extends QueryShapeSet<
           infer ShapeType,
           infer ParentSource,
@@ -1717,9 +1726,6 @@ export class QueryPrimitiveSet<
     //countable, resultKey
   }
 }
-
-// Re-export SubSelectResult from its own module (breaks circular dependency with FieldSet.ts)
-export {SubSelectResult, SelectQueryFactory} from './SubSelectResult.js';
 
 export class SetSize<Source = null> extends QueryNumber<Source> {
   constructor(
