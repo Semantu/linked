@@ -4,11 +4,13 @@ import {PropertyPath, walkPropertyPath} from './PropertyPath.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {WhereCondition} from './WhereCondition.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
+import type {SubSelectResult} from './SubSelectResult.js';
 
-// Duck-type helpers to avoid circular dependency with SelectQuery.ts.
+// Duck-type helpers for runtime detection.
+// These check structural shape since the classes live in SelectQuery.ts (runtime circular dep).
+// SubSelectResult is a type-only interface, so we must duck-type it (no instanceof).
 // QueryBuilderObject has .property (PropertyShape) and .subject (QueryBuilderObject).
 // SetSize has .subject and extends QueryNumber.
-// SubSelectResult has .getQueryPaths() and .parentQueryPath.
 type QueryBuilderObjectLike = {
   property?: PropertyShape;
   subject?: QueryBuilderObjectLike;
