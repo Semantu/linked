@@ -581,11 +581,6 @@ type ResponseToObject<R> =
 export type GetQueryResponseType<Q> =
   Q extends FieldSet<infer ResponseType, any> ? ResponseType : Q;
 
-export type GetQueryShapeType<Q> =
-  Q extends FieldSet<infer ResponseType, any>
-    ? never  // Shape type not directly carried by FieldSet; use .shape at runtime
-    : never;
-
 /**
  * ###################################
  * ####  QUERY BUILDING CLASSES   ####
@@ -884,6 +879,11 @@ function entryToQueryPath(entry: {
     }
     const parentSteps: QueryStep[] = segments.slice(0, -1).map((seg) => ({property: seg}));
     return [...parentSteps, countStep];
+  }
+
+  // Zero segments with filter/sub-select is invalid — return empty path
+  if (segments.length === 0) {
+    return [];
   }
 
   // Build property steps, attaching scopedFilter to the last segment

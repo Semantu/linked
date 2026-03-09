@@ -70,7 +70,7 @@ type RecursiveTransform<T, IsCreate = false> = T extends
       : IsPlainObject<T> extends true
         ? // ? WithId<{ [K in keyof T]-?: Prettify<RecursiveTransform<T[K]>> }>
           WithId<{[K in keyof T]: Prettify<RecursiveTransform<T[K], IsCreate>>}>
-        : never; // Unreachable for valid shape property types
+        : T;
 
 //for update() we use {updatedTo} but for create() we actually just return the array of new values;
 type UpdatedSet<U, IsCreate> = IsCreate extends true

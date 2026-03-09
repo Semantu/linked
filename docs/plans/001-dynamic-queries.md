@@ -3133,3 +3133,5 @@ Strictly sequential — each phase builds on the previous.
 4. **Duck-type check in FieldSet.ts** — `isSubSelectResult()` checks for `getQueryPaths` and `parentQueryPath`. After 12c, sub-selects return FieldSet instances. The duck-type check should be updated to `obj instanceof FieldSet` (possible since FieldSet.ts owns the class) or kept as structural check with updated comment.
 
 5. **Backward compatibility** — The deprecated `SelectQueryFactory` alias can be updated to point to `FieldSet` with matching generics: `type SelectQueryFactory<S, R, Source> = FieldSet<R, Source>`. Shape parameter `S` is lost but may be acceptable for deprecated usage.
+
+6. **`getQueryPaths` monkey-patch cleanup** — In `SelectQuery.ts` (BoundComponent.select and BoundShapeComponent.select), `getQueryPaths` is assigned onto the FieldSet instance via runtime monkey-patch after construction (lines ~1301-1307 and ~1481-1487). This is legacy glue from the old SubSelectResult setup. It should be factored into the FieldSet class itself (e.g. as a method on `forSubSelect`) so that the assignment happens inside the class rather than externally.

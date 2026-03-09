@@ -398,11 +398,15 @@ export const desugarSelectQuery = (query: RawSelectInput): DesugaredSelectQuery 
       : undefined;
 
   const subjectIds = query.subjects
-    ? query.subjects.map((s) =>
-        typeof s === 'object' && s !== null && 'id' in s
-          ? (s as NodeReferenceValue).id
-          : String(s),
-      )
+    ? query.subjects.reduce<string[]>((acc, s) => {
+        if (typeof s === 'object' && s !== null && 'id' in s) {
+          acc.push((s as NodeReferenceValue).id);
+        } else if (typeof s === 'string') {
+          acc.push(s);
+        }
+        // Skip null, undefined, numbers — invalid IRI values
+        return acc;
+      }, [])
     : undefined;
 
   return {
