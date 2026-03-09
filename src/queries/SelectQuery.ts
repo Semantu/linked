@@ -53,7 +53,6 @@ export type WhereClause<S extends Shape | AccessorReturnValue> =
 
 export type QueryBuildFn<T extends Shape, ResponseType> = (
   p: ToQueryBuilderObject<T>,
-  q: SelectQueryFactory<T>,
 ) => ResponseType;
 
 export type QueryWrapperObject<ShapeType extends Shape = any> = {
@@ -291,11 +290,6 @@ export type GetCustomObjectKeys<T> = T extends QueryWrapperObject
         : never;
     }
   : [];
-
-export type QueryIndividualResultType<T extends SelectQueryFactory<any>> =
-  T extends SelectQueryFactory<infer ShapeType, infer ResponseType>
-    ? QueryResponseToResultType<ResponseType, ShapeType>
-    : null;
 
 export type ToQueryResultSet<T> =
   T extends SelectQueryFactory<infer ShapeType, infer ResponseType>
@@ -607,22 +601,6 @@ export type GetQueryShapeType<Q> =
   Q extends SelectQueryFactory<infer ShapeType, infer ResponseType>
     ? ShapeType
     : never;
-
-export type QueryResponseToEndValues<T> = T extends SetSize
-  ? number[]
-  : T extends SelectQueryFactory<any, infer Response>
-    ? QueryResponseToEndValues<Response>[]
-    : T extends QueryShapeSet<infer ShapeType>
-      ? ShapeSet<ShapeType>
-      : T extends QueryShape<infer ShapeType>
-        ? ShapeType
-        : T extends QueryString
-          ? string[]
-          : T extends Array<infer ArrType>
-            ? Array<QueryResponseToEndValues<ArrType>>
-            : T extends Evaluation
-              ? boolean[]
-              : T;
 
 /**
  * ###################################
@@ -1331,7 +1309,7 @@ export class QueryShapeSet<
   ): SelectQueryFactory<S, QF, QueryShapeSet<S, Source, Property>> {
     const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
     const proxy = createProxiedPathBuilder(leastSpecificShape);
-    const traceResponse = subQueryFn(proxy as any, null as any);
+    const traceResponse = subQueryFn(proxy as any);
     const parentPath = this.getPropertyPath();
     return {
       parentQueryPath: parentPath,
@@ -1516,7 +1494,7 @@ export class QueryShape<
       (this.getOriginalValue() as Shape).nodeShape.id,
     );
     const proxy = createProxiedPathBuilder(leastSpecificShape as ShapeType);
-    const traceResponse = subQueryFn(proxy as any, null as any);
+    const traceResponse = subQueryFn(proxy as any);
     const parentPath = this.getPropertyPath();
     return {
       parentQueryPath: parentPath,
@@ -1757,36 +1735,6 @@ export class QueryPrimitiveSet<
     //countable, resultKey
   }
 }
-
-let documentLoaded = false;
-let callbackStack = [];
-const docReady = () => {
-  documentLoaded = true;
-  callbackStack.forEach((callback) => callback());
-  callbackStack = [];
-};
-if (typeof document === 'undefined' || document.readyState !== 'loading') {
-  docReady();
-} else {
-  documentLoaded = false;
-  document.addEventListener('DOMContentLoaded', () => () => {
-    docReady();
-  });
-  setTimeout(() => {
-    if (!documentLoaded) {
-      console.warn('⚠️ Forcing init after timeout');
-      docReady();
-    }
-  }, 3500);
-}
-//only continue to parse the query if the document is ready, and all shapes from initial bundles are loaded
-export var onQueriesReady = (callback) => {
-  if (!documentLoaded) {
-    callbackStack.push(callback);
-  } else {
-    callback();
-  }
-};
 
 /**
  * Type-only stub preserving the generic parameters of the former SelectQueryFactory class.
