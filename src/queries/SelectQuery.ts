@@ -1072,7 +1072,9 @@ export const processWhereClause = (
     if (!shape) {
       throw new Error('Cannot process where clause without shape');
     }
-    return new LinkedWhereQuery(shape, validation).getWherePath();
+    const proxy = createProxiedPathBuilder(shape);
+    const evaluation = validation(proxy);
+    return evaluation.getWherePath();
   } else {
     return (validation as Evaluation).getWherePath();
   }
@@ -2184,19 +2186,3 @@ export class SetSize<Source = null> extends QueryNumber<Source> {
   }
 }
 
-/**
- * A sub query that is used to filter results
- * i.e p.friends.where(f => //LinkedWhereQuery here)
- */
-export class LinkedWhereQuery<
-  S extends Shape,
-  ResponseType = any,
-> extends SelectQueryFactory<S, ResponseType> {
-  getResponse() {
-    return this.traceResponse as Evaluation;
-  }
-
-  getWherePath() {
-    return (this.traceResponse as Evaluation).getWherePath();
-  }
-}
