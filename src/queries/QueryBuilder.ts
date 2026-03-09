@@ -101,8 +101,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   }
 
   /** Create a shallow clone with overrides. */
-  private clone(overrides: Partial<QueryBuilderInit<S, any>> = {}): QueryBuilder<S, any> {
-    return new QueryBuilder<S, any>({
+  private clone<NR = R, NResult = Result>(overrides: Partial<QueryBuilderInit<S, any>> = {}): QueryBuilder<S, NR, NResult> {
+    return new QueryBuilder<S, NR, NResult>({
       shape: this._shape,
       selectFn: this._selectFn as any,
       whereFn: this._whereFn,
@@ -163,15 +163,15 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       const labels = fnOrLabelsOrFieldSet.labels();
       const selectFn = ((p: any) =>
         labels.map((label) => p[label])) as unknown as QueryBuildFn<S, any>;
-      return this.clone({selectFn, selectAllLabels: undefined, fieldSet: fnOrLabelsOrFieldSet}) as QueryBuilder<S, NewR>;
+      return this.clone<NewR, any>({selectFn, selectAllLabels: undefined, fieldSet: fnOrLabelsOrFieldSet});
     }
     if (Array.isArray(fnOrLabelsOrFieldSet)) {
       const labels = fnOrLabelsOrFieldSet;
       const selectFn = ((p: any) =>
         labels.map((label) => p[label])) as unknown as QueryBuildFn<S, any>;
-      return this.clone({selectFn, selectAllLabels: undefined, fieldSet: undefined}) as QueryBuilder<S, NewR>;
+      return this.clone<NewR, any>({selectFn, selectAllLabels: undefined, fieldSet: undefined});
     }
-    return this.clone({selectFn: fnOrLabelsOrFieldSet as any, selectAllLabels: undefined, fieldSet: undefined}) as QueryBuilder<S, NewR>;
+    return this.clone<NewR, any>({selectFn: fnOrLabelsOrFieldSet as any, selectAllLabels: undefined, fieldSet: undefined});
   }
 
   /** Select all decorated properties of the shape. */
@@ -186,12 +186,12 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
 
   /** Add a where clause. */
   where(fn: WhereClause<S>): QueryBuilder<S, R, Result> {
-    return this.clone({whereFn: fn}) as unknown as QueryBuilder<S, R, Result>;
+    return this.clone({whereFn: fn});
   }
 
   /** Set sort order. */
   orderBy<OR>(fn: QueryBuildFn<S, OR>, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder<S, R, Result> {
-    return this.clone({sortByFn: fn as any, sortDirection: direction}) as unknown as QueryBuilder<S, R, Result>;
+    return this.clone({sortByFn: fn as any, sortDirection: direction});
   }
 
   /**
@@ -203,32 +203,32 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
 
   /** Set result limit. */
   limit(n: number): QueryBuilder<S, R, Result> {
-    return this.clone({limit: n}) as unknown as QueryBuilder<S, R, Result>;
+    return this.clone({limit: n});
   }
 
   /** Set result offset. */
   offset(n: number): QueryBuilder<S, R, Result> {
-    return this.clone({offset: n}) as unknown as QueryBuilder<S, R, Result>;
+    return this.clone({offset: n});
   }
 
   /** Target a single entity by ID. Implies singleResult. */
   for(id: string | NodeReferenceValue): QueryBuilder<S, R, Result> {
     const subject = typeof id === 'string' ? {id} : id;
-    return this.clone({subject, subjects: undefined, singleResult: true}) as unknown as QueryBuilder<S, R, Result>;
+    return this.clone({subject, subjects: undefined, singleResult: true});
   }
 
   /** Target multiple entities by ID, or all if no ids given. */
   forAll(ids?: (string | NodeReferenceValue)[]): QueryBuilder<S, R, Result> {
     if (!ids) {
-      return this.clone({subject: undefined, subjects: undefined, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
+      return this.clone({subject: undefined, subjects: undefined, singleResult: false});
     }
     const subjects = ids.map((id) => (typeof id === 'string' ? {id} : id));
-    return this.clone({subject: undefined, subjects, singleResult: false}) as unknown as QueryBuilder<S, R, Result>;
+    return this.clone({subject: undefined, subjects, singleResult: false});
   }
 
   /** Limit to one result. Unwraps array Result type to single element. */
   one(): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result> {
-    return this.clone({limit: 1, singleResult: true}) as unknown as QueryBuilder<S, R, Result extends (infer E)[] ? E : Result>;
+    return this.clone<R, Result extends (infer E)[] ? E : Result>({limit: 1, singleResult: true});
   }
 
   /**
@@ -254,7 +254,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     component: QueryComponentLike<CS, CR>,
   ): QueryBuilder<S, R, Result> {
     const newPreloads = [...(this._preloads || []), {path, component}];
-    return this.clone({preloads: newPreloads}) as unknown as QueryBuilder<S, R, Result>;
+    return this.clone({preloads: newPreloads});
   }
 
   /**

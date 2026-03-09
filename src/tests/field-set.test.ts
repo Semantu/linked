@@ -1,5 +1,5 @@
 import {describe, expect, test} from '@jest/globals';
-import {Person} from '../test-helpers/query-fixtures';
+import {Person, Pet} from '../test-helpers/query-fixtures';
 import {FieldSet} from '../queries/FieldSet';
 import {PropertyPath, walkPropertyPath} from '../queries/PropertyPath';
 import {QueryBuilder} from '../queries/QueryBuilder';
@@ -54,10 +54,23 @@ describe('FieldSet — construction', () => {
     expect(labels).toContain('firstPet');
   });
 
-  test('FieldSet.all — depth 0 same as depth 1', () => {
-    const fs0 = FieldSet.all(personShape, {depth: 0});
-    const fs1 = FieldSet.all(personShape);
-    expect(fs0.labels()).toEqual(fs1.labels());
+  test('FieldSet.all — depth 0 throws', () => {
+    expect(() => FieldSet.all(personShape, {depth: 0})).toThrow(
+      'FieldSet.all() requires depth >= 1',
+    );
+  });
+
+  test('FieldSet.all — depth 2 includes nested shape properties', () => {
+    const fs = FieldSet.all(personShape, {depth: 2});
+    const labels = fs.labels();
+    // Should have all top-level properties
+    expect(labels).toContain('name');
+    expect(labels).toContain('friends');
+    // Properties with valueShape (e.g. friends, bestFriend) should have subSelect
+    const friendsEntry = fs.entries.find((e: any) => e.path.terminal?.label === 'friends');
+    if (friendsEntry && friendsEntry.subSelect) {
+      expect(friendsEntry.subSelect.labels()).toContain('name');
+    }
   });
 });
 
@@ -112,6 +125,15 @@ describe('FieldSet — composition', () => {
     const merged = FieldSet.merge([fs1, fs2]);
     expect(merged.entries.length).toBe(2); // not 3
     expect(merged.labels()).toEqual(['name', 'hobby']);
+  });
+
+  test('merge — throws on cross-shape', () => {
+    const petShape = (Pet as any).shape;
+    const fs1 = FieldSet.for(personShape, ['name']);
+    const fs2 = FieldSet.for(petShape, ['bestFriend']);
+    expect(() => FieldSet.merge([fs1, fs2])).toThrow(
+      'Cannot merge FieldSets with different shapes',
+    );
   });
 
   test('immutability — original unchanged after add', () => {

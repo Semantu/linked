@@ -303,15 +303,13 @@ export type QueryResponseToResultType<
   T,
   QShapeType extends Shape = null,
   HasName = false,
-  // PreserveArray = false,
 > = T extends QueryBuilderObject
   ? GetQueryObjectResultType<T, {}, false, HasName>
   : T extends FieldSet<infer Response, infer Source>
     ? GetNestedQueryResultType<Response, Source>
     : T extends Array<infer Type>
       ? UnionToIntersection<QueryResponseToResultType<Type>>
-      : // ? PreserveArray extends true ? QueryResponseToResultType<Type,null,null,true>[] : UnionToIntersection<QueryResponseToResultType<Type,null,null,true>>
-        T extends Evaluation
+      : T extends Evaluation
         ? boolean
         : T extends Object
           ? QResult<QShapeType, Prettify<ObjectToPlainResult<T>>>
@@ -323,8 +321,6 @@ export type QueryResponseToResultType<
  * @param SubProperties to add extra properties into the result object (used to merge arrays into objects for example)
  * @param SourceOverwrite if the source of the query value should be overwritten
  */
-//QV QueryBuilderObject<string[],QShape<Person,null,''>,'nickNames'>[]
-//SubProperties = {}
 export type GetQueryObjectResultType<
   QV,
   SubProperties = {},
@@ -344,8 +340,7 @@ export type GetQueryObjectResultType<
         >
       : QV extends QueryShape<infer ShapeType, infer Source, infer Property>
         ? CreateQResult<Source, ShapeType, Property, SubProperties, HasName>
-        : //   CreateQResult<Source, ShapeType, Property>
-          QV extends BoundComponent<infer Source, infer CompQueryResult>
+        : QV extends BoundComponent<infer Source, infer CompQueryResult>
           ? GetQueryObjectResultType<
               Source,
               SubProperties & QueryResponseToResultType<CompQueryResult>,
@@ -374,20 +369,8 @@ export type GetQueryObjectResultType<
                   ? 'bool'
                   : never;
 
-//for now, we don't pass result types of nested queries of bound components
-//instead we just pass on the result as it would have been if the query element was not extended with ".preLoadFor()"
 export type GetShapesResultTypeWithSource<Source> =
   QueryResponseToResultType<Source>;
-// export type GetShapesResultTypeWithSource<Source> =
-//   Source extends QueryShape<infer ShapeType, infer Source, infer Property>
-//     ? CreateQResult<Source, ShapeType, Property>
-//     : Source extends QueryShapeSet<
-//           infer ShapeType,
-//           infer Source,
-//           infer Property
-//         >
-//       ? CreateShapeSetQResult<ShapeType, Source, Property>
-//       : never;
 
 type GetQueryObjectProperty<T> =
   T extends QueryBuilderObject<any, any, infer Property>

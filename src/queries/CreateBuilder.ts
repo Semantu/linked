@@ -93,6 +93,25 @@ export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
   /** Build the IR mutation. */
   build(): CreateQuery {
     const data = this._data || {};
+
+    // Validate that required properties (minCount >= 1) are present in data
+    const shapeObj = (this._shape as any).shape;
+    if (shapeObj) {
+      const requiredProps = shapeObj
+        .getUniquePropertyShapes()
+        .filter((ps: any) => ps.minCount && ps.minCount >= 1);
+      const dataKeys = new Set(Object.keys(data));
+      const missing = requiredProps
+        .filter((ps: any) => !dataKeys.has(ps.label))
+        .map((ps: any) => ps.label);
+      if (missing.length > 0) {
+        throw new Error(
+          `Missing required fields for '${shapeObj.label || shapeObj.id}': ${missing.join(', ')}`,
+        );
+      }
+    }
+    // TODO: Full data validation against the shape (type checking, maxCount, nested shapes, etc.)
+
     // Inject __id if fixedId is set
     const dataWithId = this._fixedId
       ? {...(data as any), __id: this._fixedId}

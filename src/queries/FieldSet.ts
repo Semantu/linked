@@ -30,12 +30,6 @@ const isSetSize = (obj: any): boolean =>
   // SetSize has a 'countable' field (may be undefined) and 'label' field
   'label' in obj;
 
-const isSubSelectResult = (obj: any): boolean =>
-  obj !== null &&
-  typeof obj === 'object' &&
-  typeof obj.getQueryPaths === 'function' &&
-  'parentQueryPath' in obj;
-
 // Evaluation: has .method (WhereMethods), .value (QueryBuilderObject), .getWherePath()
 const isEvaluation = (obj: any): boolean =>
   obj !== null &&
@@ -200,16 +194,56 @@ export class FieldSet<R = any, Source = any> {
 
   /**
    * Create a FieldSet containing all decorated properties of the shape.
+   *
+   * @param opts.depth Controls how deep to include nested shape properties:
+   *   - `depth=1` (default): this level only — properties of the root shape.
+   *   - `depth=0`: throws — use a node reference instead.
+   *   - `depth>1`: recursively includes nested shape properties up to the given depth.
    */
   static all<S extends Shape>(shape: ShapeType<S>, opts?: {depth?: number}): FieldSet;
   static all(shape: NodeShape | string, opts?: {depth?: number}): FieldSet;
   static all(shape: ShapeType<any> | NodeShape | string, opts?: {depth?: number}): FieldSet {
-    const resolvedShape = FieldSet.resolveShapeInput(shape).nodeShape;
-    const propertyShapes = resolvedShape.getUniquePropertyShapes();
-    const entries: FieldSetEntry[] = propertyShapes.map((ps: PropertyShape) => ({
-      path: new PropertyPath(resolvedShape, [ps]),
-    }));
-    return new FieldSet(resolvedShape, entries);
+    const depth = opts?.depth ?? 1;
+    if (depth < 1) {
+      throw new Error(
+        'FieldSet.all() requires depth >= 1. Use a node reference ({id}) for depth 0.',
+      );
+    }
+    const resolved = FieldSet.resolveShapeInput(shape);
+    return FieldSet.allForShape(resolved.nodeShape, depth, new Set());
+  }
+
+  /**
+   * Recursive helper for all(). Tracks visited shape IDs to prevent infinite loops
+   * from circular shape references.
+   */
+  private static allForShape(
+    nodeShape: NodeShape,
+    depth: number,
+    visited: Set<string>,
+  ): FieldSet {
+    const propertyShapes = nodeShape.getUniquePropertyShapes();
+    const entries: FieldSetEntry[] = [];
+
+    for (const ps of propertyShapes) {
+      const entry: FieldSetEntry = {path: new PropertyPath(nodeShape, [ps])};
+
+      // If depth > 1, recurse into nested shapes
+      if (depth > 1 && ps.valueShape) {
+        const nestedShapeClass = getShapeClass(ps.valueShape);
+        if (nestedShapeClass?.shape && !visited.has(nestedShapeClass.shape.id)) {
+          visited.add(nodeShape.id);
+          const nestedFs = FieldSet.allForShape(nestedShapeClass.shape, depth - 1, visited);
+          if (nestedFs.entries.length > 0) {
+            entry.subSelect = nestedFs;
+          }
+        }
+      }
+
+      entries.push(entry);
+    }
+
+    return new FieldSet(nodeShape, entries);
   }
 
   /**
@@ -221,6 +255,13 @@ export class FieldSet<R = any, Source = any> {
       throw new Error('Cannot merge empty array of FieldSets');
     }
     const shape = sets[0].shape;
+    for (const set of sets) {
+      if (set.shape.id !== shape.id) {
+        throw new Error(
+          `Cannot merge FieldSets with different shapes: '${shape.label || shape.id}' and '${set.shape.label || set.shape.id}'`,
+        );
+      }
+    }
     const merged: FieldSetEntry[] = [];
     const seen = new Set<string>();
 
@@ -462,7 +503,7 @@ export class FieldSet<R = any, Source = any> {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
     // Single FieldSet sub-select (e.g. p.friends.select(f => [f.name]))
-    if (result instanceof FieldSet || isSubSelectResult(result)) {
+    if (result instanceof FieldSet && result.parentQueryPath !== undefined) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
     // Single SetSize (e.g. p.friends.size())
@@ -522,35 +563,6 @@ export class FieldSet<R = any, Source = any> {
       return {
         path: new PropertyPath(rootShape, segments),
         subSelect: subSelect as FieldSet | undefined,
-      };
-    }
-
-    // Legacy sub-select result (duck-typed) — extract entries from traceResponse
-    if (isSubSelectResult(obj)) {
-      const parentPath = obj.parentQueryPath;
-      const segments: PropertyShape[] = [];
-      if (parentPath && Array.isArray(parentPath)) {
-        for (const step of parentPath) {
-          if (step && typeof step === 'object' && 'property' in step && step.property) {
-            segments.push(step.property);
-          }
-        }
-      }
-
-      let subSelect: FieldSet | undefined;
-      const factoryShape = obj.shape;
-      const traceResponse = obj.traceResponse;
-      if (factoryShape && traceResponse !== undefined) {
-        const subNodeShape = factoryShape.shape || factoryShape;
-        const subEntries = FieldSet.extractSubSelectEntries(subNodeShape, traceResponse);
-        if (subEntries.length > 0) {
-          subSelect = FieldSet.createInternal(subNodeShape, subEntries);
-        }
-      }
-
-      return {
-        path: new PropertyPath(rootShape, segments),
-        subSelect,
       };
     }
 
@@ -649,8 +661,8 @@ export class FieldSet<R = any, Source = any> {
     if (isQueryBuilderObject(traceResponse)) {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
-    // Single sub-select factory or lightweight wrapper — convert directly
-    if (isSubSelectResult(traceResponse)) {
+    // Single FieldSet sub-select — convert directly
+    if (traceResponse instanceof FieldSet && traceResponse.parentQueryPath !== undefined) {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
     // Single SetSize
