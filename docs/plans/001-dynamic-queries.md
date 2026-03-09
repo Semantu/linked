@@ -2315,11 +2315,18 @@ FieldSet now properly handles sub-selects from DSL proxy tracing. Instead of cha
 
 **Depends on:** Phase 9
 
+**Files expected to change:**
+- `src/queries/FieldSet.ts` — `FieldSetEntry` type, `convertTraceResult()`, `toJSON()`, `fromJSON()`, `FieldSetFieldJSON`
+- `src/queries/SelectQuery.ts` — `fieldSetToSelectPath()` / `entryToQueryPath()`
+- `src/queries/QueryBuilder.ts` — remove Evaluation fallback from `toRawInput()` try/catch
+- `src/tests/field-set.test.ts` — new test block
+- `src/tests/query-builder.test.ts` — IR equivalence test
+
 #### Architecture
 
-An Evaluation used as a selection represents a boolean/filter column projected into the result. The entry needs:
-- The property path from the Evaluation's underlying `QueryBuilderObject` (the `.value` chain)
-- The where condition from `Evaluation.getWherePath()` stored as `scopedFilter`
+An Evaluation used as a selection represents a boolean/filter column projected into the result. The `isEvaluation()` duck-type check (FieldSet.ts line 40) detects objects with `method`, `value`, and `getWherePath()`. Currently throws — needs to extract:
+- The property path from the Evaluation's underlying `QueryBuilderObject` (the `.value` chain) — same `collectPropertySegments()` logic used for regular QueryBuilderObjects
+- The where condition from `Evaluation.getWherePath()` stored as `evaluation`
 
 Add an optional `evaluation` field to `FieldSetEntry`:
 
@@ -2335,50 +2342,76 @@ export type FieldSetEntry = {
 };
 ```
 
+**Key pitfall:** The Evaluation's `.value` is a `QueryBuilderObject` but may be deeply nested (e.g. `p.friends.bestFriend.equals(...)`). The `collectPropertySegments()` already walks `.subject` → `.property` chains — verify it handles the `.value` chain the same way, or if `.value` IS a `QueryBuilderObject` that has `.subject`.
+
 #### Tasks
 
-1. Add `evaluation?: { method: string; wherePath: any }` to `FieldSetEntry` type
-2. Update `convertTraceResult()` — replace `throw` with extraction:
-   - Walk the Evaluation's `.value` chain to collect PropertyPath segments (same as QueryBuilderObject)
-   - Store `{ method: obj.method, wherePath: obj.getWherePath() }` as `evaluation`
-3. Update `fieldSetToSelectPath()` in `SelectQuery.ts` — when entry has `evaluation`, emit the same IR that the legacy path produced (property path with where condition applied as a filter column)
-4. Update `FieldSetJSON` / `FieldSetFieldJSON` to include optional `evaluation` for serialization
-5. Update `toJSON()` / `fromJSON()` — serialize/deserialize evaluation field
-6. Remove the `_buildFactory()` fallback for Evaluation in `QueryBuilder.toRawInput()`
+1. **Add `evaluation` field to `FieldSetEntry` type** (FieldSet.ts ~line 65)
+   - Add `evaluation?: { method: string; wherePath: any }` to the type
+2. **Update `FieldSetFieldJSON` type** (FieldSet.ts ~line 83)
+   - Add `evaluation?: { method: string; wherePath: any }` to the JSON type
+3. **Replace `throw` in `convertTraceResult()`** (FieldSet.ts ~line 472)
+   - When `isEvaluation(obj)`:
+     - Extract `obj.value` — this is the underlying QueryBuilderObject
+     - Call `FieldSet.collectPropertySegments(obj.value)` to get PropertyPath segments
+     - Create entry with `path: new PropertyPath(rootShape, segments)` and `evaluation: { method: obj.method, wherePath: obj.getWherePath() }`
+4. **Update `entryToQueryPath()` in SelectQuery.ts** (~line 920)
+   - When entry has `evaluation` field, produce the same `QueryPath` that the legacy `getQueryPaths()` produced for Evaluation results — a property path step that carries the boolean evaluation as a terminal
+   - **Critical:** Study how `SelectQueryFactory.getQueryPaths()` handles Evaluation results (search for `instanceof Evaluation` in `getQueryPaths()` at ~line 1897) to understand the exact IR shape expected
+5. **Update `toJSON()`** (FieldSet.ts) — serialize `evaluation` field as-is (method string + wherePath object)
+6. **Update `fromJSON()`** (FieldSet.ts) — restore `evaluation` field from JSON
+7. **Remove Evaluation fallback from `toRawInput()`** (QueryBuilder.ts ~line 462)
+   - The try/catch at line 462-471 catches errors from `_buildDirectRawInput()` and falls back to `_buildFactoryRawInput()`. After this phase, Evaluation selections no longer throw — but the try/catch stays for BoundComponent (removed in 10b)
+   - No code change here yet — the try/catch now simply won't trigger for Evaluation. Verify with test.
+
+**Stubs for parallel execution:** None needed — this phase only touches the Evaluation branch. BoundComponent branch remains unchanged. Other agents working on 10b/10c/10d touch different code paths.
 
 #### Validation
 
 **Test file:** `src/tests/field-set.test.ts` (new `FieldSet — evaluation entries` describe block)
 
-| Test case | Assertion |
-|---|---|
-| `Evaluation trace produces entry with evaluation field` | `FieldSet.for(Person, p => [p.bestFriend.equals(someRef)])` → 1 entry with `evaluation` defined, `evaluation.method` is the comparison method |
-| `Evaluation entry has correct property path` | Entry's `path` walks the value chain (e.g. `bestFriend`) |
-| `Evaluation entry serialization round-trip` | `toJSON()` → `fromJSON()` preserves evaluation field |
-
-**IR equivalence tests** (in `src/tests/query-builder.test.ts`):
+Uses `Person` shape from `query-fixtures`. `personShape = (Person as any).shape`.
 
 | Test case | Assertion |
 |---|---|
-| `Evaluation selection through FieldSet produces same IR as legacy` | Build query with evaluation via FieldSet path, compare IR to legacy `_buildFactory()` path |
+| `Evaluation trace produces entry with evaluation field` | `FieldSet.for(Person, p => [p.name.equals('Moa')])` → assert `entries.length === 1`, assert `entries[0].evaluation` is defined, assert `entries[0].evaluation.method` is a string (e.g. `'equals'`) |
+| `Evaluation entry has correct property path` | Same FieldSet as above → assert `entries[0].path.toString() === 'name'`, assert `entries[0].path.segments.length === 1` |
+| `Deep evaluation path` | `FieldSet.for(Person, p => [p.friends.name.equals('Moa')])` → assert `entries[0].path.toString() === 'friends.name'`, assert `entries[0].path.segments.length === 2` |
+| `Evaluation entry has wherePath` | Assert `entries[0].evaluation.wherePath` is defined and is a valid WherePath object (has expected structure) |
+| `Evaluation mixed with regular fields` | `FieldSet.for(Person, p => [p.hobby, p.name.equals('Moa')])` → assert `entries.length === 2`, assert `entries[0].evaluation` is undefined, assert `entries[1].evaluation` is defined |
+| `Evaluation entry serialization round-trip` | Build FieldSet with evaluation entry → `toJSON()` → assert `json.fields[0].evaluation` has `method` and `wherePath` → `fromJSON()` → assert restored entry has matching `evaluation` field |
+
+**IR equivalence test** (in `src/tests/query-builder.test.ts`, add to `QueryBuilder — direct IR generation` describe block):
+
+| Test case | Assertion |
+|---|---|
+| `evaluationSelection` — `Person.select(p => [p.name.equals('Moa')])` | Capture IR from DSL via `captureDslIR()`. Build equivalent via `QueryBuilder.from(Person).select(p => [p.name.equals('Moa')]).build()`. Assert `sanitize(builderIR) === sanitize(dslIR)` — same deep-equal pattern used by existing IR equivalence tests (lines 97-227 of query-builder.test.ts) |
 
 **Non-test validation:**
 - `npx tsc --noEmit` exits 0
-- `npm test` — all tests pass including golden tests
+- `npm test` — all tests pass including all 50+ golden SPARQL tests
+- Existing `FieldSet — callback tracing` tests at line 195 still pass (no regression for non-evaluation paths)
 
 ---
 
 ### Phase 10b: BoundComponent (preload) support in FieldSetEntry
 
-**Goal:** Remove the `throw` for BoundComponent in `FieldSet.convertTraceResult()`. Preloads become a proper `FieldSetEntry` variant. Remove `_buildFactory()` preload fallback.
+**Goal:** Remove the `throw` for BoundComponent in `FieldSet.convertTraceResult()`. Preloads become a proper `FieldSetEntry` variant. Remove `_buildFactory()` preload guard in `toRawInput()`.
 
 **Depends on:** Phase 9 (independent of 10a — can run in parallel)
 
+**Files expected to change:**
+- `src/queries/FieldSet.ts` — `FieldSetEntry` type, `convertTraceResult()`, `FieldSetFieldJSON`
+- `src/queries/SelectQuery.ts` — `entryToQueryPath()` or `fieldSetToSelectPath()`
+- `src/queries/QueryBuilder.ts` — remove preload guard in `toRawInput()`, update `_buildDirectRawInput()` to handle preloads via FieldSet, remove `_preloads` insertion in `_buildFactory()`
+- `src/tests/field-set.test.ts` — new test block
+- `src/tests/query-builder.test.ts` — IR equivalence test for preloads
+
 #### Architecture
 
-A BoundComponent represents a preload composition: `p.friends.preloadFor(someComponent)`. The entry needs:
-- The property path from the BoundComponent's `.source` chain
-- A reference to the component being preloaded, so `fieldSetToSelectPath()` can merge the component's query paths
+A BoundComponent (duck-typed at FieldSet.ts line 47: has `source`, `originalValue`, `getComponentQueryPaths()`) represents `p.friends.preloadFor(someComponent)`. The entry needs:
+- The property path from the BoundComponent's `.source` chain — the `.source` is a QueryBuilderObject, walk it with `collectPropertySegments()`
+- The component's query paths from `obj.getComponentQueryPaths()` — these are the nested selections the component needs
 
 Add an optional `preload` field to `FieldSetEntry`:
 
@@ -2389,37 +2422,58 @@ export type FieldSetEntry = {
 };
 ```
 
+**Key pitfall:** The legacy preload path in `_buildFactory()` (QueryBuilder.ts line 397-435) wraps preloads into the `selectFn` callback, causing them to be traced as part of the regular selection. The new path needs to produce the same IR — specifically the OPTIONAL-wrapped pattern that preloads generate. Study the existing preload test at query-builder.test.ts line 309-384 to understand the expected IR shape.
+
+**Key pitfall 2:** `QueryBuilder.preload()` stores entries in `_preloads` array (not in the select callback). After this phase, preloads should go through the FieldSet path instead. The `_preloads` array may become unnecessary, but keep it for now — removal in 10e.
+
 #### Tasks
 
-1. Add `preload?: { component: any; queryPaths: any[] }` to `FieldSetEntry` type
-2. Update `convertTraceResult()` — replace `throw` with extraction:
-   - Walk the BoundComponent's `.source` chain to collect PropertyPath segments
-   - Call `obj.getComponentQueryPaths()` to get the component's query paths
-   - Store as `preload` on the entry
-3. Update `fieldSetToSelectPath()` in `SelectQuery.ts` — when entry has `preload`, emit the same OPTIONAL-wrapped IR that the legacy preload path produced
-4. Update `QueryBuilder.toRawInput()` — remove the preload guard that forces `_buildFactory()` fallback
-5. Remove `_preloads` array handling from `_buildFactory()` (the FieldSet path now handles it)
+1. **Add `preload` field to `FieldSetEntry` type** (FieldSet.ts ~line 65)
+   - Add `preload?: { component: any; queryPaths: any[] }`
+2. **Replace `throw` in `convertTraceResult()`** (FieldSet.ts ~line 477)
+   - When `isBoundComponent(obj)`:
+     - Extract `obj.source` — this is the underlying QueryBuilderObject for the property path
+     - Call `FieldSet.collectPropertySegments(obj.source)` to get segments
+     - Call `obj.getComponentQueryPaths()` to get the component's query paths
+     - Return entry with `path` and `preload: { component: obj, queryPaths }`
+3. **Update `entryToQueryPath()` in SelectQuery.ts**
+   - When entry has `preload` field, emit the same `QueryPath` structure that the legacy `getQueryPaths()` produced for BoundComponent results
+   - Study `SelectQueryFactory.getQueryPaths()` handling of `BoundComponent` (search for `instanceof BoundComponent` at ~line 1905) — it calls `getComponentQueryPaths()` and merges results into the parent path
+4. **Update `QueryBuilder.toRawInput()`** (line 452-454)
+   - Remove the preload guard: `if (this._preloads && this._preloads.length > 0) { return this._buildFactoryRawInput(); }`
+   - Instead, when `_preloads` exist, merge them into the FieldSet before calling `_buildDirectRawInput()`:
+     - Create proxy via `createProxiedPathBuilder(this._shape)`
+     - For each preload entry, trace `proxy[entry.path].preloadFor(entry.component)` to get a BoundComponent
+     - The resulting BoundComponent will be handled by `convertTraceResult()` (from step 2)
+5. **Do NOT remove `_preloads` array yet** — keep for backward compatibility until 10e
+
+**Stubs for parallel execution:** None needed — touches different code path than 10a (BoundComponent vs Evaluation branch). 10c touches `processWhereClause` (unrelated). 10d touches `QueryShapeSet.select()`/`QueryShape.select()` (unrelated).
 
 #### Validation
 
 **Test file:** `src/tests/field-set.test.ts` (new `FieldSet — preload entries` describe block)
 
-| Test case | Assertion |
-|---|---|
-| `BoundComponent trace produces entry with preload field` | `FieldSet.for(Person, p => [p.friends.preloadFor(comp)])` → 1 entry with `preload` defined |
-| `Preload entry has correct property path` | Entry's `path` walks the source chain (e.g. `friends`) |
-| `Preload entry carries component query paths` | `preload.queryPaths` contains the component's declared paths |
-
-**IR equivalence tests** (in `src/tests/query-builder.test.ts`):
+Uses `Person` shape and a mock component. The existing preload tests at query-builder.test.ts lines 309-384 use `tmpEntityBase` to create a component with `PersonQuery`.
 
 | Test case | Assertion |
 |---|---|
-| `Preload through FieldSet produces same IR as legacy` | Build query with preload via FieldSet path, compare IR to legacy `_buildFactory()` path |
+| `BoundComponent trace produces entry with preload field` | Create a mock BoundComponent (or use real `preloadFor` via proxy tracing). Assert `entries.length === 1`, assert `entries[0].preload` is defined |
+| `Preload entry has correct property path` | Assert `entries[0].path.toString()` matches the property name (e.g. `'friends'` or `'bestFriend'`) |
+| `Preload entry carries component query paths` | Assert `entries[0].preload.queryPaths` is an array with length > 0, containing the paths the component declared |
+| `Preload mixed with regular fields` | `FieldSet.for(Person, p => [p.name, p.friends.preloadFor(comp)])` → assert `entries.length === 2`, assert `entries[0].preload` is undefined, assert `entries[1].preload` is defined |
+
+**IR equivalence tests** (in `src/tests/query-builder.test.ts`, extend existing `QueryBuilder — preloads` describe block at line 309):
+
+| Test case | Assertion |
+|---|---|
+| `preload through direct FieldSet path produces same IR` | Use existing `tmpEntityBase` setup. Build `QueryBuilder.from(Person).select(p => [p.name]).preload('friends', comp).build()`. Capture IR. Compare with legacy `_buildFactory()` IR (call `_buildFactoryRawInput()` before removal). Assert `sanitize(directIR) === sanitize(legacyIR)` |
+| `preload guard removed — toRawInput no longer falls back` | After change, verify that `toRawInput()` for a preload query does NOT call `_buildFactory()` — confirm by adding a `console.warn` or spy in `_buildFactory()`, or simply by verifying the test passes after the guard is removed |
 
 **Non-test validation:**
 - `npx tsc --noEmit` exits 0
-- `npm test` — all tests pass including golden tests
-- Preload golden SPARQL tests pass unchanged
+- `npm test` — all tests pass
+- Existing preload tests at query-builder.test.ts lines 309-384 pass unchanged
+- All golden SPARQL tests pass unchanged (preload patterns produce same SPARQL)
 
 ---
 
@@ -2429,43 +2483,72 @@ export type FieldSetEntry = {
 
 **Depends on:** Phase 9 (independent of 10a/10b — can run in parallel)
 
+**Files expected to change:**
+- `src/queries/SelectQuery.ts` — `processWhereClause()` function (~line 1053), delete `LinkedWhereQuery` class (~line 2177)
+
 #### Architecture
 
-`LinkedWhereQuery` currently:
-1. Extends `SelectQueryFactory` (inheriting constructor that runs the callback through proxy)
-2. Calls `.getWherePath()` on the traced `Evaluation` result
+`LinkedWhereQuery` (SelectQuery.ts line 2177-2187) extends `SelectQueryFactory`, inheriting the constructor that:
+1. Calls `createProxiedPathBuilder(shape)` to build a proxy
+2. Passes the proxy to the callback
+3. Stores the result as `this.traceResponse`
 
-The replacement:
-1. Use `createProxiedPathBuilder(shapeClass)` to create the proxy
-2. Call the where callback with the proxy
-3. Call `.getWherePath()` on the returned `Evaluation` directly
+Then `LinkedWhereQuery.getWherePath()` just calls `(this.traceResponse as Evaluation).getWherePath()`.
 
-This is a simple replacement — no new types needed.
+The replacement in `processWhereClause()` does the same thing directly:
+1. Look up the ShapeClass from `shape` parameter (it may be a ShapeClass already, or need resolution)
+2. Call `createProxiedPathBuilder(shapeClass)` to get the proxy
+3. Call `validation(proxy)` — the where callback — returns an Evaluation
+4. Call `evaluation.getWherePath()` directly
+
+**Key pitfall:** The `shape` parameter to `processWhereClause()` can be a `ShapeType` (class) or a `NodeShape`. The `SelectQueryFactory` constructor handles both via its own resolution. The replacement needs to handle both cases too — use the same `getShapeClass()` or just pass to `createProxiedPathBuilder()` which already handles ShapeClass input.
+
+**Key pitfall 2:** `processWhereClause()` is also called by `SelectQueryFactory` internally (lines 1312, 1353, 1578, 1585, 1617, 1827). After deleting `LinkedWhereQuery`, these internal calls must still work. They pass `this.shape` which is a ShapeClass — verify `createProxiedPathBuilder` handles it.
 
 #### Tasks
 
-1. Update `processWhereClause()` in `SelectQuery.ts`:
-   - When `validation` is a Function, create proxy via `createProxiedPathBuilder(shape)`
-   - Call `validation(proxy)` to get the Evaluation
-   - Call `evaluation.getWherePath()` directly
-   - Remove `LinkedWhereQuery` instantiation
-2. Delete `LinkedWhereQuery` class from `SelectQuery.ts`
-3. Verify all callers of `processWhereClause()` still work:
-   - `QueryBuilder._buildDirectRawInput()` (line 484)
-   - `SelectQueryFactory` internal calls (lines 1312, 1353, etc.) — these remain until Phase 10f
+1. **Update `processWhereClause()` body** (SelectQuery.ts ~line 1053-1065):
+   ```typescript
+   export const processWhereClause = (
+     validation: WhereClause<any>,
+     shape?,
+   ): WherePath => {
+     if (validation instanceof Function) {
+       if (!shape) {
+         throw new Error('Cannot process where clause without shape');
+       }
+       const proxy = createProxiedPathBuilder(shape);
+       const evaluation = validation(proxy);
+       return evaluation.getWherePath();
+     } else {
+       return (validation as Evaluation).getWherePath();
+     }
+   };
+   ```
+2. **Delete `LinkedWhereQuery` class** (SelectQuery.ts ~line 2177-2187)
+3. **Add import for `createProxiedPathBuilder`** if not already imported in SelectQuery.ts
+4. **Verify all 6+ callers of `processWhereClause()`** still compile and pass tests
 
 #### Validation
 
-**Test file:** `src/tests/query-builder.test.ts` (existing where tests serve as regression)
+**Test file:** `src/tests/query-builder.test.ts` — existing where tests serve as full regression (no new tests needed — this is a pure refactor with identical behavior)
 
 | Test case | Assertion |
 |---|---|
-| All existing `where` tests pass | `whereFriendsNameEquals`, `whereAnd`, `outerWhereLimit` golden IR tests unchanged |
-| `processWhereClause` with callback works | Direct call: `processWhereClause(p => p.name.equals('Moa'), Person)` returns valid WherePath |
-| `processWhereClause` with Evaluation works | Direct call: `processWhereClause(evaluation)` returns valid WherePath (no regression) |
+| `whereFriendsNameEquals` IR equivalence (existing, ~line 155) | `Person.select(p => [p.name]).where(p => p.friends.name.equals('Moa'))` → assert IR matches DSL IR. Already passes — just verify no regression. |
+| `whereAnd` IR equivalence (existing, ~line 168) | `Person.select(p => [p.name]).where(p => p.friends.name.equals('Moa').and(p.hobby.equals('fishing')))` → assert IR matches DSL IR |
+| `outerWhereLimit` IR equivalence (existing, ~line 180) | `.where().limit()` combination → assert IR matches |
+| All golden SPARQL where tests | `sparql-select-golden.test.ts` tests involving `where` clauses all pass unchanged |
+
+**New test** (in `src/tests/query-builder.test.ts`, add to `QueryBuilder — direct IR generation` block):
+
+| Test case | Assertion |
+|---|---|
+| `processWhereClause with raw Evaluation` | Create an Evaluation object directly (trace through proxy: `const proxy = createProxiedPathBuilder(Person); const eval = proxy.name.equals('test')`). Call `processWhereClause(eval)`. Assert returns valid WherePath with the expected structure. |
 
 **Non-test validation:**
-- `grep -r 'LinkedWhereQuery' src/` returns 0 hits
+- `grep -rn 'LinkedWhereQuery' src/` returns 0 hits (only comments allowed)
+- `grep -rn 'new LinkedWhereQuery' src/` returns 0 hits
 - `npx tsc --noEmit` exits 0
 - `npm test` — all tests pass
 
@@ -2477,51 +2560,77 @@ This is a simple replacement — no new types needed.
 
 **Depends on:** Phase 9
 
+**Files expected to change:**
+- `src/queries/SelectQuery.ts` — `QueryShapeSet.select()` (~line 1318), `QueryShape.select()` (~line 1485)
+
 #### Architecture
 
-Currently `QueryShapeSet.select()` and `QueryShape.select()` create a full `SelectQueryFactory` just to serve as a carrier for:
-- `parentQueryPath` — the property path from root to the sub-select point
-- `traceResponse` — the result of running the sub-query callback
-- `shape` — the sub-query's shape class
-- `getQueryPaths()` — used by legacy path (will be removed)
+Currently `QueryShapeSet.select()` (line 1318-1325) and `QueryShape.select()` (line 1485-1497) create `new SelectQueryFactory(leastSpecificShape, subQueryFn)` and set `.parentQueryPath`. The `SelectQueryFactory` constructor:
+1. Calls `createProxiedPathBuilder(shape)` to build a proxy
+2. Passes the proxy to `subQueryFn` to trace the sub-query
+3. Stores the result as `this.traceResponse`
 
-Replace with a plain object that duck-types as what `isSelectQueryFactory()` expects:
+`FieldSet.convertTraceResult()` (line 441) then detects this via `isSelectQueryFactory()` (line 33: checks for `getQueryPaths` function and `parentQueryPath` property) and extracts `parentQueryPath`, `traceResponse`, and `shape`.
+
+Replace with a plain object carrying the same duck-type interface:
 
 ```typescript
-// In QueryShapeSet.select() and QueryShape.select():
-const proxy = createProxiedPathBuilder(leastSpecificShape);
-const traceResponse = subQueryFn(proxy);
-return {
-  parentQueryPath: this.getPropertyPath(),
-  traceResponse,
-  shape: leastSpecificShape,
-  getQueryPaths: () => { /* legacy compat — delegate or throw */ },
-} as any;
+select<QF = unknown>(subQueryFn: QueryBuildFn<S, QF>) {
+  const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
+  const proxy = createProxiedPathBuilder(leastSpecificShape);
+  const traceResponse = subQueryFn(proxy as any);
+  return {
+    parentQueryPath: this.getPropertyPath(),
+    traceResponse,
+    shape: leastSpecificShape,
+    getQueryPaths() {
+      throw new Error('Legacy getQueryPaths() not supported — use FieldSet path');
+    },
+  } as any;
+}
 ```
+
+**Key pitfall:** The `SelectQueryFactory` constructor does more than just trace — it also handles `selectAll` mode (no callback), and the traceResponse can be an array or single value. Verify that `subQueryFn(proxy)` produces the same `traceResponse` shape as `SelectQueryFactory`'s constructor would. Specifically:
+- The proxy passed to `subQueryFn` must be the same type that `SelectQueryFactory` would pass — a `ProxiedPathBuilder` that returns `QueryBuilderObject`, `QueryShape`, `QueryShapeSet`, etc.
+- `createProxiedPathBuilder(leastSpecificShape)` should work if `leastSpecificShape` is a ShapeClass. Verify.
+
+**Key pitfall 2:** `getQueryPaths()` is still called by the legacy `SelectQueryFactory.getQueryPaths()` path (line 1897: `if (endValue instanceof SelectQueryFactory)`). Since we're replacing with a plain object, `instanceof` checks will fail — but this is fine because the FieldSet path (which doesn't use `getQueryPaths()`) is now primary. However, if `_buildFactory()` is still active for some paths, it might call `getQueryPaths()` on the sub-query. The `throw` in `getQueryPaths()` will trigger the try/catch fallback in `toRawInput()`. This is acceptable during the transition — 10e removes `_buildFactory()` entirely.
 
 #### Tasks
 
-1. Update `QueryShapeSet.select()` — replace `new SelectQueryFactory(...)` with lightweight object:
-   - Create proxy via `createProxiedPathBuilder(leastSpecificShape)`
-   - Call `subQueryFn(proxy)` to trace the sub-query
-   - Return object with `parentQueryPath`, `traceResponse`, `shape`, `getQueryPaths()`
-   - `getQueryPaths()` can delegate to the old code or throw — it's only needed during the transition
-2. Update `QueryShape.select()` — same replacement
-3. Verify `FieldSet.convertTraceResult()` still handles the lightweight object correctly via `isSelectQueryFactory()` duck-type check
-4. Remove `SelectQueryFactory` import from the proxy handler methods (if it was the last import)
+1. **Update `QueryShapeSet.select()`** (SelectQuery.ts ~line 1318-1325):
+   - Replace `new SelectQueryFactory(leastSpecificShape, subQueryFn)` with lightweight object
+   - Use `createProxiedPathBuilder(leastSpecificShape)` to get proxy
+   - Call `subQueryFn(proxy)` to trace
+   - Return plain object with `parentQueryPath`, `traceResponse`, `shape`, `getQueryPaths()`
+2. **Update `QueryShape.select()`** (SelectQuery.ts ~line 1485-1497):
+   - Same replacement. Note: uses `getShapeClass((this.getOriginalValue() as Shape).nodeShape.id)` to get the shape class — keep this resolution logic.
+3. **Verify `isSelectQueryFactory()` still matches** — the duck-type check requires `typeof obj.getQueryPaths === 'function'` and `'parentQueryPath' in obj`. The lightweight object has both. ✓
+4. **Verify `FieldSet.convertTraceResult()` handles it** — it reads `obj.parentQueryPath`, `obj.traceResponse`, `obj.shape`. All present on lightweight object. ✓
+5. **Remove `SelectQueryFactory` import** from proxy handler section if no other code in that scope needs it
+
+**Stubs for parallel execution:** None needed. The lightweight object satisfies the same duck-type interface that `FieldSet.convertTraceResult()` expects. Other phases (10a, 10b, 10c) touch different code paths.
 
 #### Validation
 
-**Test file:** `src/tests/query-builder.test.ts` and `src/tests/field-set.test.ts` — existing sub-select tests serve as regression
+**Test files:** `src/tests/query-builder.test.ts`, `src/tests/field-set.test.ts` — existing sub-select tests serve as full regression
 
 | Test case | Assertion |
 |---|---|
-| All existing sub-select golden tests pass | `subSelectSingleProp`, `subSelectPluralCustom`, `subSelectAllProperties`, `doubleNestedSubSelect`, etc. |
-| `FieldSet.for(Person, p => [p.friends.select(f => [f.name])])` works | FieldSet entry has `subSelect` with correct shape and labels |
-| `Person.select(p => p.friends.select(f => [f.name]))` produces same IR | IR equivalence with previous implementation |
+| `subSelectPluralCustom` IR equivalence (existing, ~line 210) | `Person.select(p => p.friends.select(f => ({name: f.name, hobby: f.hobby})))` → assert IR matches DSL IR. Already passes — verify no regression. |
+| `selectAll` IR equivalence (existing, ~line 220) | `Person.select(p => p.friends.select(f => [f.name]))` variant → assert IR matches |
+| Existing `FieldSet — sub-select extraction` tests (field-set.test.ts ~line 408-444) | All 4 tests pass: sub-select array, sub-select custom object, sub-select with aggregation, sub-select IR equivalence |
+| `doubleNestedSubSelect` golden SPARQL test | 3+ levels of nesting through lightweight wrapper → passes unchanged |
+| `subSelectAllProperties` golden SPARQL test | `.select()` without specific fields → passes unchanged |
+
+**New test** (in `src/tests/field-set.test.ts`, add to `FieldSet — sub-select extraction` block):
+
+| Test case | Assertion |
+|---|---|
+| `sub-select through QueryShape.select() works` | `FieldSet.for(Person, p => [p.bestFriend.select(f => [f.name])])` (singular relationship, goes through `QueryShape.select()` not `QueryShapeSet.select()`) → assert `entries.length === 1`, assert `entries[0].subSelect` is defined, assert `entries[0].subSelect.labels()` includes `'name'` |
 
 **Non-test validation:**
-- `grep -rn 'new SelectQueryFactory' src/queries/SelectQuery.ts` — only in `SelectQueryFactory`'s own methods and `_buildFactory()` (no proxy handler hits)
+- `grep -rn 'new SelectQueryFactory' src/queries/SelectQuery.ts` — only in `SelectQueryFactory` class itself (constructor) and `_buildFactory()` in QueryBuilder.ts
 - `npx tsc --noEmit` exits 0
 - `npm test` — all tests pass
 
@@ -2529,28 +2638,52 @@ return {
 
 ### Phase 10e: Remove `_buildFactory()` and remaining SelectQueryFactory runtime usage
 
-**Goal:** Delete `QueryBuilder._buildFactory()`. All runtime paths now go through FieldSet. SelectQueryFactory is only referenced by types and its own definition.
+**Goal:** Delete `QueryBuilder._buildFactory()` and `_buildFactoryRawInput()`. All runtime paths now go through FieldSet / `_buildDirectRawInput()`. SelectQueryFactory is only referenced by types and its own definition.
 
-**Depends on:** Phase 10a + 10b + 10c + 10d (all runtime usages removed)
+**Depends on:** Phase 10a + 10b + 10c + 10d (all runtime fallback triggers removed)
+
+**Files expected to change:**
+- `src/queries/QueryBuilder.ts` — delete `_buildFactory()`, `_buildFactoryRawInput()`, simplify `toRawInput()`, update `getQueryPaths()`, remove `SelectQueryFactory` import
+- `src/queries/SelectQuery.ts` — remove `instanceof SelectQueryFactory` checks in `getQueryPaths()` (~lines 1897, 1905)
 
 #### Tasks
 
-1. Remove `_buildFactory()` method from `QueryBuilder.ts`
-2. Update `toRawInput()` — remove the try/catch fallback to `_buildFactory()`. The direct FieldSet path is now the only path.
-3. Update `getQueryPaths()` — if still used, rewrite to derive paths from FieldSet directly instead of `_buildFactory().getQueryPaths()`
-4. Remove `SelectQueryFactory` import from `QueryBuilder.ts`
-5. Remove any `instanceof SelectQueryFactory` checks in `getQueryPaths()` processing (SelectQuery.ts lines 1897, 1905)
-6. Clean up `QueryBuilder._preloads` — preloads are now handled via FieldSetEntry, remove the separate `_preloads` array if no longer needed
+1. **Delete `_buildFactory()` method** (QueryBuilder.ts ~line 397-435)
+2. **Delete `_buildFactoryRawInput()` method** (if separate from `_buildFactory`)
+3. **Simplify `toRawInput()`** (QueryBuilder.ts ~line 452-472):
+   - Remove the try/catch fallback entirely
+   - Remove the preload guard (already handled by FieldSetEntry from 10b)
+   - `toRawInput()` now just calls `_buildDirectRawInput()` directly
+   ```typescript
+   toRawInput(): RawSelectInput {
+     return this._buildDirectRawInput();
+   }
+   ```
+   Or inline `_buildDirectRawInput()` into `toRawInput()` if preferred.
+4. **Update `getQueryPaths()`** (QueryBuilder.ts ~line 441-443):
+   - Currently delegates to `this._buildFactory().getQueryPaths()`
+   - Replace with FieldSet-based derivation: `return fieldSetToSelectPath(this.fields())`
+5. **Remove `SelectQueryFactory` import** from QueryBuilder.ts
+6. **Remove `instanceof SelectQueryFactory` checks** in SelectQuery.ts `getQueryPaths()` (~lines 1897, 1905)
+   - These checks are inside `SelectQueryFactory.getQueryPaths()` itself — they handle nested sub-query results
+   - After 10d, sub-queries are lightweight objects, not `SelectQueryFactory` instances — `instanceof` will never match
+   - Remove the dead `instanceof` branch. The lightweight objects' `getQueryPaths()` throws, but that's fine because this code path is only reached from `SelectQueryFactory.getQueryPaths()` which is itself dead after this phase.
+7. **Assess `_preloads` array** — if `_preloads` is no longer read by any code path (10b made preloads go through FieldSet), remove the field and `.preload()` method's storage into it. If `.preload()` still stores into `_preloads` for the FieldSet merge in `toRawInput()`, keep it.
 
 #### Validation
 
 | Check | Expected result |
 |---|---|
-| `grep -rn '_buildFactory' src/` | 0 hits |
+| `grep -rn '_buildFactory' src/queries/QueryBuilder.ts` | 0 hits |
+| `grep -rn '_buildFactoryRawInput' src/queries/QueryBuilder.ts` | 0 hits |
 | `grep -rn 'new SelectQueryFactory' src/queries/QueryBuilder.ts` | 0 hits |
+| `grep -rn 'import.*SelectQueryFactory' src/queries/QueryBuilder.ts` | 0 hits |
 | `npx tsc --noEmit` | exits 0 |
 | `npm test` | all tests pass |
-| All golden IR + SPARQL tests | pass unchanged |
+| All golden IR tests (`ir-select-golden.test.ts`) | pass unchanged |
+| All golden SPARQL tests (`sparql-select-golden.test.ts`, 50+ tests) | pass unchanged |
+| All query-builder.test.ts IR equivalence tests (12 tests) | pass unchanged |
+| All preload tests (query-builder.test.ts lines 309-384) | pass unchanged |
 
 ---
 
@@ -2560,84 +2693,138 @@ return {
 
 **Depends on:** Phase 10e (runtime removal complete — types are the last reference)
 
+**Files expected to change:**
+- `src/queries/SelectQuery.ts` — 8 type definitions (~lines 300-630)
+- `src/shapes/Shape.ts` — 4 `static select()` overloads (~lines 99-170)
+- `src/tests/type-probe-4.4a.ts` — update type assertions if they reference `SelectQueryFactory`
+
 #### Architecture
 
-The type utilities in `SelectQuery.ts` use `SelectQueryFactory<S, R>` for generic inference (e.g. `T extends SelectQueryFactory<infer S, infer R>`). These need to be updated to infer from `QueryBuilder<S, R>` instead — or from a lightweight `QueryResult<S, R>` type alias if that simplifies the migration.
+The type utilities use `SelectQueryFactory<S, R>` for generic inference in conditional types. They need to infer from `QueryBuilder<S, R>` instead.
 
-Key types to migrate (~8 type definitions, ~20 references):
+**Migration table** (8 types, ~20 reference sites):
 
-| Type | Current | Target |
-|---|---|---|
-| `GetQueryResponseType` | `Q extends SelectQueryFactory<any, infer R>` | `Q extends QueryBuilder<any, infer R>` |
-| `GetQueryShapeType` | `Q extends SelectQueryFactory<infer S>` | `Q extends QueryBuilder<infer S>` |
-| `QueryIndividualResultType` | `T extends SelectQueryFactory<any>` | `T extends QueryBuilder<any>` |
-| `ToQueryResultSet` | `T extends SelectQueryFactory<infer S, infer R>` | `T extends QueryBuilder<infer S, infer R>` |
-| `QueryResponseToResultType` | References `SelectQueryFactory<any, infer R, infer S>` | References `QueryBuilder` |
-| `QueryResponseToEndValues` | References `SelectQueryFactory<any, infer R>` | References `QueryBuilder` |
-| `GetQueryObjectResultType` | Nested conditionals with `SelectQueryFactory` | Update conditionals |
+| Type (SelectQuery.ts) | Line | Current pattern | New pattern |
+|---|---|---|---|
+| `QueryIndividualResultType` | 300 | `T extends SelectQueryFactory<any>` → `SelectQueryFactory<infer S, infer R>` | `T extends QueryBuilder<any>` → `QueryBuilder<infer S, infer R>` |
+| `ToQueryResultSet` | 305 | `T extends SelectQueryFactory<infer S, infer R>` | `T extends QueryBuilder<infer S, infer R>` |
+| `QueryResponseToResultType` | 320 | `T extends SelectQueryFactory<any, infer Response, infer Source>` | `T extends QueryBuilder<any, infer Response>` — note: QueryBuilder doesn't have 3rd generic for Source, so extraction may need adjustment |
+| `GetQueryObjectResultType` | 339 | No direct `SelectQueryFactory` reference — but nested conditionals reference `BoundComponent` which returns `SelectQueryFactory`-dependent types | May need adjustment if BoundComponent's type parameter chain references `SelectQueryFactory` |
+| `GetQueryResponseType` | 608 | `Q extends SelectQueryFactory<any, infer ResponseType>` | `Q extends QueryBuilder<any, infer ResponseType>` |
+| `GetQueryShapeType` | 611 | `Q extends SelectQueryFactory<infer ShapeType, infer ResponseType>` | `Q extends QueryBuilder<infer ShapeType, infer ResponseType>` |
+| `QueryResponseToEndValues` | 616 | `T extends SelectQueryFactory<any, infer Response>` | `T extends QueryBuilder<any, infer Response>` |
+| `GetCustomObjectKeys` | 292 | References `SelectQueryFactory<any>` in conditional | Update to `QueryBuilder<any>` |
 
-Shape.ts overloads (4 overloads on `static select()`):
-- `GetQueryResponseType<SelectQueryFactory<ShapeType, S>>` → `GetQueryResponseType<QueryBuilder<ShapeType, S>>` (or simplified since QueryBuilder already carries R)
+**Shape.ts overloads** (4 overloads, lines 111, 121, 133, 145):
+- Current: `GetQueryResponseType<SelectQueryFactory<ShapeType, S>>`
+- This is wrapping `SelectQueryFactory` just to feed it to `GetQueryResponseType` for type inference
+- After migrating `GetQueryResponseType` to use `QueryBuilder`, update to: `GetQueryResponseType<QueryBuilder<ShapeType, S>>`
+- **Simplification opportunity:** Since `GetQueryResponseType<QueryBuilder<ShapeType, S>>` just extracts `S`, this may simplify to just `S` directly — but only if the conditional type resolution is equivalent. Test carefully.
+
+**Key pitfall:** `QueryResponseToResultType` at line 320 uses `SelectQueryFactory<any, infer Response, infer Source>` — the 3rd generic parameter `Source` captures the parent query path type. `QueryBuilder` may not have an equivalent 3rd parameter. Study whether `Source` is actually used downstream in `GetNestedQueryResultType<Response, Source>` — if it's only used for type narrowing that's no longer needed, it can be simplified.
+
+**Key pitfall 2:** These types are deeply nested conditionals. Changing one layer can break inference in unexpected ways. The type probe file (`type-probe-4.4a.ts`, 204 lines) with `Expect<Equal<>>` assertions is the primary safety net. Run `npx tsc --noEmit` after each type change, not just at the end.
 
 #### Tasks
 
-1. Update type utilities in `SelectQuery.ts` — replace `SelectQueryFactory` with `QueryBuilder` in all conditional type inference
-2. Update `Shape.ts` — update 4 `static select()` overload return type annotations
-3. Update `src/tests/type-probe-4.4a.ts` — update any type test assertions that reference `SelectQueryFactory`
-4. Verify compile-time type inference still works for all DSL patterns:
-   - `Person.select(p => [p.name])` — result type correctly inferred
-   - `Person.select(p => ({name: p.name}))` — custom object result type
-   - `Person.select(p => p.friends.select(f => [f.name]))` — nested result type
-5. Move surviving type utilities out of `SelectQuery.ts` if they no longer belong there (optional — can defer to Phase 11)
+1. **Migrate `GetQueryResponseType`** (line 608) — straightforward replacement
+2. **Migrate `GetQueryShapeType`** (line 611) — straightforward replacement
+3. **Migrate `QueryIndividualResultType`** (line 300) — replace both occurrences
+4. **Migrate `ToQueryResultSet`** (line 305) — replace infer pattern
+5. **Migrate `QueryResponseToResultType`** (line 320) — requires careful handling of 3rd `Source` generic
+6. **Migrate `QueryResponseToEndValues`** (line 616) — straightforward replacement
+7. **Migrate `GetCustomObjectKeys`** (line 292) — replace `SelectQueryFactory<any>` check
+8. **Review `GetQueryObjectResultType`** (line 339) — may not directly reference `SelectQueryFactory` but verify
+9. **Update Shape.ts overloads** (lines 111, 121, 133, 145) — replace `SelectQueryFactory<ShapeType, S>` with `QueryBuilder<ShapeType, S>` in `GetQueryResponseType<>` wrapper
+10. **Update `type-probe-4.4a.ts`** — fix any type assertions that reference `SelectQueryFactory` directly
+11. **Run `npx tsc --noEmit` after each change** — catch type inference breakage incrementally
+
+**Stubs for parallel execution:** N/A — this phase is sequential after 10e and must be done as a single unit.
 
 #### Validation
 
-**Test file:** `src/tests/query-builder.types.test.ts` — compile-time type assertions
+**Type probe file:** `src/tests/type-probe-4.4a.ts` (204 lines) — compile-time type assertions using `Expect<Equal<>>` pattern
 
-| Test case | Assertion |
+| Probe | What it validates |
 |---|---|
-| All existing type tests pass | No regression in type inference |
-| `GetQueryResponseType<QueryBuilder<Person, R>>` resolves correctly | Type-level assertion |
-| `Shape.select()` overloads still infer result type | `Person.select(p => [p.name])` result type is correct |
+| PROBE 1 (line 20-38) | `QueryResponseToResultType` resolves `Person` with `p.name` → correct result type |
+| PROBE 2 (line 66-75) | SingleResult unwrapping via `.one()` |
+| PROBE 3 (line 77-110) | Generic propagation through builder class |
+| PROBE 4 (line 139-201) | PromiseLike builder with `Awaited<>`, covers nested selects, aggregations, custom objects, booleans, dates |
 
-**Non-test validation:**
-- `grep -rn 'SelectQueryFactory' src/` — only hits in `SelectQueryFactory` class definition itself (and possibly `QueryComponentLike`)
+All probes must pass `npx tsc --noEmit` with 0 errors.
+
+**Runtime tests:**
+
+| Test | Assertion |
+|---|---|
+| All existing `npm test` tests | Pass unchanged — type changes don't affect runtime, but imports may shift |
+| All golden IR tests | Pass unchanged |
+| All golden SPARQL tests | Pass unchanged |
+
+**Structural validation:**
+- `grep -rn 'SelectQueryFactory' src/queries/SelectQuery.ts` — only in the class definition itself, nowhere in type utilities
+- `grep -rn 'SelectQueryFactory' src/shapes/Shape.ts` — 0 hits
+- `grep -rn 'SelectQueryFactory' src/tests/type-probe` — 0 hits
 - `npx tsc --noEmit` exits 0
-- `npm test` — all tests pass
 
 ---
 
-### Phase 10g: Delete SelectQueryFactory class
+### Phase 10g: Delete SelectQueryFactory class and final cleanup
 
-**Goal:** Delete the `SelectQueryFactory` class and all supporting code. Final cleanup.
+**Goal:** Delete the `SelectQueryFactory` class (~600 lines) and all supporting dead code. Final cleanup commit.
 
 **Depends on:** Phase 10f (all references migrated)
 
+**Files expected to change:**
+- `src/queries/SelectQuery.ts` — delete `SelectQueryFactory` class, `patchResultPromise()`, `PatchedQueryPromise`, helper methods only used by factory
+- `src/index.ts` — remove `SelectQueryFactory` export
+- `src/queries/QueryFactory.ts` — remove reference if present
+- `src/queries/QueryContext.ts` — delete if only used by factory
+- `src/queries/SelectQuery.ts` — update `QueryComponentLike` type
+
 #### Tasks
 
-1. Verify no remaining usages: `grep -r 'SelectQueryFactory' src/` — only the class definition and comments
-2. Delete `SelectQueryFactory` class from `SelectQuery.ts` (~600 lines)
-3. Delete `patchResultPromise()` and `PatchedQueryPromise` type (if not already removed)
-4. Remove from barrel exports (`src/index.ts`)
-5. Remove from `QueryFactory.ts` if referenced
-6. Clean up `QueryContext.ts` if only used by SelectQueryFactory
-7. Update `QueryComponentLike` type — remove `SelectQueryFactory` variant
-8. Delete `LinkedWhereQuery` if not already removed in 10c
-9. Remove any remaining `instanceof SelectQueryFactory` checks
-10. Clean up dead imports across all files
+1. **Verify no remaining usages:**
+   - `grep -rn 'SelectQueryFactory' src/` — should only find the class definition, `QueryComponentLike` type, and maybe comments
+   - `grep -rn 'new SelectQueryFactory' src/` — should return 0 hits
+   - `grep -rn 'extends SelectQueryFactory' src/` — should return 0 hits (LinkedWhereQuery deleted in 10c)
+2. **Delete `SelectQueryFactory` class** from SelectQuery.ts (~600 lines, starts around line 1070)
+   - Delete the class definition and all its methods
+   - Keep: `QueryShape`, `QueryShapeSet`, `QueryBuilderObject`, `QueryPrimitive`, `QueryPrimitiveSet`, `QueryBoolean`, `QueryString`, `SetSize`, `Evaluation`, `BoundComponent` — these are used by the proxy tracing system
+   - Keep: All type exports (`QueryResponseToResultType`, etc.) — migrated in 10f
+   - Keep: `processWhereClause()` — updated in 10c
+   - Keep: `fieldSetToSelectPath()`, `entryToQueryPath()` — used by QueryBuilder
+3. **Delete `patchResultPromise()` and `PatchedQueryPromise`** — if they still exist (may have been removed in Phase 4)
+4. **Remove from barrel export** (`src/index.ts`) — remove `SelectQueryFactory` from export list
+5. **Check `QueryFactory.ts`** — if it references `SelectQueryFactory`, remove the reference
+6. **Check `QueryContext.ts`** — if only used by `SelectQueryFactory`, delete the file entirely. If used elsewhere, keep.
+7. **Update `QueryComponentLike` type** — remove the `SelectQueryFactory` variant from the union
+8. **Clean up dead imports** — scan all files in `src/queries/` for unused `SelectQueryFactory` imports
+9. **Remove `isSelectQueryFactory()` duck-type check** from FieldSet.ts (line 33-37) if the lightweight sub-select objects from 10d use a different detection mechanism, OR rename to `isSubSelectWrapper()` for clarity
+10. **Remove `LinkedWhereQuery`** — should already be deleted in 10c, verify
 
 #### Validation
 
 | Check | Expected result |
 |---|---|
-| `grep -r 'SelectQueryFactory' src/` | 0 hits (excluding comments/changelog) |
-| `grep -r 'buildFactory' src/` | 0 hits |
-| `grep -r 'patchResultPromise' src/` | 0 hits |
-| `grep -r 'LinkedWhereQuery' src/` | 0 hits |
+| `grep -rn 'SelectQueryFactory' src/` | 0 hits in runtime code (comments/changelog OK) |
+| `grep -rn 'class SelectQueryFactory' src/` | 0 hits |
+| `grep -rn 'new SelectQueryFactory' src/` | 0 hits |
+| `grep -rn 'extends SelectQueryFactory' src/` | 0 hits |
+| `grep -rn 'buildFactory' src/` | 0 hits |
+| `grep -rn 'patchResultPromise' src/` | 0 hits |
+| `grep -rn 'PatchedQueryPromise' src/` | 0 hits |
+| `grep -rn 'LinkedWhereQuery' src/` | 0 hits |
 | `npx tsc --noEmit` | exits 0 |
 | `npm test` | all tests pass |
-| All golden tests | pass unchanged (same IR, same SPARQL output) |
-| Bundle size reduced | SelectQueryFactory was ~600 lines |
+| All golden IR tests | pass unchanged — same IR output |
+| All golden SPARQL tests (50+) | pass unchanged — same SPARQL output |
+| Type probe file compiles | `npx tsc --noEmit` on `type-probe-4.4a.ts` passes |
+
+**Post-deletion structural check:**
+- `wc -l src/queries/SelectQuery.ts` — should be ~600 lines shorter than before this phase
+- `grep -c 'export' src/index.ts` — `SelectQueryFactory` no longer in exports
 
 ---
 
@@ -2651,10 +2838,20 @@ Phase 10d (Sub-select wrap) ──┘
 ```
 
 **Parallel opportunities:**
-- 10a, 10b, 10c, 10d are independent — can all run in parallel
-- 10e depends on all four completing
+- 10a, 10b, 10c, 10d are independent — can all run in parallel (each touches a different code path)
+- 10e depends on all four completing (convergence point)
 - 10f depends on 10e
 - 10g depends on 10f
+
+**Stubs for parallel execution (10a–10d):**
+- No stubs needed — each phase touches isolated code:
+  - 10a: `isEvaluation()` branch in `convertTraceResult()`, `entryToQueryPath()` evaluation handling
+  - 10b: `isBoundComponent()` branch in `convertTraceResult()`, preload guard in `toRawInput()`, `entryToQueryPath()` preload handling
+  - 10c: `processWhereClause()` function, `LinkedWhereQuery` class
+  - 10d: `QueryShapeSet.select()`, `QueryShape.select()` methods
+- If running in parallel, each agent should NOT touch `FieldSetEntry` type simultaneously — coordinate by having each agent add their new field and verify compilation. Alternative: 10a adds both `evaluation` and `preload` fields to the type in a shared prep step.
+
+**Integration consideration:** After merging 10a+10b+10c+10d, run full test suite before proceeding to 10e. The try/catch in `toRawInput()` may mask subtle issues — 10e removes that safety net.
 
 ---
 
