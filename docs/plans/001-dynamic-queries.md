@@ -367,6 +367,7 @@ Shape and property identifiers use prefixed IRIs (resolved through existing pref
 
 - **Result typing** — Dynamic queries use generic `ResultRow` type for now. Potential future addition: `QueryBuilder.from<T>(shape)` type parameter for static result typing.
 - **Raw IR helpers** (Option A from ideation) — `ir.select()`, `ir.shapeScan()`, `ir.traverse()` etc. for power-user direct IR construction.
+- **Desugar pass: accept FieldSet directly** — Currently the pipeline is `FieldSet → fieldSetToSelectPath() → SelectPath → RawSelectInput → desugarSelectQuery() → IRSelectQuery`. The `SelectPath` format (arrays of `QueryStep`, `SizeStep`, `CustomQueryObject`, etc.) is the old IR representation from `SelectQueryFactory`. `fieldSetToSelectPath()` is a translation layer that converts FieldSet's clean data model (PropertyPath, entries with aggregation/subSelect/evaluation/preload) into this old format, only for `desugarSelectQuery()` to parse it back out. A future phase should modify `desugarSelectQuery()` (in `IRDesugar.ts`) to accept `FieldSet` directly, collapsing the pipeline to `FieldSet → desugarSelectQuery(fieldSet) → IRSelectQuery` and eliminating the `fieldSetToSelectPath()` bridge and the `SelectPath`/`QueryStep`/`SizeStep` intermediate types.
 
 ---
 
@@ -2884,3 +2885,251 @@ Per-item validation — each item gets its own commit with:
 - `npx tsc --noEmit` exits 0
 - `npm test` — all tests pass
 - For item 7 (cast reduction): `grep -c 'as any\|as unknown' src/queries/*.ts` count < 10
+
+---
+
+### Phase 12: Typed FieldSet — carry response type through sub-selects
+
+**Status:** PLANNED
+
+**Goal:** Make `FieldSet<R>` the typed carrier for sub-select results, eliminating the need for the `SubSelectResult` type-only interface. After this phase, the type inference for sub-selects flows through `FieldSet` generics instead of a separate structural interface.
+
+**Motivation:** Currently sub-selects (`.select()` on QueryShapeSet/QueryShape) return plain objects typed as `SubSelectResult<S, ResponseType, Source>`. This interface exists *only* for conditional type pattern-matching — at runtime, these objects are ad-hoc literals that get converted to FieldSets anyway. FieldSet already has an unused `R` generic parameter (`class FieldSet<R = any>`). By wiring up this generic and adding a `Source` parameter, FieldSet can carry the same type information and the conditional types can pattern-match on `FieldSet` directly.
+
+**Key insight:** The proxy callbacks (`QueryBuildFn`) already produce fully typed results. The `traceResponse` (callback return value) carries all type information. Today it's stored on `SubSelectResult.traceResponse`; after this phase it will be stored on `FieldSet<R, Source>.traceResponse` (or inferred from the generic).
+
+#### Background: Current flow
+
+```typescript
+// 1. User writes:
+p.friends.select(f => ({ name: f.name, age: f.age }))
+
+// 2. QueryShapeSet.select() returns:
+SubSelectResult<Person, { name: QueryString, age: QueryNumber }, QueryShapeSet<Person, ...>>
+
+// 3. Conditional types pattern-match on SubSelectResult to infer:
+//    Response = { name: QueryString, age: QueryNumber }
+//    Source = QueryShapeSet<...>  →  result is array
+
+// 4. At runtime, the returned object is a plain literal { traceResponse, parentQueryPath, shape, getQueryPaths() }
+//    which gets converted to a FieldSet when consumed by QueryBuilder
+```
+
+#### Target flow
+
+```typescript
+// 1. User writes (same):
+p.friends.select(f => ({ name: f.name, age: f.age }))
+
+// 2. QueryShapeSet.select() returns:
+FieldSet<{ name: QueryString, age: QueryNumber }, QueryShapeSet<Person, ...>>
+
+// 3. Conditional types pattern-match on FieldSet to infer:
+//    Response = { name: QueryString, age: QueryNumber }
+//    Source = QueryShapeSet<...>  →  result is array
+
+// 4. At runtime, select() directly constructs a FieldSet (no intermediate plain object)
+```
+
+#### Phase 12a: Add Source generic to FieldSet
+
+**Files:** `src/queries/FieldSet.ts`
+
+Add a second generic parameter `Source` to FieldSet:
+
+```typescript
+// Before:
+export class FieldSet<R = any> {
+  readonly shape: NodeShape;
+  readonly entries: readonly FieldSetEntry[];
+
+// After:
+export class FieldSet<R = any, Source = any> {
+  readonly shape: NodeShape;
+  readonly entries: readonly FieldSetEntry[];
+  /** Phantom field for conditional type inference of response type */
+  declare readonly __response: R;
+  /** Phantom field for conditional type inference of source context */
+  declare readonly __source: Source;
+```
+
+Using `declare` ensures no runtime cost — these are compile-time-only fields.
+
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all 614 tests pass
+- No runtime behavior changes — purely additive type change
+
+#### Phase 12b: Wire up FieldSet.for() to propagate Source generic
+
+**Files:** `src/queries/FieldSet.ts`
+
+Update the `FieldSet.for()` callback overload to accept an optional Source parameter:
+
+```typescript
+// The callback overload already infers R:
+static for<S extends Shape, R>(shape: ShapeType<S>, fn: (p: any) => R): FieldSet<R>
+
+// Add a Source-aware factory for sub-selects:
+static forSubSelect<S extends Shape, R, Source>(
+  shape: ShapeType<S>,
+  fn: (p: any) => R,
+  parentPath: QueryPath,
+): FieldSet<R, Source> {
+  const entries = FieldSet.traceFieldsWithProxy(shape.shape || shape, fn);
+  const fs = new FieldSet(shape.shape || shape, entries);
+  (fs as any)._parentPath = parentPath;
+  return fs as FieldSet<R, Source>;
+}
+```
+
+Also update `createFromEntries` to preserve generics:
+
+```typescript
+static createFromEntries<R = any, Source = any>(
+  shape: NodeShape, entries: FieldSetEntry[]
+): FieldSet<R, Source> {
+  return new FieldSet(shape, entries) as FieldSet<R, Source>;
+}
+```
+
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all 614 tests pass
+
+#### Phase 12c: Update QueryShapeSet.select() and QueryShape.select() to return FieldSet
+
+**Files:** `src/queries/SelectQuery.ts`, `src/queries/FieldSet.ts`
+
+Change the `.select()` methods to construct and return typed FieldSets instead of plain objects:
+
+```typescript
+// Before (QueryShapeSet.select):
+select<QF = unknown>(
+  subQueryFn: QueryBuildFn<S, QF>,
+): SubSelectResult<S, QF, QueryShapeSet<S, Source, Property>> {
+  // ...builds plain object with traceResponse, parentQueryPath, shape, getQueryPaths()
+  return { ... } as any;
+}
+
+// After:
+select<QF = unknown>(
+  subQueryFn: QueryBuildFn<S, QF>,
+): FieldSet<QF, QueryShapeSet<S, Source, Property>> {
+  const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
+  const parentPath = this.getPropertyPath();
+  return FieldSet.forSubSelect<S, QF, QueryShapeSet<S, Source, Property>>(
+    leastSpecificShape,
+    subQueryFn as any,
+    parentPath,
+  );
+}
+```
+
+Same pattern for `QueryShape.select()`, changing `SubSelectResult` → `FieldSet`.
+
+Also update `selectAll()` return types accordingly.
+
+**Critical:** The FieldSet must still expose `getQueryPaths()` and `parentQueryPath` for compatibility with `BoundComponent.getComponentQueryPaths()` and `fieldSetToSelectPath()`. Add these as computed properties or methods on FieldSet.
+
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all 614 tests pass
+- Type probe file compiles with same inferred types
+
+#### Phase 12d: Migrate conditional types from SubSelectResult to FieldSet
+
+**Files:** `src/queries/SelectQuery.ts`, `src/queries/SubSelectResult.ts`
+
+Update all 8 conditional type pattern matches to match on `FieldSet` instead of `SubSelectResult`:
+
+```typescript
+// Before:
+export type GetQueryResponseType<Q> =
+  Q extends SubSelectResult<any, infer ResponseType> ? ResponseType : Q;
+
+// After:
+export type GetQueryResponseType<Q> =
+  Q extends FieldSet<infer ResponseType, any> ? ResponseType : Q;
+```
+
+```typescript
+// Before:
+T extends SubSelectResult<any, infer Response, infer Source>
+  ? GetNestedQueryResultType<Response, Source>
+
+// After:
+T extends FieldSet<infer Response, infer Source>
+  ? GetNestedQueryResultType<Response, Source>
+```
+
+Full list of pattern matches to update:
+1. `QueryWrapperObject` (line 60) — `SubSelectResult<ShapeType>` → `FieldSet<any, any>`
+2. `GetCustomObjectKeys` (line 289) — `T[P] extends SubSelectResult<any>` → `T[P] extends FieldSet`
+3. `ToQueryResultSet` (line 296) — extract ShapeType and ResponseType from FieldSet
+4. `QueryResponseToResultType` (line 310) — extract Response and Source from FieldSet
+5. `GetQueryObjectProperty` (line 396) — extract SubSource from FieldSet
+6. `GetQueryObjectOriginal` (line 406) — extract SubResponse and SubSource from FieldSet
+7. `GetQueryResponseType` (line 598) — extract ResponseType from FieldSet
+8. `GetQueryShapeType` (line 601) — extract ShapeType from FieldSet (needs shape generic)
+
+**Challenge for #8:** `GetQueryShapeType` currently extracts `S` (Shape type) from `SubSelectResult<S, ...>`. FieldSet doesn't currently have an `S` generic — its shape is stored as `NodeShape`, not `ShapeType<S>`. Options:
+- Add a third generic `S` to FieldSet: `FieldSet<R, Source, S extends Shape>` — adds complexity
+- Store `ShapeType<S>` on FieldSet alongside `NodeShape` — mirrors SubSelectResult
+- Keep `GetQueryShapeType` pattern-matching on SubSelectResult as a temporary bridge
+
+**Recommendation:** If `GetQueryShapeType` is only used in a few places, check if those usages can be refactored. Otherwise add `ShapeType<S>` storage to FieldSet.
+
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all 614 tests pass
+- Type probe file `type-probe-4.4a.ts` compiles and produces identical inferred types
+- `grep -rn 'SubSelectResult' src/` — zero hits in conditional types (only in deprecated alias)
+
+#### Phase 12e: Delete SubSelectResult interface
+
+**Files:** `src/queries/SubSelectResult.ts`, `src/queries/SelectQuery.ts`
+
+Once all conditional types match on FieldSet:
+1. Remove the `SubSelectResult` interface from `SubSelectResult.ts`
+2. Keep the deprecated `SelectQueryFactory` alias pointing to `FieldSet` if external consumers use it, or delete entirely
+3. Remove re-exports from `SelectQuery.ts`
+4. Delete `SubSelectResult.ts` if empty
+
+**Validation:**
+- `grep -rn 'SubSelectResult' src/` — zero hits (or only in deprecated alias)
+- `npx tsc --noEmit` exits 0
+- `npm test` — all 614 tests pass
+- Type probe file compiles
+
+#### Phase 12 — Dependency Graph
+
+```
+Phase 12a (Add Source generic)
+    ↓
+Phase 12b (Wire up FieldSet.for/createFromEntries)
+    ↓
+Phase 12c (select() returns FieldSet)
+    ↓
+Phase 12d (Migrate conditional types)
+    ↓
+Phase 12e (Delete SubSelectResult)
+```
+
+Strictly sequential — each phase builds on the previous.
+
+#### Risks and Considerations
+
+1. **FieldSet is a class, SubSelectResult is an interface** — TypeScript conditional types with `extends` work on both, but `FieldSet` is nominal (class) while `SubSelectResult` was structural (interface). The conditional type `T extends FieldSet<infer R>` will match actual FieldSet instances. This is correct since after 12c, `.select()` returns real FieldSets.
+
+2. **`getQueryPaths()` and `parentQueryPath`** — These are currently on SubSelectResult but not on FieldSet. Phase 12c must add them (either as methods/getters or stored properties) so that existing code in `BoundComponent`, `isSubSelectResult` duck-checks, and `fieldSetToSelectPath` continues to work. FieldSet already has `entries` which can produce query paths via `fieldSetToSelectPath()`, so `getQueryPaths()` can be a computed method.
+
+3. **`traceResponse` field** — SubSelectResult stores `traceResponse` (the raw callback return). FieldSet currently doesn't store this — it processes it into entries during construction. For the phantom `__response` type to work, we don't need the runtime value, just the `declare` field. But `extractSubSelectEntriesPublic` uses `traceResponse` at runtime. Two options:
+   - Store `traceResponse` on FieldSet (adds runtime field)
+   - Process it eagerly during `forSubSelect()` construction (cleaner — no raw trace needed after construction)
+
+   **Recommendation:** Process eagerly. The FieldSet already processes the trace into entries in `for()`, so `forSubSelect()` should do the same.
+
+4. **Duck-type check in FieldSet.ts** — `isSubSelectResult()` checks for `getQueryPaths` and `parentQueryPath`. After 12c, sub-selects return FieldSet instances. The duck-type check should be updated to `obj instanceof FieldSet` (possible since FieldSet.ts owns the class) or kept as structural check with updated comment.
+
+5. **Backward compatibility** — The deprecated `SelectQueryFactory` alias can be updated to point to `FieldSet` with matching generics: `type SelectQueryFactory<S, R, Source> = FieldSet<R, Source>`. Shape parameter `S` is lost but may be acceptable for deprecated usage.
