@@ -395,26 +395,26 @@ Phase 4 (done)       [after 3a and 3b]
     ↓
 Phase 5 (done)       [after 4.4a and 3a — preloadFor + component integration]
     ↓
-Phase 6              [forAll multi-ID — independent, small, quick win]
+Phase 6 (done)       [forAll multi-ID — independent, small, quick win]
     ↓
-Phase 7              [unified callback tracing — THE foundational refactor]
-  7a: Extend FieldSetEntry data model (subSelect, aggregation, customKey)
+Phase 7 (done)       [unified callback tracing — THE foundational refactor]
+  7a: Extend FieldSetEntry data model (done)
     ↓
-  7b: FieldSet.for() accepts ShapeClass + NodeShape overloads
+  7b: FieldSet.for() accepts ShapeClass + NodeShape overloads (done)
     ↓
-  7c: Replace traceFieldsFromCallback with ProxiedPathBuilder (the core swap)
+  7c: Replace traceFieldsFromCallback with ProxiedPathBuilder (done)
     ↓
-  7d: toJSON for callback-based selections + orderDirection fix
+  7d: toJSON for callback-based selections + orderDirection fix (done)
     ↓
-  7e: Typed FieldSet<R> — carry callback return type
+  7e: Typed FieldSet<R> — carry callback return type (done)
     ↓
-Phase 8              [QueryBuilder direct IR — bypass SelectQueryFactory]
+Phase 8 (done)       [QueryBuilder direct IR — bypass SelectQueryFactory]
     ↓
-Phase 9              [sub-queries through FieldSet — DSL proxy produces FieldSets]
+Phase 9 (done)       [sub-queries through FieldSet — DSL proxy produces FieldSets]
     ↓
-Phase 10             [remove SelectQueryFactory]
+Phase 10 (done)      [remove SelectQueryFactory]
     ↓
-Phase 11             [hardening — API cleanup, reviewed item by item]
+Phase 11 (mostly done) [hardening — API cleanup, reviewed item by item]
 ```
 
 ---
@@ -1259,7 +1259,7 @@ A new `query-builder.types.test.ts` must be added mirroring key patterns from `q
 
 ---
 
-### Phase 5 — preloadFor + Component Query Integration
+### Phase 5 — preloadFor + Component Query Integration ✅
 
 **Status: Complete.**
 
@@ -1506,11 +1506,15 @@ These changes are required before `Shape.query()` is removed in Phase 4.4e.
 
 ---
 
-### Phase 6: `forAll(ids)` — multi-ID subject filtering
+### Phase 6: `forAll(ids)` — multi-ID subject filtering ✅
+
+**Status: Complete.**
+
+Implemented `_subjects` field on QueryBuilder, `forAll(ids)` normalizes and stores IDs, generates `VALUES` clause in SPARQL, with full serialization support. 6 new tests in query-builder.test.ts + 2 serialization tests.
 
 **Goal:** Make `Person.select(...).forAll([id1, id2])` actually filter by the given IDs instead of silently ignoring them.
 
-**Current problem:** Both branches of `forAll()` (with and without `ids`) do the exact same thing: `clone({subject: undefined, singleResult: false})`. The IDs parameter is discarded.
+**Current problem (resolved):** Both branches of `forAll()` (with and without `ids`) do the exact same thing: `clone({subject: undefined, singleResult: false})`. The IDs parameter is discarded.
 
 **Approach: `VALUES` clause (Option A)**
 
@@ -1547,11 +1551,15 @@ Use a `VALUES ?subject { <id1> <id2> }` binding, consistent with how `.for(id)` 
 
 ---
 
-### Phase 7: Unified callback tracing — FieldSet as canonical query primitive
+### Phase 7: Unified callback tracing — FieldSet as canonical query primitive ✅
+
+**Status: Complete.**
+
+All sub-phases (7a–7e) implemented. FieldSetEntry extended with subSelect/aggregation/customKey. FieldSet.for() accepts ShapeClass. Callback tracing uses createProxiedPathBuilder. toJSON works for callback-based selections. FieldSet carries generic `<R, Source>` type parameters.
 
 **Goal:** Make FieldSet the single canonical declarative primitive that queries are built from. Unify FieldSet's callback tracing with the existing `QueryShape`/`ProxiedPathBuilder` proxy so nested paths, where clauses, and orderBy all work. Enable `toJSON()` for callback-based selections. Add type parameter `R` to FieldSet.
 
-**Current problem:**
+**Current problem (resolved):**
 
 `FieldSet.traceFieldsFromCallback()` uses a **simple proxy** that only captures top-level string keys:
 ```ts
@@ -2013,7 +2021,7 @@ Phase 11             [depends on 10g — cleanup pass]
 
 ---
 
-### Phase 6: forAll(ids) — multi-ID subject filtering
+### Phase 6: forAll(ids) — multi-ID subject filtering ✅
 
 #### Tasks
 
@@ -2051,7 +2059,7 @@ Phase 11             [depends on 10g — cleanup pass]
 
 ---
 
-### Phase 7a: Extend FieldSetEntry data model
+### Phase 7a: Extend FieldSetEntry data model ✅
 
 #### Tasks
 
@@ -2090,7 +2098,7 @@ Phase 11             [depends on 10g — cleanup pass]
 
 ---
 
-### Phase 7b: FieldSet.for() accepts ShapeClass + NodeShape overloads
+### Phase 7b: FieldSet.for() accepts ShapeClass + NodeShape overloads ✅
 
 #### Tasks
 
@@ -2118,7 +2126,7 @@ Phase 11             [depends on 10g — cleanup pass]
 
 ---
 
-### Phase 7c: Replace traceFieldsFromCallback with ProxiedPathBuilder
+### Phase 7c: Replace traceFieldsFromCallback with ProxiedPathBuilder ✅
 
 **This is the core phase.** FieldSet callbacks now go through the real `createProxiedPathBuilder` proxy, enabling nested paths, where, aggregation, and sub-selects.
 
@@ -2174,7 +2182,7 @@ These prove that FieldSet-constructed queries produce the same IR as direct call
 
 ---
 
-### Phase 7d: toJSON for callback-based selections
+### Phase 7d: toJSON for callback-based selections ✅
 
 #### Tasks
 
@@ -2203,7 +2211,7 @@ These prove that FieldSet-constructed queries produce the same IR as direct call
 
 ---
 
-### Phase 7e: Typed FieldSet\<R\> — carry callback return type
+### Phase 7e: Typed FieldSet\<R\> — carry callback return type ✅
 
 #### Tasks
 
@@ -2864,20 +2872,22 @@ Phase 10d (Sub-select wrap) ──┘
 
 ### Phase 11: Hardening — API cleanup and robustness
 
+**Status: Mostly complete (7/10 items done).**
+
 Each item to be discussed with project owner before implementation. This phase is a series of small, independent tasks.
 
 #### Tasks (each reviewed individually)
 
-1. `FieldSet.merge()` shape validation — throw on mismatched shapes?
-2. `CreateBuilder.build()` missing-data guard — throw like UpdateBuilder?
-3. `FieldSet.all()` depth parameter — implement or remove?
-4. `FieldSet.select()` vs `FieldSet.set()` duplication — remove one
-5. Dead import cleanup — `FieldSetJSON` from QueryBuilder.ts, `toNodeReference` from UpdateBuilder.ts
-6. `toJSON()` dead branch — remove unreachable `else if (this._selectAllLabels)`
-7. Reduce `as any` / `as unknown as` casts (target: reduce 28 → <10)
-8. Clone type preservation — `clone()` returns properly typed `QueryBuilder<S, R, T>`
-9. `PropertyPath.segments` defensive copy — `Object.freeze` or `.slice()`
-10. `FieldSet.traceFieldsFromCallback` removal — delete old simple proxy code (should already be gone from 7c)
+1. ✅ `FieldSet.merge()` shape validation — throw on mismatched shapes
+2. ✅ `CreateBuilder.build()` missing-data guard — throw like UpdateBuilder
+3. ✅ `FieldSet.all()` depth parameter — implemented with circular reference handling
+4. ❌ `FieldSet.select()` vs `FieldSet.set()` duplication — remove one (both still exist and are identical)
+5. ⚠️ Dead import cleanup — `toNodeReference` clean; `FieldSetJSON` unused import in QueryBuilder.ts still present
+6. ✅ `toJSON()` dead branch — removed (comment: "T1: dead else-if removed")
+7. ⚠️ Reduce `as any` / `as unknown as` casts — still ~65 across src/queries/*.ts, target was <10
+8. ✅ Clone type preservation — `clone()` returns properly typed `QueryBuilder<S, R, T>` with full generic propagation
+9. ❌ `PropertyPath.segments` defensive copy — no freeze/slice, only `readonly` type annotation
+10. ⚠️ `FieldSet.traceFieldsFromCallback` removal — still exists as fallback (line 159 in FieldSet.ts); ProxiedPathBuilder is primary but old code kept as fallback for NodeShape-only paths
 
 #### Validation
 
@@ -2888,9 +2898,11 @@ Per-item validation — each item gets its own commit with:
 
 ---
 
-### Phase 12: Typed FieldSet — carry response type through sub-selects
+### Phase 12: Typed FieldSet — carry response type through sub-selects ✅
 
-**Status:** PLANNED
+**Status: Complete.**
+
+FieldSet now carries `<R, Source>` generics with phantom `declare` fields. `forSubSelect()` factory preserves types. `QueryShapeSet.select()` and `QueryShape.select()` return typed `FieldSet`. All conditional types migrated from `SubSelectResult` to pattern-match on `FieldSet`. `SubSelectResult` eliminated from codebase. 20 deep-nesting type probe tests + 7 FieldSet type tests pass.
 
 **Goal:** Make `FieldSet<R>` the typed carrier for sub-select results, eliminating the need for the `SubSelectResult` type-only interface. After this phase, the type inference for sub-selects flows through `FieldSet` generics instead of a separate structural interface.
 
