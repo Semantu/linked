@@ -1,6 +1,5 @@
 import {Shape, ShapeType} from '../shapes/Shape.js';
-import {getShapeClass} from '../utils/ShapeClass.js';
-import {NodeReferenceValue} from './QueryFactory.js';
+import {resolveShape} from './resolveShape.js';
 import {DeleteQueryFactory, DeleteQuery, DeleteResponse} from './DeleteQuery.js';
 import {NodeId} from './MutationQuery.js';
 import {getQueryDispatch} from './queryDispatch.js';
@@ -45,22 +44,12 @@ export class DeleteBuilder<S extends Shape = Shape>
     shape: ShapeType<S> | string,
     ids: NodeId | NodeId[],
   ): DeleteBuilder<S> {
-    const resolved = DeleteBuilder.resolveShape<S>(shape);
+    const resolved = resolveShape<S>(shape);
     const idsArray = Array.isArray(ids) ? ids : [ids];
-    return new DeleteBuilder<S>({shape: resolved, ids: idsArray});
-  }
-
-  private static resolveShape<S extends Shape>(
-    shape: ShapeType<S> | string,
-  ): ShapeType<S> {
-    if (typeof shape === 'string') {
-      const shapeClass = getShapeClass(shape);
-      if (!shapeClass) {
-        throw new Error(`Cannot resolve shape for '${shape}'`);
-      }
-      return shapeClass as unknown as ShapeType<S>;
+    if (idsArray.length === 0) {
+      throw new Error('DeleteBuilder requires at least one ID to delete.');
     }
-    return shape;
+    return new DeleteBuilder<S>({shape: resolved, ids: idsArray});
   }
 
   // ---------------------------------------------------------------------------
@@ -95,11 +84,11 @@ export class DeleteBuilder<S extends Shape = Shape>
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
   ): Promise<DeleteResponse | TResult> {
-    return this.exec().catch(onrejected);
+    return this.then().catch(onrejected);
   }
 
   finally(onfinally?: (() => void) | null): Promise<DeleteResponse> {
-    return this.exec().finally(onfinally);
+    return this.then().finally(onfinally);
   }
 
   get [Symbol.toStringTag](): string {

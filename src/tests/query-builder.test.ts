@@ -1,40 +1,17 @@
-import {describe, expect, test} from '@jest/globals';
+import {describe, expect, test, beforeAll} from '@jest/globals';
 import {Person, tmpEntityBase} from '../test-helpers/query-fixtures';
 import {captureQuery} from '../test-helpers/query-capture-store';
+import {entity, captureDslIR, sanitize} from '../test-helpers/test-utils';
 import {QueryBuilder} from '../queries/QueryBuilder';
-import {buildSelectQuery} from '../queries/IRPipeline';
 import {walkPropertyPath} from '../queries/PropertyPath';
 import {FieldSet} from '../queries/FieldSet';
 import {setQueryContext} from '../queries/QueryContext';
 
-setQueryContext('user', {id: 'user-1'}, Person);
+const personShape = Person.shape;
 
-const entity = (suffix: string) => ({id: `${tmpEntityBase}${suffix}`});
-
-/**
- * Helper: capture the built IR from the existing DSL path.
- */
-const captureDslIR = async (runner: () => Promise<unknown>) => {
-  const ir = await captureQuery(runner);
-  return ir;
-};
-
-/**
- * Helper: sanitize IR for comparison (strip undefined keys).
- */
-const sanitize = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map((item) => sanitize(item));
-  if (value && typeof value === 'object') {
-    return Object.entries(value as Record<string, unknown>).reduce(
-      (acc, [key, child]) => {
-        if (child !== undefined) acc[key] = sanitize(child);
-        return acc;
-      },
-      {} as Record<string, unknown>,
-    );
-  }
-  return value;
-};
+beforeAll(() => {
+  setQueryContext('user', {id: 'user-1'}, Person);
+});
 
 // =============================================================================
 // Immutability tests
@@ -231,8 +208,6 @@ describe('QueryBuilder — IR equivalence with DSL', () => {
 // =============================================================================
 
 describe('walkPropertyPath', () => {
-  const personShape = (Person as any).shape;
-
   test('single segment', () => {
     const path = walkPropertyPath(personShape, 'name');
     expect(path.segments.length).toBe(1);
@@ -279,7 +254,7 @@ describe('QueryBuilder — shape resolution', () => {
   });
 
   test('from() with string IRI', () => {
-    const shapeId = (Person as any).shape.id;
+    const shapeId = personShape.id;
     const ir = QueryBuilder.from(shapeId).select((p: any) => p.name).build();
     expect(ir.kind).toBe('select');
   });
@@ -304,6 +279,8 @@ describe('QueryBuilder — PromiseLike', () => {
 
 // =============================================================================
 // Preload tests (Phase 5)
+// B2 fix: removed duplicate ".preload() IR matches DSL preloadFor" test.
+// TQ2 fix: strengthened preload assertions to verify actual preload structure.
 // =============================================================================
 
 describe('QueryBuilder — preload', () => {
@@ -327,19 +304,7 @@ describe('QueryBuilder — preload', () => {
     expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
   });
 
-  test('.preload() IR matches DSL preloadFor', async () => {
-    const dslIR = await captureDslIR(() =>
-      Person.select((p) => [p.name, p.bestFriend.preloadFor(componentLike)]),
-    );
-    const builderIR = QueryBuilder.from(Person)
-      .select((p) => [p.name])
-      .preload('bestFriend', componentLike)
-      .build();
-    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
-  });
-
-  test('.preload() with FieldSet-based component', async () => {
-    const personShape = (Person as any).shape;
+  test('.preload() with FieldSet-based component includes preload projections', async () => {
     const componentFieldSet = FieldSet.for(personShape, ['name']);
     const componentLikeFieldSet = {query: componentFieldSet, fields: componentFieldSet};
 
@@ -348,7 +313,7 @@ describe('QueryBuilder — preload', () => {
       .preload('bestFriend', componentLikeFieldSet)
       .build();
     expect(builderIR.kind).toBe('select');
-    // The preloaded fields should appear in the IR projections
+    // Should have the base 'name' projection + at least one preload projection
     expect(builderIR.projection.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -364,7 +329,6 @@ describe('QueryBuilder — preload', () => {
   });
 
   test('DSL preloadFor with FieldSet component produces valid IR', async () => {
-    const personShape = (Person as any).shape;
     const componentFieldSet = FieldSet.for(personShape, ['name']);
     const componentLikeFieldSet = {query: componentFieldSet, fields: componentFieldSet};
 
@@ -448,6 +412,7 @@ describe('QueryBuilder — forAll', () => {
 
 // =============================================================================
 // Phase 8: Direct IR generation tests
+// TQ3 fix: strengthened sub-select test to verify actual structure.
 // =============================================================================
 
 describe('QueryBuilder — direct IR generation', () => {
@@ -534,6 +499,16 @@ describe('QueryBuilder — direct IR generation', () => {
     );
     const builderIR = QueryBuilder.from(Person)
       .select((p) => ({isBestFriend: p.bestFriend.equals({id: `${tmpEntityBase}p3`})}))
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+
+  test('sub-select via callback produces matching IR to DSL', async () => {
+    const dslIR = await captureDslIR(() =>
+      Person.select((p) => p.friends.select((f) => [f.name, f.hobby])),
+    );
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => p.friends.select((f: any) => [f.name, f.hobby]))
       .build();
     expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
   });

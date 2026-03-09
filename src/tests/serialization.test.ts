@@ -1,27 +1,11 @@
 import {describe, expect, test} from '@jest/globals';
 import {Person, tmpEntityBase} from '../test-helpers/query-fixtures';
+import {sanitize} from '../test-helpers/test-utils';
 import {FieldSet} from '../queries/FieldSet';
 import {QueryBuilder} from '../queries/QueryBuilder';
 import type {QueryBuilderJSON} from '../queries/QueryBuilder';
 
-const personShape = (Person as any).shape;
-
-/**
- * Helper: sanitize IR for comparison (strip undefined keys).
- */
-const sanitize = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map((item) => sanitize(item));
-  if (value && typeof value === 'object') {
-    return Object.entries(value as Record<string, unknown>).reduce(
-      (acc, [key, child]) => {
-        if (child !== undefined) acc[key] = sanitize(child);
-        return acc;
-      },
-      {} as Record<string, unknown>,
-    );
-  }
-  return value;
-};
+const personShape = Person.shape;
 
 // =============================================================================
 // FieldSet serialization tests

@@ -1,11 +1,11 @@
 import {describe, expect, test} from '@jest/globals';
 import {Person, Pet} from '../test-helpers/query-fixtures';
+import {sanitize} from '../test-helpers/test-utils';
 import {FieldSet} from '../queries/FieldSet';
 import {PropertyPath, walkPropertyPath} from '../queries/PropertyPath';
 import {QueryBuilder} from '../queries/QueryBuilder';
-import {captureQuery} from '../test-helpers/query-capture-store';
 
-const personShape = (Person as any).shape;
+const personShape = Person.shape;
 
 // =============================================================================
 // Construction tests
@@ -60,17 +60,31 @@ describe('FieldSet — construction', () => {
     );
   });
 
-  test('FieldSet.all — depth 2 includes nested shape properties', () => {
+  test('FieldSet.all — depth 2 includes nested shape properties for non-cyclic refs', () => {
     const fs = FieldSet.all(personShape, {depth: 2});
     const labels = fs.labels();
-    // Should have all top-level properties
     expect(labels).toContain('name');
-    expect(labels).toContain('friends');
-    // Properties with valueShape (e.g. friends, bestFriend) should have subSelect
+    expect(labels).toContain('pets');
+    // pets → Pet is a different shape, so at depth 2 it should have a subSelect
+    const petsEntry = fs.entries.find((e: any) => e.path.terminal?.label === 'pets');
+    expect(petsEntry).toBeDefined();
+    expect(petsEntry!.subSelect).toBeDefined();
+    expect(petsEntry!.subSelect!.labels()).toContain('bestFriend');
+  });
+
+  test('FieldSet.all — depth 2 skips self-referential shapes (cycle detection)', () => {
+    // B1 fix: friends → Person is the same shape as the root, so
+    // cycle detection correctly prevents infinite recursion.
+    const fs = FieldSet.all(personShape, {depth: 2});
     const friendsEntry = fs.entries.find((e: any) => e.path.terminal?.label === 'friends');
-    if (friendsEntry && friendsEntry.subSelect) {
-      expect(friendsEntry.subSelect.labels()).toContain('name');
-    }
+    expect(friendsEntry).toBeDefined();
+    // friends → Person is cyclic (same as root), so no subSelect
+    expect(friendsEntry!.subSelect).toBeUndefined();
+
+    // bestFriend → Person is also cyclic
+    const bestFriendEntry = fs.entries.find((e: any) => e.path.terminal?.label === 'bestFriend');
+    expect(bestFriendEntry).toBeDefined();
+    expect(bestFriendEntry!.subSelect).toBeUndefined();
   });
 });
 
@@ -128,7 +142,7 @@ describe('FieldSet — composition', () => {
   });
 
   test('merge — throws on cross-shape', () => {
-    const petShape = (Pet as any).shape;
+    const petShape = Pet.shape;
     const fs1 = FieldSet.for(personShape, ['name']);
     const fs2 = FieldSet.for(petShape, ['bestFriend']);
     expect(() => FieldSet.merge([fs1, fs2])).toThrow(
@@ -166,8 +180,6 @@ describe('FieldSet — nesting', () => {
 
   test('nested — FieldSet value', () => {
     const innerFs = FieldSet.for(personShape, ['name', 'hobby']);
-    // The inner FieldSet paths are relative to Person, but when used as nested
-    // they should combine with the base path
     const fs = FieldSet.for(personShape, [{friends: innerFs}]);
     expect(fs.entries.length).toBe(2);
     expect(fs.entries[0].path.toString()).toBe('friends.name');
@@ -275,7 +287,6 @@ describe('FieldSet — callback tracing (ProxiedPathBuilder)', () => {
 // =============================================================================
 
 describe('FieldSet — extended entries', () => {
-  /** Helper: build a FieldSet from JSON with extended fields (subSelect, aggregation, customKey). */
   const buildExtended = (fields: Array<{path: string; subSelect?: any; aggregation?: string; customKey?: string}>) =>
     FieldSet.fromJSON({shape: personShape.id, fields});
 
@@ -396,21 +407,6 @@ describe('FieldSet — QueryBuilder integration', () => {
       .select((p) => [p.name, p.hobby])
       .build();
 
-    // Sanitize for comparison (strip undefined keys)
-    const sanitize = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map((item) => sanitize(item));
-      if (value && typeof value === 'object') {
-        return Object.entries(value as Record<string, unknown>).reduce(
-          (acc, [key, child]) => {
-            if (child !== undefined) acc[key] = sanitize(child);
-            return acc;
-          },
-          {} as Record<string, unknown>,
-        );
-      }
-      return value;
-    };
-
     expect(sanitize(builderIR)).toEqual(sanitize(callbackIR));
   });
 
@@ -419,7 +415,7 @@ describe('FieldSet — QueryBuilder integration', () => {
     const builder = QueryBuilder.from(Person).select(fs);
     const returned = builder.fields();
     expect(returned).toBeInstanceOf(FieldSet);
-    expect(returned.labels()).toEqual(['name', 'hobby']);
+    expect(returned!.labels()).toEqual(['name', 'hobby']);
   });
 });
 
@@ -456,11 +452,12 @@ describe('FieldSet — sub-select extraction', () => {
     expect(fs.entries[0].customKey).toBe('numFriends');
   });
 
-  test('sub-select FieldSet produces same IR as callback-based query', () => {
+  test('sub-select FieldSet produces valid IR with projections', () => {
     const directIR = QueryBuilder.from(Person)
       .select((p) => p.friends.select((f: any) => [f.name]))
       .build();
-    // The sub-select should produce projections for the nested name field
+    expect(directIR.kind).toBe('select');
+    // Sub-select should produce at least one projection entry
     expect(directIR.projection.length).toBeGreaterThanOrEqual(1);
   });
 });

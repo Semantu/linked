@@ -2,7 +2,7 @@ import type {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import type {Shape, ShapeType} from '../shapes/Shape.js';
 import {PropertyPath, walkPropertyPath} from './PropertyPath.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
-import type {WhereCondition} from './WhereCondition.js';
+import type {WherePath} from './SelectQuery.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 
 // Duck-type helpers for runtime detection.
@@ -53,7 +53,7 @@ const isBoundComponent = (obj: any): boolean =>
 export type FieldSetEntry = {
   path: PropertyPath;
   alias?: string;
-  scopedFilter?: WhereCondition;
+  scopedFilter?: WherePath;
   subSelect?: FieldSet;
   aggregation?: 'count';
   customKey?: string;
@@ -212,7 +212,9 @@ export class FieldSet<R = any, Source = any> {
       );
     }
     const resolved = FieldSet.resolveShapeInput(shape);
-    return FieldSet.allForShape(resolved.nodeShape, depth, new Set());
+    // Seed visited with the root shape to prevent self-referencing cycles
+    const visited = new Set<string>([resolved.nodeShape.id]);
+    return FieldSet.allForShape(resolved.nodeShape, depth, visited);
   }
 
   /**
@@ -234,7 +236,7 @@ export class FieldSet<R = any, Source = any> {
       if (depth > 1 && ps.valueShape) {
         const nestedShapeClass = getShapeClass(ps.valueShape);
         if (nestedShapeClass?.shape && !visited.has(nestedShapeClass.shape.id)) {
-          visited.add(nodeShape.id);
+          visited.add(nestedShapeClass.shape.id);
           const nestedFs = FieldSet.allForShape(nestedShapeClass.shape, depth - 1, visited);
           if (nestedFs.entries.length > 0) {
             entry.subSelect = nestedFs;
@@ -598,7 +600,7 @@ export class FieldSet<R = any, Source = any> {
         path: new PropertyPath(rootShape, segments),
       };
       if (obj.wherePath) {
-        entry.scopedFilter = obj.wherePath as any;
+        entry.scopedFilter = obj.wherePath as WherePath;
       }
       return entry;
     }
@@ -693,6 +695,11 @@ export class FieldSet<R = any, Source = any> {
   /**
    * Trace fields from a callback using a simple string-capturing proxy.
    * Fallback for when no ShapeClass is available (NodeShape-only path).
+   *
+   * **Limitation**: only captures single-depth property accesses. Nested
+   * chaining like `p.friends.name` returns the string `"friends"` and the
+   * subsequent `.name` access is lost. Use the ProxiedPathBuilder path
+   * (via ShapeClass overload) for nested paths.
    */
   private static traceFieldsFromCallback(
     shape: NodeShape,

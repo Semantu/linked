@@ -1,35 +1,9 @@
 import {describe, expect, test} from '@jest/globals';
 import {Person, tmpEntityBase} from '../test-helpers/query-fixtures';
-import {captureQuery} from '../test-helpers/query-capture-store';
+import {entity, captureDslIR, sanitize} from '../test-helpers/test-utils';
 import {CreateBuilder} from '../queries/CreateBuilder';
 import {UpdateBuilder} from '../queries/UpdateBuilder';
 import {DeleteBuilder} from '../queries/DeleteBuilder';
-
-const entity = (suffix: string) => ({id: `${tmpEntityBase}${suffix}`});
-
-/**
- * Helper: capture IR from the existing DSL path.
- */
-const captureDslIR = async (runner: () => Promise<unknown>) => {
-  return captureQuery(runner);
-};
-
-/**
- * Helper: sanitize IR for comparison.
- */
-const sanitize = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map((item) => sanitize(item));
-  if (value && typeof value === 'object') {
-    return Object.entries(value as Record<string, unknown>).reduce(
-      (acc, [key, child]) => {
-        if (child !== undefined) acc[key] = sanitize(child);
-        return acc;
-      },
-      {} as Record<string, unknown>,
-    );
-  }
-  return value;
-};
 
 // =============================================================================
 // Create IR equivalence tests
@@ -199,7 +173,7 @@ describe('Mutation builders — immutability', () => {
 });
 
 // =============================================================================
-// Guard tests
+// Guard tests (LP3 + LP4: consistent validation across builders)
 // =============================================================================
 
 describe('Mutation builders — guards', () => {
@@ -211,6 +185,17 @@ describe('Mutation builders — guards', () => {
   test('UpdateBuilder — .build() without .set() throws', () => {
     const builder = UpdateBuilder.from(Person).for(entity('p1'));
     expect(() => builder.build()).toThrow(/requires .set/);
+  });
+
+  test('CreateBuilder — .build() without .set() throws', () => {
+    const builder = CreateBuilder.from(Person);
+    expect(() => builder.build()).toThrow(/requires .set/);
+  });
+
+  test('DeleteBuilder — empty ids array throws', () => {
+    expect(() => DeleteBuilder.from(Person, [] as any)).toThrow(
+      /requires at least one ID/,
+    );
   });
 });
 

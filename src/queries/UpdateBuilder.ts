@@ -1,6 +1,6 @@
 import {Shape, ShapeType} from '../shapes/Shape.js';
-import {getShapeClass} from '../utils/ShapeClass.js';
-import {AddId, UpdatePartial, NodeReferenceValue, toNodeReference} from './QueryFactory.js';
+import {resolveShape} from './resolveShape.js';
+import {AddId, UpdatePartial, NodeReferenceValue} from './QueryFactory.js';
 import {UpdateQueryFactory, UpdateQuery} from './UpdateQuery.js';
 import {getQueryDispatch} from './queryDispatch.js';
 
@@ -54,21 +54,8 @@ export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
   // ---------------------------------------------------------------------------
 
   static from<S extends Shape>(shape: ShapeType<S> | string): UpdateBuilder<S> {
-    const resolved = UpdateBuilder.resolveShape<S>(shape);
+    const resolved = resolveShape<S>(shape);
     return new UpdateBuilder<S>({shape: resolved});
-  }
-
-  private static resolveShape<S extends Shape>(
-    shape: ShapeType<S> | string,
-  ): ShapeType<S> {
-    if (typeof shape === 'string') {
-      const shapeClass = getShapeClass(shape);
-      if (!shapeClass) {
-        throw new Error(`Cannot resolve shape for '${shape}'`);
-      }
-      return shapeClass as unknown as ShapeType<S>;
-    }
-    return shape;
   }
 
   // ---------------------------------------------------------------------------
@@ -129,11 +116,11 @@ export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
   ): Promise<AddId<U> | TResult> {
-    return this.exec().catch(onrejected);
+    return this.then().catch(onrejected);
   }
 
   finally(onfinally?: (() => void) | null): Promise<AddId<U>> {
-    return this.exec().finally(onfinally);
+    return this.then().finally(onfinally);
   }
 
   get [Symbol.toStringTag](): string {

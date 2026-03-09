@@ -1,6 +1,6 @@
 import {Shape, ShapeType} from '../shapes/Shape.js';
-import {getShapeClass} from '../utils/ShapeClass.js';
-import {UpdatePartial, NodeReferenceValue} from './QueryFactory.js';
+import {resolveShape} from './resolveShape.js';
+import {UpdatePartial} from './QueryFactory.js';
 import {CreateQueryFactory, CreateQuery, CreateResponse} from './CreateQuery.js';
 import {getQueryDispatch} from './queryDispatch.js';
 
@@ -55,21 +55,8 @@ export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
    * Create a CreateBuilder for the given shape.
    */
   static from<S extends Shape>(shape: ShapeType<S> | string): CreateBuilder<S> {
-    const resolved = CreateBuilder.resolveShape<S>(shape);
+    const resolved = resolveShape<S>(shape);
     return new CreateBuilder<S>({shape: resolved});
-  }
-
-  private static resolveShape<S extends Shape>(
-    shape: ShapeType<S> | string,
-  ): ShapeType<S> {
-    if (typeof shape === 'string') {
-      const shapeClass = getShapeClass(shape);
-      if (!shapeClass) {
-        throw new Error(`Cannot resolve shape for '${shape}'`);
-      }
-      return shapeClass as unknown as ShapeType<S>;
-    }
-    return shape;
   }
 
   // ---------------------------------------------------------------------------
@@ -90,9 +77,14 @@ export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
   // Build & execute
   // ---------------------------------------------------------------------------
 
-  /** Build the IR mutation. */
+  /** Build the IR mutation. Throws if no data was set via .set(). */
   build(): CreateQuery {
-    const data = this._data || {};
+    if (!this._data) {
+      throw new Error(
+        'CreateBuilder requires .set(data) before .build(). Specify what to create.',
+      );
+    }
+    const data = this._data;
 
     // Validate that required properties (minCount >= 1) are present in data
     const shapeObj = (this._shape as any).shape;
@@ -142,11 +134,11 @@ export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
   ): Promise<CreateResponse<U> | TResult> {
-    return this.exec().catch(onrejected);
+    return this.then().catch(onrejected);
   }
 
   finally(onfinally?: (() => void) | null): Promise<CreateResponse<U>> {
-    return this.exec().finally(onfinally);
+    return this.then().finally(onfinally);
   }
 
   get [Symbol.toStringTag](): string {

@@ -1,5 +1,5 @@
 import {Shape, ShapeType} from '../shapes/Shape.js';
-import {getShapeClass} from '../utils/ShapeClass.js';
+import {resolveShape} from './resolveShape.js';
 import {
   SelectQuery,
   QueryBuildFn,
@@ -43,7 +43,7 @@ interface QueryBuilderInit<S extends Shape, R> {
   selectFn?: QueryBuildFn<S, R>;
   whereFn?: WhereClause<S>;
   sortByFn?: QueryBuildFn<S, any>;
-  sortDirection?: string;
+  sortDirection?: 'ASC' | 'DESC';
   limit?: number;
   offset?: number;
   subject?: S | QResult<S> | NodeReferenceValue;
@@ -74,7 +74,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   private readonly _selectFn?: QueryBuildFn<S, R>;
   private readonly _whereFn?: WhereClause<S>;
   private readonly _sortByFn?: QueryBuildFn<S, any>;
-  private readonly _sortDirection?: string;
+  private readonly _sortDirection?: 'ASC' | 'DESC';
   private readonly _limit?: number;
   private readonly _offset?: number;
   private readonly _subject?: S | QResult<S> | NodeReferenceValue;
@@ -133,21 +133,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   static from<S extends Shape>(
     shape: ShapeType<S> | string,
   ): QueryBuilder<S> {
-    const resolved = QueryBuilder.resolveShape<S>(shape);
+    const resolved = resolveShape<S>(shape);
     return new QueryBuilder<S>({shape: resolved});
-  }
-
-  private static resolveShape<S extends Shape>(
-    shape: ShapeType<S> | string,
-  ): ShapeType<S> {
-    if (typeof shape === 'string') {
-      const shapeClass = getShapeClass(shape);
-      if (!shapeClass) {
-        throw new Error(`Cannot resolve shape for '${shape}'`);
-      }
-      return shapeClass as unknown as ShapeType<S>;
-    }
-    return shape;
   }
 
   // ---------------------------------------------------------------------------
@@ -213,7 +200,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
 
   /** Target a single entity by ID. Implies singleResult. */
   for(id: string | NodeReferenceValue): QueryBuilder<S, R, Result> {
-    const subject = typeof id === 'string' ? {id} : id;
+    const subject: NodeReferenceValue = typeof id === 'string' ? {id} : id;
     return this.clone({subject, subjects: undefined, singleResult: true});
   }
 
@@ -298,12 +285,11 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       shape: shapeId,
     };
 
-    // Serialize fields from FieldSet or selectAll labels
+    // Serialize fields — fields() already handles _selectAllLabels, so
+    // no separate branch is needed (T1: dead else-if removed).
     const fs = this.fields();
     if (fs) {
       json.fields = fs.toJSON().fields;
-    } else if (this._selectAllLabels) {
-      json.fields = this._selectAllLabels.map((label) => ({path: label}));
     }
 
     if (this._limit !== undefined) {
@@ -322,7 +308,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       json.singleResult = true;
     }
     if (this._sortDirection) {
-      json.orderDirection = this._sortDirection as 'ASC' | 'DESC';
+      json.orderDirection = this._sortDirection;
     }
 
     return json;
@@ -432,7 +418,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       sortBy = evaluateSortCallback(
         this._shape,
         this._sortByFn as unknown as (p: any) => any,
-        (this._sortDirection as 'ASC' | 'DESC') || 'ASC',
+        this._sortDirection || 'ASC',
       );
     }
 
@@ -484,16 +470,16 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     return this.exec().then(onfulfilled, onrejected);
   }
 
-  /** Catch errors from execution. */
+  /** Catch errors from execution. Chain off then() to avoid re-executing. */
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
   ): Promise<Result | TResult> {
-    return this.exec().catch(onrejected);
+    return this.then().catch(onrejected);
   }
 
-  /** Finally handler after execution. */
+  /** Finally handler after execution. Chain off then() to avoid re-executing. */
   finally(onfinally?: (() => void) | null): Promise<Result> {
-    return this.exec().finally(onfinally);
+    return this.then().finally(onfinally);
   }
 
   get [Symbol.toStringTag](): string {
