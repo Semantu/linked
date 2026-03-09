@@ -56,7 +56,7 @@ export type QueryBuildFn<T extends Shape, ResponseType> = (
 ) => ResponseType;
 
 export type QueryWrapperObject<ShapeType extends Shape = any> = {
-  [key: string]: SelectQueryFactory<ShapeType>;
+  [key: string]: SubSelectResult<ShapeType>;
 };
 export type CustomQueryObject = {[key: string]: QueryPath};
 
@@ -285,14 +285,14 @@ export type QueryController = {
 
 export type GetCustomObjectKeys<T> = T extends QueryWrapperObject
   ? {
-      [P in keyof T]: T[P] extends SelectQueryFactory<any>
+      [P in keyof T]: T[P] extends SubSelectResult<any>
         ? ToQueryResultSet<T[P]>
         : never;
     }
   : [];
 
 export type ToQueryResultSet<T> =
-  T extends SelectQueryFactory<infer ShapeType, infer ResponseType>
+  T extends SubSelectResult<infer ShapeType, infer ResponseType>
     ? QueryResponseToResultType<ResponseType, ShapeType>[]
     : null;
 
@@ -306,7 +306,7 @@ export type QueryResponseToResultType<
   // PreserveArray = false,
 > = T extends QueryBuilderObject
   ? GetQueryObjectResultType<T, {}, false, HasName>
-  : T extends SelectQueryFactory<any, infer Response, infer Source>
+  : T extends SubSelectResult<any, infer Response, infer Source>
     ? GetNestedQueryResultType<Response, Source>
     : T extends Array<infer Type>
       ? UnionToIntersection<QueryResponseToResultType<Type>>
@@ -392,7 +392,7 @@ export type GetShapesResultTypeWithSource<Source> =
 type GetQueryObjectProperty<T> =
   T extends QueryBuilderObject<any, any, infer Property>
     ? Property
-    : T extends SelectQueryFactory<
+    : T extends SubSelectResult<
           infer SubShapeType,
           infer SubResponse,
           infer SubSource
@@ -402,7 +402,7 @@ type GetQueryObjectProperty<T> =
 type GetQueryObjectOriginal<T> =
   T extends QueryBuilderObject<infer Original>
     ? Original
-    : T extends SelectQueryFactory<
+    : T extends SubSelectResult<
           infer SubShapeType,
           infer SubResponse,
           infer SubSource
@@ -595,10 +595,10 @@ type ResponseToObject<R> =
     : Prettify<ObjectToPlainResult<R>>;
 
 export type GetQueryResponseType<Q> =
-  Q extends SelectQueryFactory<any, infer ResponseType> ? ResponseType : Q;
+  Q extends SubSelectResult<any, infer ResponseType> ? ResponseType : Q;
 
 export type GetQueryShapeType<Q> =
-  Q extends SelectQueryFactory<infer ShapeType, infer ResponseType>
+  Q extends SubSelectResult<infer ShapeType, infer ResponseType>
     ? ShapeType
     : never;
 
@@ -963,7 +963,7 @@ export class BoundComponent<
 
   /**
    * Extract the component's query paths from whatever query type was provided.
-   * Handles SelectQueryFactory, QueryBuilder (duck-typed), FieldSet, and Record forms.
+   * Handles SubSelectResult, QueryBuilder (duck-typed), FieldSet, and Record forms.
    */
   getComponentQueryPaths(): SelectPath {
     // If component exposes a FieldSet via .fields, prefer it
@@ -1055,7 +1055,7 @@ export const processWhereClause = (
 
 /**
  * Evaluate a sort callback through the proxy and extract a SortByPath.
- * This is a standalone helper that replaces the need for SelectQueryFactory.sortBy().
+ * This is a standalone helper that replaces the need for the former SelectQueryFactory.sortBy().
  */
 export const evaluateSortCallback = <S extends Shape>(
   shape: ShapeType<S>,
@@ -1306,7 +1306,7 @@ export class QueryShapeSet<
 
   select<QF = unknown>(
     subQueryFn: QueryBuildFn<S, QF>,
-  ): SelectQueryFactory<S, QF, QueryShapeSet<S, Source, Property>> {
+  ): SubSelectResult<S, QF, QueryShapeSet<S, Source, Property>> {
     const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
     const proxy = createProxiedPathBuilder(leastSpecificShape);
     const traceResponse = subQueryFn(proxy as any);
@@ -1316,7 +1316,7 @@ export class QueryShapeSet<
       traceResponse,
       shape: leastSpecificShape,
       getQueryPaths() {
-        // Build query paths from FieldSet conversion for legacy compatibility
+        // Build query paths from FieldSet conversion
         const subNodeShape = leastSpecificShape.shape || leastSpecificShape;
         const subEntries = FieldSet.extractSubSelectEntriesPublic(subNodeShape, traceResponse);
         const subFs = FieldSet.createFromEntries(subNodeShape, subEntries);
@@ -1329,7 +1329,7 @@ export class QueryShapeSet<
     } as any;
   }
 
-  selectAll(): SelectQueryFactory<
+  selectAll(): SubSelectResult<
     S,
     SelectAllQueryResponse<S>,
     QueryShapeSet<S, Source, Property>
@@ -1489,7 +1489,7 @@ export class QueryShape<
 
   select<QF = unknown>(
     subQueryFn: QueryBuildFn<S, QF>,
-  ): SelectQueryFactory<S, QF, QueryShape<S, Source, Property>> {
+  ): SubSelectResult<S, QF, QueryShape<S, Source, Property>> {
     const leastSpecificShape = getShapeClass(
       (this.getOriginalValue() as Shape).nodeShape.id,
     );
@@ -1501,7 +1501,7 @@ export class QueryShape<
       traceResponse,
       shape: leastSpecificShape,
       getQueryPaths() {
-        // Build query paths from FieldSet conversion for legacy compatibility
+        // Build query paths from FieldSet conversion
         const subNodeShape = (leastSpecificShape as any).shape || leastSpecificShape;
         const subEntries = FieldSet.extractSubSelectEntriesPublic(subNodeShape, traceResponse);
         const subFs = FieldSet.createFromEntries(subNodeShape, subEntries);
@@ -1514,7 +1514,7 @@ export class QueryShape<
     } as any;
   }
 
-  selectAll(): SelectQueryFactory<
+  selectAll(): SubSelectResult<
     S,
     SelectAllQueryResponse<S>,
     QueryShape<S, Source, Property>
@@ -1737,13 +1737,15 @@ export class QueryPrimitiveSet<
 }
 
 /**
- * Type-only stub preserving the generic parameters of the former SelectQueryFactory class.
- * The class implementation has been removed — all runtime query building now goes through
- * QueryBuilder + FieldSet. This interface is retained so that conditional types
- * (GetQueryResponseType, QueryResponseToResultType, etc.) can still pattern-match
- * on `SelectQueryFactory<S, ResponseType, Source>` for sub-select result inference.
+ * Type-only interface representing a sub-select result — a nested property path selection
+ * within a query. This is NOT a SPARQL sub-query; it represents selecting multiple continued
+ * paths from the same root (e.g. `p.friends.select(f => ({name: f.name, age: f.age}))`).
+ *
+ * At runtime, sub-selects produce FieldSets. This interface exists so that conditional types
+ * (GetQueryResponseType, QueryResponseToResultType, etc.) can pattern-match on
+ * `SubSelectResult<S, ResponseType, Source>` for sub-select result type inference.
  */
-export interface SelectQueryFactory<
+export interface SubSelectResult<
   S extends Shape = Shape,
   ResponseType = any,
   Source = any,
@@ -1755,6 +1757,15 @@ export interface SelectQueryFactory<
   /** Phantom field to preserve Source type for conditional type inference */
   readonly __source?: Source;
 }
+
+/**
+ * @deprecated Use SubSelectResult instead. Kept as alias for backward compatibility.
+ */
+export type SelectQueryFactory<
+  S extends Shape = Shape,
+  ResponseType = any,
+  Source = any,
+> = SubSelectResult<S, ResponseType, Source>;
 
 export class SetSize<Source = null> extends QueryNumber<Source> {
   constructor(

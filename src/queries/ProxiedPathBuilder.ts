@@ -9,7 +9,7 @@ import {QueryBuilderObject, QueryShape} from './SelectQuery.js';
  * This is the shared foundation for both the DSL (`Person.select(p => p.name)`)
  * and the future QueryBuilder API.
  *
- * Extracted from SelectQueryFactory.getQueryShape() to enable reuse
+ * Originally extracted from SelectQueryFactory.getQueryShape() to enable reuse
  * across the DSL and dynamic query building.
  */
 export function createProxiedPathBuilder<S extends Shape>(

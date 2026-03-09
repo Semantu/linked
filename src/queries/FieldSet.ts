@@ -8,7 +8,7 @@ import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 // Duck-type helpers to avoid circular dependency with SelectQuery.ts.
 // QueryBuilderObject has .property (PropertyShape) and .subject (QueryBuilderObject).
 // SetSize has .subject and extends QueryNumber.
-// SelectQueryFactory has .getQueryPaths() and .parentQueryPath.
+// SubSelectResult has .getQueryPaths() and .parentQueryPath.
 type QueryBuilderObjectLike = {
   property?: PropertyShape;
   subject?: QueryBuilderObjectLike;
@@ -30,7 +30,7 @@ const isSetSize = (obj: any): boolean =>
   // SetSize has a 'countable' field (may be undefined) and 'label' field
   'label' in obj;
 
-const isSelectQueryFactory = (obj: any): boolean =>
+const isSubSelectResult = (obj: any): boolean =>
   obj !== null &&
   typeof obj === 'object' &&
   typeof obj.getQueryPaths === 'function' &&
@@ -411,8 +411,8 @@ export class FieldSet<R = any> {
     if (isQueryBuilderObject(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
-    // Single SelectQueryFactory (e.g. p.friends.select(f => [f.name]))
-    if (isSelectQueryFactory(result)) {
+    // Single SubSelectResult (e.g. p.friends.select(f => [f.name]))
+    if (isSubSelectResult(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
     // Single SetSize (e.g. p.friends.size())
@@ -441,7 +441,7 @@ export class FieldSet<R = any> {
   }
 
   /**
-   * Convert a single proxy trace result (QueryBuilderObject, SetSize, or SelectQueryFactory)
+   * Convert a single proxy trace result (QueryBuilderObject, SetSize, or SubSelectResult)
    * into a FieldSetEntry.
    */
   private static convertTraceResult(rootShape: NodeShape, obj: any): FieldSetEntry {
@@ -454,8 +454,8 @@ export class FieldSet<R = any> {
       };
     }
 
-    // SelectQueryFactory → sub-select (Phase 9: extract sub-FieldSet from factory's trace)
-    if (isSelectQueryFactory(obj)) {
+    // SubSelectResult → sub-select (extract sub-FieldSet from the trace)
+    if (isSubSelectResult(obj)) {
       const parentPath = obj.parentQueryPath;
       const segments: PropertyShape[] = [];
       if (parentPath && Array.isArray(parentPath)) {
@@ -566,7 +566,7 @@ export class FieldSet<R = any> {
   }
 
   /**
-   * Extract FieldSetEntry[] from a SelectQueryFactory's traceResponse.
+   * Extract FieldSetEntry[] from a SubSelectResult's traceResponse.
    * The traceResponse is the result of calling the sub-query callback with a proxy,
    * containing QueryBuilderObjects, arrays, custom objects, etc.
    */
@@ -580,7 +580,7 @@ export class FieldSet<R = any> {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
     // Single sub-select factory or lightweight wrapper — convert directly
-    if (isSelectQueryFactory(traceResponse)) {
+    if (isSubSelectResult(traceResponse)) {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
     // Single SetSize
