@@ -3309,7 +3309,11 @@ Moved to **docs/ideas/011-query-type-system-refactor.md**. The types are stable,
 
 ---
 
-### Phase 17: getQueryPaths Monkey-Patch Cleanup
+### Phase 17: getQueryPaths Monkey-Patch Cleanup ✅
+
+**Status: Complete.**
+
+Discovered the monkey-patched `getQueryPaths` on FieldSet was dead code — `getComponentQueryPaths()` catches FieldSet via `instanceof` before the duck-type check, and `fieldSetToSelectPath` + `entryToQueryPath` already handle parent path nesting through the entry's `path.segments` + recursive `subSelect`. Removed the two monkey-patch assignments, the optional property declaration on FieldSet, and the related comment. The duck-type checks remain for QueryBuilder (which has `getQueryPaths` as a real method). All 619 tests pass, tsc clean.
 
 **Effort: Medium | Impact: Code health, enables Phase 18**
 

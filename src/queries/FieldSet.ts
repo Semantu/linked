@@ -122,7 +122,6 @@ export class FieldSet<R = any, Source = any> {
 
   /**
    * For sub-select FieldSets: the shape class (ShapeType) of the sub-select's target.
-   * Used by getQueryPaths() for compatibility with the old SelectPath pipeline.
    */
   readonly shapeType?: any;
 
@@ -188,11 +187,6 @@ export class FieldSet<R = any, Source = any> {
     return fs;
   }
 
-  /**
-   * Build query paths from this FieldSet's entries. For sub-select FieldSets,
-   * this is set during construction via forSubSelect. Used by the legacy SelectPath pipeline.
-   */
-  getQueryPaths?: () => any;
 
   /**
    * Create a FieldSet containing all decorated properties of the shape.

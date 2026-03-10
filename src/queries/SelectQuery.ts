@@ -1281,14 +1281,6 @@ export class QueryShapeSet<
       subQueryFn as any,
       parentPath,
     );
-    // Attach getQueryPaths for legacy SelectPath pipeline compatibility
-    fs.getQueryPaths = () => {
-      const subPaths = fieldSetToSelectPath(fs);
-      if (parentPath) {
-        return (parentPath as any[]).concat([subPaths]);
-      }
-      return subPaths;
-    };
     return fs;
   }
 
@@ -1429,14 +1421,6 @@ export class QueryShape<
       subQueryFn as any,
       parentPath,
     );
-    // Attach getQueryPaths for legacy SelectPath pipeline compatibility
-    fs.getQueryPaths = () => {
-      const subPaths = fieldSetToSelectPath(fs);
-      if (parentPath) {
-        return (parentPath as any[]).concat([subPaths]);
-      }
-      return subPaths;
-    };
     return fs;
   }
 
