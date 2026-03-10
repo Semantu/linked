@@ -623,7 +623,7 @@ export class QueryBuilderObject<
     ) {
       //Support accessors that return NodeReferenceValue when a value shape is known.
       if (property.valueShape) {
-        const shapeClass = getShapeClass(property.valueShape) as any;
+        const shapeClass = getShapeClass(property.valueShape);
         if (!shapeClass) {
           throw new Error(
             `Shape class not found for ${property.valueShape.id}`,
@@ -677,7 +677,7 @@ export class QueryBuilderObject<
       }
     }
     if (valueShape) {
-      const shapeClass = getShapeClass(valueShape) as any;
+      const shapeClass = getShapeClass(valueShape);
       if(!shapeClass) {
         //TODO: getShapeClassAsync -> which will lazy load the shape class
         // but Im not sure if that's even possible with dynamic import paths, that are only known at runtime

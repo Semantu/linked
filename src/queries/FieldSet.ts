@@ -152,9 +152,13 @@ export class FieldSet<R = any, Source = any> {
     const resolvedShape = resolved.nodeShape;
 
     if (typeof fieldsOrFn === 'function') {
-      const fields = resolved.shapeClass
-        ? FieldSet.traceFieldsWithProxy(resolved.nodeShape, resolved.shapeClass, fieldsOrFn)
-        : FieldSet.traceFieldsFromCallback(resolved.nodeShape, fieldsOrFn);
+      if (!resolved.shapeClass) {
+        throw new Error(
+          `Cannot use callback form for shape '${resolved.nodeShape.id}': no ShapeConstructor registered. ` +
+          `Use string field names instead, or pass the Shape class directly.`,
+        );
+      }
+      const fields = FieldSet.traceFieldsWithProxy(resolved.nodeShape, resolved.shapeClass, fieldsOrFn);
       return new FieldSet(resolved.nodeShape, fields);
     }
 
@@ -411,15 +415,18 @@ export class FieldSet<R = any, Source = any> {
       if (!shapeClass || !shapeClass.shape) {
         throw new Error(`Cannot resolve shape for '${shape}'`);
       }
-      // SAFETY: getShapeClass() returns `typeof Shape` (abstract), but at runtime it's always a concrete subclass.
-      return {nodeShape: shapeClass.shape, shapeClass: shapeClass as unknown as ShapeConstructor<any>};
+      return {nodeShape: shapeClass.shape, shapeClass};
     }
     // ShapeConstructor: has a static .shape property that is a NodeShape
     if ('shape' in shape && typeof shape.shape === 'object' && shape.shape !== null && 'id' in shape.shape) {
       return {nodeShape: (shape as ShapeConstructor<any>).shape, shapeClass: shape as ShapeConstructor<any>};
     }
-    // NodeShape: has .id directly
-    return {nodeShape: shape as NodeShape};
+    // NodeShape: has .id directly — try to look up its ShapeConstructor for full proxy support
+    const nodeShape = shape as NodeShape;
+    const shapeClass = nodeShape.id ? getShapeClass(nodeShape.id) : undefined;
+    return shapeClass
+      ? {nodeShape, shapeClass}
+      : {nodeShape};
   }
 
   /** @deprecated Use resolveShapeInput instead. Kept for fromJSON which only passes NodeShape|string. */
@@ -701,35 +708,4 @@ export class FieldSet<R = any, Source = any> {
     return [];
   }
 
-  /**
-   * Trace fields from a callback using a simple string-capturing proxy.
-   * Fallback for when no ShapeClass is available (NodeShape-only path).
-   *
-   * **Limitation**: only captures single-depth property accesses. Nested
-   * chaining like `p.friends.name` returns the string `"friends"` and the
-   * subsequent `.name` access is lost. Use the ProxiedPathBuilder path
-   * (via ShapeClass overload) for nested paths.
-   */
-  private static traceFieldsFromCallback(
-    shape: NodeShape,
-    fn: (p: any) => any[],
-  ): FieldSetEntry[] {
-    const accessed: string[] = [];
-    const proxy = new Proxy(
-      {},
-      {
-        get(_target, key) {
-          if (typeof key === 'string') {
-            accessed.push(key);
-            return key;
-          }
-          return undefined;
-        },
-      },
-    );
-    fn(proxy);
-    return accessed.map((label) => ({
-      path: walkPropertyPath(shape, label),
-    }));
-  }
 }

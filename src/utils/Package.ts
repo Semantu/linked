@@ -11,7 +11,7 @@ import {
   NodeShape,
   PropertyShape,
 } from '../shapes/SHACL.js';
-import {Shape} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {Prefix} from './Prefix.js';
 import {lincd as lincdOntology} from '../ontologies/lincd.js';
 import {rdf} from '../ontologies/rdf.js';
@@ -158,7 +158,7 @@ export interface LinkedPackageObject
    * So get image() is implemented with getOneAs(...,getPackageShape('ImageObject'))
    * @param name
    */
-  getPackageShape: (name: string) => typeof Shape;
+  getPackageShape: (name: string) => ShapeConstructor | undefined;
   /**
    * A reference to the modules' object in the LINCD tree.
    * Contains all linked components of the module.
@@ -408,7 +408,7 @@ export function linkedPackage(packageName: string): LinkedPackageObject
    * This can be used to avoid circular dependencies between shapes.
    * @param name
    */
-  let getPackageShape = (name: string): typeof Shape => {
+  let getPackageShape = (name: string): ShapeConstructor | undefined => {
     //get the named node of the node shape first,
     //then get the shape class that defines this node shape
     return getShapeClass(

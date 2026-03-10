@@ -1,4 +1,4 @@
-import {Shape} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {ICoreIterable} from '../interfaces/ICoreIterable.js';
 import {NodeReferenceValue} from './NodeReference.js';
@@ -37,12 +37,14 @@ export function addNodeShapeToShapeClass(
 
 export function getShapeClass(
   nodeShape: NodeReferenceValue | {id: string} | string,
-): typeof Shape {
+): ShapeConstructor | undefined {
   const id = typeof nodeShape === 'string' ? nodeShape : nodeShape?.id;
   if (!id) {
-    return null;
+    return undefined;
   }
-  return nodeShapeToShapeClass.get(id);
+  // SAFETY: The map stores `typeof Shape` (abstract), but registered shapes are always
+  // concrete subclasses with a constructor and static .shape — i.e. ShapeConstructor.
+  return nodeShapeToShapeClass.get(id) as unknown as ShapeConstructor | undefined;
 }
 
 /**

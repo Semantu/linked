@@ -17,7 +17,7 @@ export function resolveShape<S extends Shape>(
     if (!shapeClass) {
       throw new Error(`Cannot resolve shape for '${shape}'`);
     }
-    return shapeClass as unknown as ShapeConstructor<S>;
+    return shapeClass as ShapeConstructor<S>;
   }
   return shape;
 }

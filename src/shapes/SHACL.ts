@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 import {NodeReferenceValue} from '../utils/NodeReference.js';
-import {Shape} from './Shape.js';
+import {Shape, ShapeConstructor} from './Shape.js';
 import {shacl} from '../ontologies/shacl.js';
 import {URI} from '../utils/URI.js';
 import {toNodeReference} from '../utils/NodeReference.js';
@@ -252,16 +252,16 @@ export class NodeShape extends Shape {
       return [...this.propertyShapes];
     }
     const res: PropertyShape[] = [];
-    let shapeClass = getShapeClass(this.id);
+    let shapeClass: ShapeConstructor | undefined = getShapeClass(this.id);
     if (!shapeClass) {
       return [...this.propertyShapes];
     }
-    while (shapeClass && (shapeClass as typeof Shape).shape) {
-      res.push(...(shapeClass as typeof Shape).shape.propertyShapes);
-      if (shapeClass === Shape) {
+    while (shapeClass?.shape) {
+      res.push(...shapeClass.shape.propertyShapes);
+      if (shapeClass === (Shape as unknown)) {
         break;
       }
-      shapeClass = Object.getPrototypeOf(shapeClass);
+      shapeClass = Object.getPrototypeOf(shapeClass) as ShapeConstructor | undefined;
     }
     return res;
   }
@@ -282,20 +282,20 @@ export class NodeShape extends Shape {
     label: string,
     checkSubShapes: boolean = true,
   ): PropertyShape {
-    let shapeClass = getShapeClass(this.id);
+    let shapeClass: ShapeConstructor | undefined = getShapeClass(this.id);
     let res: PropertyShape;
     if (!shapeClass) {
       return this.propertyShapes.find((shape) => shape.label === label);
     }
-    while (!res && shapeClass && (shapeClass as typeof Shape).shape) {
-      res = (shapeClass as typeof Shape).shape.propertyShapes.find(
+    while (!res && shapeClass?.shape) {
+      res = shapeClass.shape.propertyShapes.find(
         (shape) => shape.label === label,
       );
       if (checkSubShapes) {
-        if (shapeClass === Shape) {
+        if (shapeClass === (Shape as unknown)) {
           break;
         }
-        shapeClass = Object.getPrototypeOf(shapeClass);
+        shapeClass = Object.getPrototypeOf(shapeClass) as ShapeConstructor | undefined;
       } else {
         break;
       }
@@ -674,14 +674,14 @@ export function onShapeSetup(
     const nodeShapeId = getNodeShapeUri(packageName, shapeName);
     if (typeof document !== 'undefined') {
       window.addEventListener('load', () => {
-        shapeClass = getShapeClass(nodeShapeId);
-        if (!shapeClass) {
+        const resolved = getShapeClass(nodeShapeId);
+        if (!resolved) {
           console.warn(
             `Could not find value shape (${packageName}/${shapeName}) for accessor get ${propertyName}(). Likely because it is not bundled.`,
           );
           return;
         }
-        safeCallback(shapeClass, cb);
+        safeCallback(resolved as unknown as typeof Shape, cb);
       });
     } else {
       addNodeShapeCallback(nodeShapeId, cb);
