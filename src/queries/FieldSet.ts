@@ -115,10 +115,9 @@ export class FieldSet<R = any, Source = any> {
   readonly traceResponse?: R;
 
   /**
-   * For sub-select FieldSets: the parent query path leading to this sub-select.
-   * Used during proxy tracing to associate sub-selects with their parent property.
+   * For sub-select FieldSets: the parent property segments leading to this sub-select.
    */
-  readonly parentQueryPath?: any;
+  readonly parentSegments?: PropertyShape[];
 
   /**
    * For sub-select FieldSets: the shape class (ShapeType) of the sub-select's target.
@@ -165,13 +164,13 @@ export class FieldSet<R = any, Source = any> {
 
   /**
    * Create a typed FieldSet for a sub-select. Traces the callback through the proxy,
-   * stores parentQueryPath and traceResponse for runtime compatibility, and preserves
+   * stores parentSegments and traceResponse for runtime compatibility, and preserves
    * R and Source generics for conditional type inference.
    */
   static forSubSelect<R, Source>(
     shapeClass: any,
     fn: (p: any) => R,
-    parentQueryPath: any,
+    parentSegments: PropertyShape[],
   ): FieldSet<R, Source> {
     const nodeShape = shapeClass.shape || shapeClass;
     // Trace once: get both the raw response (for type carriers) and the entries
@@ -180,9 +179,9 @@ export class FieldSet<R = any, Source = any> {
     const entries = FieldSet.extractSubSelectEntries(nodeShape, traceResponse);
     const fs = new FieldSet(nodeShape, entries) as FieldSet<R, Source>;
     // Writable cast — these readonly fields are initialised once here at construction time
-    const w = fs as {-readonly [K in 'traceResponse' | 'parentQueryPath' | 'shapeType']: FieldSet<R, Source>[K]};
+    const w = fs as {-readonly [K in 'traceResponse' | 'parentSegments' | 'shapeType']: FieldSet<R, Source>[K]};
     w.traceResponse = traceResponse;
-    w.parentQueryPath = parentQueryPath;
+    w.parentSegments = parentSegments;
     w.shapeType = shapeClass;
     return fs;
   }
@@ -501,7 +500,7 @@ export class FieldSet<R = any, Source = any> {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
     // Single FieldSet sub-select (e.g. p.friends.select(f => [f.name]))
-    if (result instanceof FieldSet && result.parentQueryPath !== undefined) {
+    if (result instanceof FieldSet && result.parentSegments !== undefined) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
     // Single SetSize (e.g. p.friends.size())
@@ -544,22 +543,10 @@ export class FieldSet<R = any, Source = any> {
     }
 
     // FieldSet sub-select — use its entries directly (created by forSubSelect)
-    if (obj instanceof FieldSet && obj.parentQueryPath !== undefined) {
-      const parentPath = obj.parentQueryPath;
-      const segments: PropertyShape[] = [];
-      if (parentPath && Array.isArray(parentPath)) {
-        for (const step of parentPath) {
-          if (step && typeof step === 'object' && 'property' in step && step.property) {
-            segments.push(step.property);
-          }
-        }
-      }
-
-      // The FieldSet already has entries computed during forSubSelect()
+    if (obj instanceof FieldSet && obj.parentSegments !== undefined) {
       const subSelect = obj.entries.length > 0 ? obj : undefined;
-
       return {
-        path: new PropertyPath(rootShape, segments),
+        path: new PropertyPath(rootShape, obj.parentSegments),
         subSelect: subSelect as FieldSet | undefined,
       };
     }
@@ -609,7 +596,7 @@ export class FieldSet<R = any, Source = any> {
    * Walk a QueryBuilderObject-like chain (via .subject) collecting PropertyShape segments
    * from leaf to root, then reverse to get root-to-leaf order.
    */
-  private static collectPropertySegments(obj: QueryBuilderObjectLike): PropertyShape[] {
+  static collectPropertySegments(obj: QueryBuilderObjectLike): PropertyShape[] {
     const segments: PropertyShape[] = [];
     let current: QueryBuilderObjectLike | undefined = obj;
     while (current) {
@@ -687,7 +674,7 @@ export class FieldSet<R = any, Source = any> {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
     // Single FieldSet sub-select — convert directly
-    if (traceResponse instanceof FieldSet && traceResponse.parentQueryPath !== undefined) {
+    if (traceResponse instanceof FieldSet && traceResponse.parentSegments !== undefined) {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
     // Single SetSize

@@ -10,6 +10,7 @@ import {xsd} from '../ontologies/xsd.js';
 import type {IRSelectQuery} from './IntermediateRepresentation.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 import {FieldSet} from './FieldSet.js';
+import {PropertyPath} from './PropertyPath.js';
 import type {QueryBuilder} from './QueryBuilder.js';
 
 /**
@@ -60,7 +61,7 @@ export type QueryWrapperObject<ShapeType extends Shape = any> = {
 };
 
 export type SortByPath = {
-  paths: QueryPropertyPath[];
+  paths: PropertyPath[];
   direction: 'ASC' | 'DESC';
 };
 
@@ -867,13 +868,14 @@ export const evaluateSortCallback = <S extends Shape>(
 ): SortByPath => {
   const proxy = createProxiedPathBuilder(shape);
   const response = sortFn(proxy);
-  const paths: QueryPropertyPath[] = [];
+  const nodeShape = (shape as any).shape;
+  const paths: PropertyPath[] = [];
   if (response instanceof QueryBuilderObject || response instanceof QueryPrimitiveSet) {
-    paths.push(response.getPropertyPath());
+    paths.push(new PropertyPath(nodeShape, FieldSet.collectPropertySegments(response)));
   } else if (Array.isArray(response)) {
     for (const item of response) {
       if (item instanceof QueryBuilderObject) {
-        paths.push(item.getPropertyPath());
+        paths.push(new PropertyPath(nodeShape, FieldSet.collectPropertySegments(item)));
       }
     }
   }
@@ -1109,11 +1111,11 @@ export class QueryShapeSet<
     subQueryFn: QueryBuildFn<S, QF>,
   ): FieldSet<QF, QueryShapeSet<S, Source, Property>> {
     const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
-    const parentPath = this.getPropertyPath();
+    const parentSegments = FieldSet.collectPropertySegments(this);
     const fs = FieldSet.forSubSelect<QF, QueryShapeSet<S, Source, Property>>(
       leastSpecificShape,
       subQueryFn as any,
-      parentPath,
+      parentSegments,
     );
     return fs;
   }
@@ -1249,11 +1251,11 @@ export class QueryShape<
     const leastSpecificShape = getShapeClass(
       (this.getOriginalValue() as Shape).nodeShape.id,
     );
-    const parentPath = this.getPropertyPath();
+    const parentSegments = FieldSet.collectPropertySegments(this);
     const fs = FieldSet.forSubSelect<QF, QueryShape<S, Source, Property>>(
       leastSpecificShape,
       subQueryFn as any,
-      parentPath,
+      parentSegments,
     );
     return fs;
   }

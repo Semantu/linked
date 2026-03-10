@@ -257,7 +257,7 @@ const desugarFieldSetEntries = (entries: readonly FieldSetEntry[]): DesugaredSel
 };
 
 /**
- * Convert a WherePath/SortByPath QueryPropertyPath to a DesugaredSelectionPath.
+ * Convert a WherePath QueryPropertyPath to a DesugaredSelectionPath.
  * Handles PropertyQueryStep (.property.id), SizeStep (.count), and ShapeReferenceValue (.id + .shape).
  */
 const toSelectionPath = (path: unknown): DesugaredSelectionPath => {
@@ -368,7 +368,13 @@ const toSortBy = (query: RawSelectInput): DesugaredSortBy | undefined => {
 
   return {
     direction: query.sortBy.direction,
-    paths: query.sortBy.paths.map((path) => toSelectionPath(path)),
+    paths: query.sortBy.paths.map((path) => ({
+      kind: 'selection_path' as const,
+      steps: path.segments.map((seg) => ({
+        kind: 'property_step' as const,
+        propertyShapeId: seg.id,
+      })),
+    })),
   };
 };
 

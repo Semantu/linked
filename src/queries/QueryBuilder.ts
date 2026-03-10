@@ -417,7 +417,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       limit: this._limit,
       offset: this._offset,
       shape: this._shape,
-      sortBy: sortBy as any,
+      sortBy,
       singleResult:
         this._singleResult ||
         !!(
