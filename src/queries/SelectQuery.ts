@@ -204,7 +204,7 @@ export type ToQueryPrimitive<
       ? QueryDate<Source, Property>
       : T extends boolean
         ? QueryBoolean<Source, Property>
-        : never;
+        : never & {__error: 'ToQueryPrimitive: no matching primitive type'};
 
 export type WherePath = WhereEvaluationPath | WhereAndOr;
 
@@ -313,7 +313,7 @@ export type QueryResponseToResultType<
         ? boolean
         : T extends Object
           ? QResult<QShapeType, Prettify<ObjectToPlainResult<T>>>
-          : never;
+          : never & {__error: 'QueryResponseToResultType: unmatched query response type'};
 
 /**
  * Turns a QueryBuilderObject into a plain JS object
@@ -367,7 +367,7 @@ export type GetQueryObjectResultType<
                 ? UnionToIntersection<QueryResponseToResultType<Type>>
                 : QV extends QueryBoolean<any, any>
                   ? 'bool'
-                  : never;
+                  : never & {__error: 'GetQueryObjectResultType: unmatched query value type'};
 
 export type GetShapesResultTypeWithSource<Source> =
   QueryResponseToResultType<Source>;

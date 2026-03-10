@@ -25,7 +25,7 @@ export type RawSelectInput = {
   sortBy?: SortByPath;
   subject?: unknown;
   subjects?: unknown[];
-  shape?: unknown;
+  shape?: {shape?: {id?: string}; id?: string};
   limit?: number;
   offset?: number;
   singleResult?: boolean;
@@ -411,7 +411,7 @@ export const desugarSelectQuery = (query: RawSelectInput): DesugaredSelectQuery 
 
   return {
     kind: 'desugared_select',
-    shapeId: (query.shape as any)?.shape?.id || (query.shape as any)?.id,
+    shapeId: query.shape?.shape?.id || query.shape?.id,
     subjectId,
     subjectIds,
     singleResult: query.singleResult,
