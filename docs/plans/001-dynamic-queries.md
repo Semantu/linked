@@ -3303,28 +3303,9 @@ Merge `QueryString`, `QueryNumber`, `QueryBoolean`, `QueryDate` into `QueryPrimi
 
 ---
 
-### Phase 16: CreateQResult Simplification
+### Phase 16: CreateQResult Simplification — DEFERRED
 
-**Effort: Medium–High | Impact: Readability, maintainability**
-
-Break the 12-level conditional `CreateQResult` (SelectQuery.ts:415–493) into 2–3 smaller helper types. This is the riskiest change but type probes provide a safety net.
-
-| # | Task |
-|---|---|
-| 16.1 | Map out which branches of `CreateQResult` handle which input patterns (document the decision tree) |
-| 16.2 | Extract helper types: e.g. `ResolveQResultPrimitive`, `ResolveQResultObject`, `ResolveQResultArray` |
-| 16.3 | Recompose `CreateQResult` from the helpers — must be semantically equivalent |
-| 16.4 | Verify all type probes produce identical inferred types (diff the `.d.ts` output before/after) |
-
-**Validation:**
-- Type probes (primary) — `npx tsc --noEmit` on probe files, diff inferred types
-- `npx tsc --noEmit` exits 0 on full project
-- `npm test` — all tests pass
-- Snapshot: generate `.d.ts` for SelectQuery.ts before and after, diff must show only the helper type extractions
-
-**Open questions:**
-1. **How many helper types to extract?** The 12-level conditional could be split into 2 (primitive vs object) or 3 (primitive, plain object, array/set). **Recommendation:** Start with 3 helpers — `ResolveQResultPrimitive`, `ResolveQResultObject`, `ResolveQResultCollection`. This matches the natural decision points in the conditional.
-2. **Should `GetQueryObjectResultType` be simplified in the same phase?** It has 10+ branches and is closely related. **Recommendation:** Yes, tackle both together — they share the same decomposition pattern and the type probes test them jointly.
+Moved to **docs/ideas/011-query-type-system-refactor.md**. The types are stable, well-tested by type probes, and rarely modified. Risk of silently breaking type inference outweighs the readability benefit during a cleanup pass. Should be done as a dedicated effort with `.d.ts` before/after diffing.
 
 ---
 
