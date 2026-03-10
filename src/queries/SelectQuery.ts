@@ -729,20 +729,6 @@ export class QueryBuilderObject<
     throw Error(
       `No shape set for objectProperty ${property.parentNodeShape.label}.${property.label}`,
     );
-
-    // //and use a generic shape
-    // const shapeValue = new (Shape as any)(new TestNode(path));
-    // if (singleValue) {
-    //   return QueryShape.create(shapeValue, property, subject);
-    // } else {
-    //   //check if shapeValue is iterable
-    //   if (!(Symbol.iterator in Object(shapeValue))) {
-    //     throw new Error(
-    //       `Property ${property.parentNodeShape.label}.${property.label} is not marked as single value (maxCount:1), but the value is not iterable`,
-    //     );
-    //   }
-    //   return QueryShapeSet.create(new ShapeSet(shapeValue), property, subject);
-    // }
   }
 
   static getOriginalSource(
@@ -819,7 +805,6 @@ export class QueryBuilderObject<
   }
 
   limit(lim: number) {
-    console.log(lim);
   }
 
   /**
@@ -1144,8 +1129,6 @@ export class QueryShapeSet<
             //then return that method and bind the original value as 'this'
             return originalShapeSet[key].bind(originalShapeSet);
           } else if (key !== 'then' && key !== '$$typeof') {
-            //TODO: there is a strange bug with "then" being called, only for queries that access ShapeSets (multi value props), but I'm not sure where it comes from
-            //hiding the warning for now in that case as it doesn't seem to affect the results
             console.warn(
               'Could not find property shape for key ' +
                 key +
@@ -1362,13 +1345,6 @@ export class QueryShape<
     );
   }
 
-  // where(validation: WhereClause<S>): this {
-  //   let nodeShape = this.originalValue.nodeShape;
-  //   this.wherePath = processWhereClause(validation, nodeShape);
-  //   //return this because after Shape.friends.where() we can call other methods of Shape.friends
-  //   return this.proxy;
-  // }
-
   static create(
     original: Shape,
     property?: PropertyShape,
@@ -1399,33 +1375,12 @@ export class QueryShape<
           //if not, then a method/accessor of the original shape was called
           //then check if we have indexed any property shapes with that name for this shapes NodeShape
           //NOTE: this will only work with a @linkedProperty decorator
-          // let propertyShape = originalShape.nodeShape
-          //   .getPropertyShapes()
-          //   .find((propertyShape) => propertyShape.label === key);
-
           let propertyShape = getPropertyShapeByLabel(
             originalShape.constructor as typeof Shape,
             key,
           );
           if (propertyShape) {
-            //generate the query shape based on the property shape
-            // let nodeValue;
-            // if(propertyShape.maxCount <= 1) {
-            //   nodeValue = new TestNode(propertyShape.path);
-            // } else {
-            //   nodeValue = new NodeSet(new TestNode(propertyShape.path));
-            // }
-
             return QueryBuilderObject.generatePathValue(propertyShape, target);
-
-            //get the value of the property from the original shape
-            // let value = originalShape[key];
-            // //convert the value into a query value
-            // return QueryBuilderObject.convertOriginal(
-            //   value,
-            //   propertyShape,
-            //   queryShape,
-            // );
           }
         }
         if (key !== 'then' && key !== '$$typeof') {
@@ -1437,8 +1392,6 @@ export class QueryShape<
           console.warn(
             `${originalShape.constructor.name}.${key.toString()} is accessed in a query, but it does not have a @linkedProperty decorator. Queries can only access decorated get/set methods. ${stackLines.join('\n')}`,
           );
-          // } else {
-          //   console.error('Proxy is accessed like a promise');
         }
         return originalShape[key];
       },
@@ -1457,9 +1410,7 @@ export class QueryShape<
       }
       return QueryShape.create(newOriginal, this.property, this.subject as any);
     }
-    // else return this
     return this as any as QShape<InstanceType<ShapeClass>, Source, Property>;
-    // return this.proxy;
   }
 
   equals(otherValue: NodeReferenceValue | QShape<any>) {
@@ -1725,47 +1676,22 @@ export class SetSize<Source = null> extends QueryNumber<Source> {
   }
 
   getPropertyPath(): QueryPropertyPath {
-    //if a countable argument was given
-    // if (this.countable) {
-    //then creating the count step is straightforward
-    // let countablePath = this.countable.getPropertyPath();
-    // if (countablePath.some((step) => Array.isArray(step))) {
-    //   throw new Error(
-    //     'Cannot count a diverging path. Provide one path of properties to count',
-    //   );
-    // }
-    // let self: CountStep = {
-    //   count: this.countable?.getPropertyPath(),
-    //   label: this.label,
-    // };
-    // //and we can add the count step to the path of the subject
-    // let parent = this.subject.getPropertyPath();
-    // parent.push(self);
-    // return parent;
-    // } else {
-
-    //if nothing to count was given as an argument,
-    //then we just count the last property in the path
-    //also, we use the label of the last property as the label of the count step
+    //count the last property in the path
+    //use the label of the last property as the label of the count step
     let countable = this.subject.getPropertyStep();
     let self: SizeStep = {
       count: [countable],
-      label: this.label || this.subject.property.label, //the default is property name + 'Size', i.e., friendsSize
-      //numFriends
-      // label: this.label || 'num'+this.subject.property.label[0].toUpperCase()+this.subject.property.label.slice(1),//the default is property name + 'Size', i.e., friendsSize
+      label: this.label || this.subject.property.label,
     };
 
-    //in that case we request the path of the subject of the subject (the parent of the parent)
-    //and add the CountStep to that path
-    //since we already used the subject as the thing that's counted.
+    //request the path of the subject's subject (the parent of the parent)
+    //and add the SizeStep to that path, since we already used the subject as the thing that's counted
     if (this.subject.subject) {
       let path = this.subject.subject.getPropertyPath();
       path.push(self);
       return path;
     }
-    //if there is no parent of a parent, then we just return the count step as the whole path
     return [self];
-    // }
   }
 }
 

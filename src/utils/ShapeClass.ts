@@ -134,30 +134,9 @@ export function isClass(v) {
   return typeof v === 'function' && /^\s*class\s+/.test(v.toString());
 }
 
+// no-op: shape validation removed — kept as passthrough for existing callers
 function ensureShapeConstructor(shape: typeof Shape | (typeof Shape)[]) {
-  //TODO: figure out why sometimes we need shape.prototype, sometimes we need shape.constructor.prototype
-  // in other words, why we sometimes get a ES6 Class and sometimes its constructor?
-  //make sure we have a real class
-
-  //NOTE: update, this started breaking for when classes are functions. the constructor is native Function
-  //had to turn it off for now, waiting for issues to come back up to understand what needs to happen
   return shape;
-  // if(Array.isArray(shape))
-  // {
-  //   return shape.map(s => {
-  //     if (!isClass(s))
-  //     {
-  //       return s.constructor as any;
-  //     }
-  //     return s;
-  //   }) as any[];
-  // } else {
-  //   if (!isClass(shape))
-  //   {
-  //     return shape.constructor as any;
-  //   }
-  //   return shape;
-  // }
 }
 
 export function hasSuperClass(a: Function, b: Function) {

@@ -262,11 +262,6 @@ export class MutationQueryFactory extends QueryFactory {
   }
 
   protected convertNodeReference(obj: {id: string}): NodeReferenceValue {
-    //ensure there are no other properties in the object
-    // if (Object.keys(obj).length > 1)
-    // {
-    //   throw new Error('Cannot have id and other properties in the same value object');
-    // }
     return {id: obj.id};
   }
 }
