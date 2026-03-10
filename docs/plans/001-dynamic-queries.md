@@ -3219,11 +3219,13 @@ Sequential: 18 after 17, 19 after 14
 
 ---
 
-### Phase 13: Dead Code Removal
+### Phase 13: Dead Code Removal ✅
+
+**Status: Complete.**
 
 **Effort: Low | Impact: Clarity**
 
-Remove all commented-out dead code identified in the review. No functional changes.
+Removed all commented-out dead code, debug `console.log(lim)`, stale "strange bug" TODO, and stripped `ensureShapeConstructor` commented body (kept passthrough stub — has 2 callers). 106 lines deleted, 0 functional changes, all 619 tests pass.
 
 | # | Task |
 |---|---|
