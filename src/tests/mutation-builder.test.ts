@@ -124,13 +124,29 @@ describe('UpdateBuilder — IR equivalence', () => {
 // =============================================================================
 
 describe('DeleteBuilder — IR equivalence', () => {
-  test('delete — single', async () => {
+  test('delete — single via .for()', async () => {
+    const dslIR = await captureDslIR(() => Person.delete(entity('to-delete')));
+    const builderIR = DeleteBuilder.from(Person).for(entity('to-delete')).build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+
+  test('delete — multiple via .for()', async () => {
+    const dslIR = await captureDslIR(() =>
+      Person.delete([entity('to-delete-1'), entity('to-delete-2')]),
+    );
+    const builderIR = DeleteBuilder.from(Person)
+      .for([entity('to-delete-1'), entity('to-delete-2')])
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+
+  test('delete — single via .from() (backwards compat)', async () => {
     const dslIR = await captureDslIR(() => Person.delete(entity('to-delete')));
     const builderIR = DeleteBuilder.from(Person, entity('to-delete')).build();
     expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
   });
 
-  test('delete — multiple', async () => {
+  test('delete — multiple via .from() (backwards compat)', async () => {
     const dslIR = await captureDslIR(() =>
       Person.delete([entity('to-delete-1'), entity('to-delete-2')]),
     );
@@ -156,6 +172,12 @@ describe('Mutation builders — immutability', () => {
   test('CreateBuilder — .withId() returns new instance', () => {
     const b1 = CreateBuilder.from(Person).set({name: 'Alice'});
     const b2 = b1.withId('some-id');
+    expect(b1).not.toBe(b2);
+  });
+
+  test('DeleteBuilder — .for() returns new instance', () => {
+    const b1 = DeleteBuilder.from(Person);
+    const b2 = b1.for(entity('to-delete'));
     expect(b1).not.toBe(b2);
   });
 
@@ -192,10 +214,14 @@ describe('Mutation builders — guards', () => {
     expect(() => builder.build()).toThrow(/requires .set/);
   });
 
-  test('DeleteBuilder — empty ids array throws', () => {
-    expect(() => DeleteBuilder.from(Person, [] as any)).toThrow(
-      /requires at least one ID/,
-    );
+  test('DeleteBuilder — .build() without .for() throws', () => {
+    const builder = DeleteBuilder.from(Person);
+    expect(() => builder.build()).toThrow(/requires at least one ID/);
+  });
+
+  test('DeleteBuilder — .build() with empty .for() throws', () => {
+    const builder = DeleteBuilder.from(Person).for([] as any);
+    expect(() => builder.build()).toThrow(/requires at least one ID/);
   });
 });
 
@@ -215,7 +241,7 @@ describe('Mutation builders — PromiseLike', () => {
   });
 
   test('DeleteBuilder has .then()', () => {
-    const builder = DeleteBuilder.from(Person, entity('to-delete'));
+    const builder = DeleteBuilder.from(Person).for(entity('to-delete'));
     expect(typeof builder.then).toBe('function');
   });
 
@@ -225,7 +251,7 @@ describe('Mutation builders — PromiseLike', () => {
   });
 
   test('DeleteBuilder await triggers execution', async () => {
-    const result = await DeleteBuilder.from(Person, entity('to-delete'));
+    const result = await DeleteBuilder.from(Person).for(entity('to-delete'));
     expect(result).toEqual({deleted: [], count: 0});
   });
 });
