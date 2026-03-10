@@ -1,4 +1,4 @@
-import {Shape, ShapeType} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {resolveShape} from './resolveShape.js';
 import {UpdatePartial} from './QueryFactory.js';
 import {CreateQueryFactory, CreateQuery, CreateResponse} from './CreateQuery.js';
@@ -8,7 +8,7 @@ import {getQueryDispatch} from './queryDispatch.js';
  * Internal state bag for CreateBuilder.
  */
 interface CreateBuilderInit<S extends Shape> {
-  shape: ShapeType<S>;
+  shape: ShapeConstructor<S>;
   data?: UpdatePartial<S>;
   fixedId?: string;
 }
@@ -28,7 +28,7 @@ interface CreateBuilderInit<S extends Shape> {
 export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> = UpdatePartial<S>>
   implements PromiseLike<CreateResponse<U>>, Promise<CreateResponse<U>>
 {
-  private readonly _shape: ShapeType<S>;
+  private readonly _shape: ShapeConstructor<S>;
   private readonly _data?: UpdatePartial<S>;
   private readonly _fixedId?: string;
 
@@ -54,7 +54,7 @@ export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
   /**
    * Create a CreateBuilder for the given shape.
    */
-  static from<S extends Shape>(shape: ShapeType<S> | string): CreateBuilder<S> {
+  static from<S extends Shape>(shape: ShapeConstructor<S> | string): CreateBuilder<S> {
     const resolved = resolveShape<S>(shape);
     return new CreateBuilder<S>({shape: resolved});
   }
@@ -87,15 +87,15 @@ export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
     const data = this._data;
 
     // Validate that required properties (minCount >= 1) are present in data
-    const shapeObj = (this._shape as any).shape;
+    const shapeObj = this._shape.shape;
     if (shapeObj) {
       const requiredProps = shapeObj
         .getUniquePropertyShapes()
-        .filter((ps: any) => ps.minCount && ps.minCount >= 1);
+        .filter((ps) => ps.minCount && ps.minCount >= 1);
       const dataKeys = new Set(Object.keys(data));
       const missing = requiredProps
-        .filter((ps: any) => !dataKeys.has(ps.label))
-        .map((ps: any) => ps.label);
+        .filter((ps) => !dataKeys.has(ps.label))
+        .map((ps) => ps.label);
       if (missing.length > 0) {
         throw new Error(
           `Missing required fields for '${shapeObj.label || shapeObj.id}': ${missing.join(', ')}`,
@@ -109,7 +109,7 @@ export class CreateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
       ? {...(data as any), __id: this._fixedId}
       : data;
     const factory = new CreateQueryFactory<S, UpdatePartial<S>>(
-      this._shape as any as typeof Shape,
+      this._shape,
       dataWithId as UpdatePartial<S>,
     );
     return factory.build();

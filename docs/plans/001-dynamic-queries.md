@@ -3535,51 +3535,58 @@ Remove all dead code from the old IR layer.
 
 **Effort: High | Impact: Type safety — addresses root cause of ~44 `as any` casts**
 
-The root cause: `ShapeType<S>` (a class constructor `{ new(...args): S }`) and `typeof Shape` (the abstract base with static methods) don't align. Every `Shape.select()`, `.update()`, `.create()`, `.delete()` static method starts with `this as any` because TypeScript's `this` parameter in static methods doesn't carry the concrete subclass constructor type properly into the Builder generics.
+#### Root cause
 
-**Current pattern (Shape.ts:148):**
+`ShapeType<S>` uses `abstract new` in its constructor signature, which prevents TypeScript from allowing direct instantiation (`new shape()`) or recognizing that concrete subclasses satisfy it. Meanwhile, Shape static methods type `this` as `{ new (...args: any[]): S }` — a bare constructor without the static `shape` property. These two types don't match each other or what the Builders expect, forcing `as any` at every boundary.
+
+#### Solution: `ShapeConstructor<S>`
+
+Define a single concrete constructor type that includes both the `new` signature and static properties:
+
 ```ts
-static select<ShapeType extends Shape>(
-  this: { new (...args: any[]): ShapeType },
-  ...
-) {
-  let builder = QueryBuilder.from(this as any) as QueryBuilder<ShapeType, any, any>;
-}
+type ShapeConstructor<S extends Shape = Shape> = (new (...args: any[]) => S) & {
+  shape: NodeShape;
+  targetClass?: NodeReferenceValue;
+};
 ```
 
-The `this as any` is needed because `this` is typed as `{ new(...args): ShapeType }` but `QueryBuilder.from()` expects `ShapeType<S>` which may have additional constraints.
+Key difference from `ShapeType<S>`: uses `new` (not `abstract new`), so TypeScript allows:
+- Direct instantiation: `new shape()` — no cast needed
+- Property access: `shape.shape` — no cast needed
+- Passing to Builder `.from()` methods — no cast needed
 
-**Cast clusters to address:**
-- Shape.ts: 11 casts — all in static methods (`select`, `selectAll`, `update`, `create`, `delete`, `forShape`)
-- SelectQuery.ts: 22 casts — proxy construction, generic coercion, shape instantiation
-- QueryBuilder.ts: 12 casts — shape/subject/select coercion
-- CreateBuilder.ts, UpdateBuilder.ts, DeleteBuilder.ts: 5 casts — `this._shape as any as typeof Shape`
+Concrete subclasses (e.g. `Person extends Shape`) are assignable to `ShapeConstructor<Person>` because they have a concrete constructor and the `@linkedShape` decorator adds the `.shape` property.
+
+`ShapeType<S>` (with `abstract new`) is kept for any remaining type-level constraints but is no longer used in runtime patterns.
+
+#### Tasks
 
 | # | Task |
 |---|---|
-| 19.1 | Define a unified `ShapeConstructor<S>` type that satisfies both the Builder `from()` methods and the Shape static `this` parameter — e.g. `type ShapeConstructor<S extends Shape> = { new (...args: any[]): S } & { shape?: NodeShape }` |
-| 19.2 | Update `QueryBuilder.from()`, `UpdateBuilder.from()`, `CreateBuilder.from()`, `DeleteBuilder.from()` to accept `ShapeConstructor<S>` |
-| 19.3 | Update Shape static methods to use `ShapeConstructor` as the `this` type — eliminate `this as any` casts |
-| 19.4 | Address SelectQuery.ts casts: categorize each cast as (a) fixable with better generics, (b) inherent to proxy/dynamic patterns, (c) noise from the Shape misalignment |
-| 19.5 | Fix category (a) and (c) casts. Document category (b) casts with `// SAFETY:` comments explaining why the cast is necessary |
-| 19.6 | Target: reduce from ~44 to ≤15 `as any` casts, all with SAFETY comments |
+| 19.1 | Define `ShapeConstructor<S>` in Shape.ts alongside the existing `ShapeType<S>` |
+| 19.2 | Update `QueryBuilder.from()`, `UpdateBuilder.from()`, `CreateBuilder.from()`, `DeleteBuilder.from()` to accept `ShapeConstructor<S>` instead of `ShapeType<S>` |
+| 19.3 | Update Shape static methods (`select`, `selectAll`, `update`, `create`, `delete`, `forShape`) to use `this: ShapeConstructor<S>` — eliminates all `this as any` casts |
+| 19.4 | Update `QueryBuilder._shape` field type to `ShapeConstructor<S>` — eliminates `(this._shape as any).shape` casts |
+| 19.5 | Update SelectQuery.ts constructor/instantiation sites to use `ShapeConstructor` — eliminates `new (shape as any)()` casts |
+| 19.6 | Update mutation builders to use `ShapeConstructor` — eliminates `this._shape as any as typeof Shape` double casts |
+| 19.7 | Add `// SAFETY:` comments to remaining inherent casts (proxy/dynamic patterns, callback generics, dynamic property access) |
 
-**Risks:**
-- This touches the most foundational type in the system — every Shape subclass is affected
-- Proxy construction (`new (shape as any)()`) may be inherently untyped — some casts are unavoidable
-- Shape class hierarchy with decorators adds complexity
+#### Expected cast reduction
 
-**Validation:**
+| Category | Before | After |
+|---|---|---|
+| `this as any` in Shape static methods | 11 | 0 |
+| `(this._shape as any).shape` in Builders | ~8 | 0 |
+| `new (shape as any)()` in SelectQuery | ~4 | 0 |
+| `this._shape as any as typeof Shape` in mutation builders | 3 | 0 |
+| Inherent proxy/generic casts (callbacks, dynamic property access) | ~10 | ~10 |
+| **Total** | **~44** | **~10** |
+
+#### Validation
+
 - `npx tsc --noEmit` exits 0
 - `npm test` — all tests pass
-- Type probe files compile unchanged
-- `grep -c 'as any' src/queries/*.ts src/shapes/Shape.ts` — total ≤ 15, each with `// SAFETY:` comment
 - No new `@ts-ignore` or `@ts-expect-error` introduced
-
-**Open questions:**
-1. **`ShapeConstructor<S>` — single unified type or intersection?** We could define `ShapeConstructor<S> = { new (...args: any[]): S } & { shape?: NodeShape }` or use a more elaborate mapped type. **Recommendation:** Simple intersection — the `new` signature plus `shape` accessor is all the Builders need. Don't over-engineer.
-2. **Target cast count — ≤15 or ≤10?** Some casts are inherently unavoidable (proxy construction via `new (shape as any)()`). **Recommendation:** Target ≤15 with SAFETY comments. Getting below 10 would require runtime type guards that add overhead for no real benefit.
-3. **Tackle all Builder `from()` methods at once or one at a time?** QueryBuilder, UpdateBuilder, CreateBuilder, DeleteBuilder all have the same pattern. **Recommendation:** All at once — they share the same `ShapeConstructor` type and changing one without the others creates inconsistency.
 
 ---
 

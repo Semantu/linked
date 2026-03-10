@@ -1,4 +1,4 @@
-import {Shape, ShapeType} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {resolveShape} from './resolveShape.js';
 import {
   SelectQuery,
@@ -38,7 +38,7 @@ interface PreloadEntry {
 
 /** Internal state bag for QueryBuilder. */
 interface QueryBuilderInit<S extends Shape, R> {
-  shape: ShapeType<S>;
+  shape: ShapeConstructor<S>;
   selectFn?: QueryBuildFn<S, R>;
   whereFn?: WhereClause<S>;
   sortByFn?: QueryBuildFn<S, any>;
@@ -69,7 +69,7 @@ interface QueryBuilderInit<S extends Shape, R> {
 export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   implements PromiseLike<Result>, Promise<Result>
 {
-  private readonly _shape: ShapeType<S>;
+  private readonly _shape: ShapeConstructor<S>;
   private readonly _selectFn?: QueryBuildFn<S, R>;
   private readonly _whereFn?: WhereClause<S>;
   private readonly _sortByFn?: QueryBuildFn<S, any>;
@@ -130,7 +130,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
    * or a shape IRI string (resolved via the shape registry).
    */
   static from<S extends Shape>(
-    shape: ShapeType<S> | string,
+    shape: ShapeConstructor<S> | string,
   ): QueryBuilder<S> {
     const resolved = resolveShape<S>(shape);
     return new QueryBuilder<S>({shape: resolved});
@@ -162,9 +162,9 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
 
   /** Select all decorated properties of the shape. */
   selectAll(): QueryBuilder<S, any, QueryResponseToResultType<SelectAllQueryResponse<S>, S>[]> {
-    const propertyLabels = (this._shape as any)
-      .shape.getUniquePropertyShapes()
-      .map((ps: any) => ps.label) as string[];
+    const propertyLabels = this._shape.shape
+      .getUniquePropertyShapes()
+      .map((ps) => ps.label);
     const selectFn = ((p: any) =>
       propertyLabels.map((label) => p[label])) as unknown as QueryBuildFn<S, any>;
     return this.clone({selectFn, selectAllLabels: propertyLabels});
@@ -254,7 +254,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       return this._fieldSet;
     }
     if (this._selectAllLabels) {
-      return FieldSet.for((this._shape as any).shape, this._selectAllLabels);
+      return FieldSet.for(this._shape.shape, this._selectAllLabels);
     }
     if (this._selectFn) {
       // Eagerly evaluate the callback through FieldSet.for(ShapeClass, callback)
@@ -279,7 +279,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
    * is preserved for orderBy).
    */
   toJSON(): QueryBuilderJSON {
-    const shapeId = (this._shape as any).shape?.id || '';
+    const shapeId = this._shape.shape?.id || '';
     const json: QueryBuilderJSON = {
       shape: shapeId,
     };
@@ -298,7 +298,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       json.offset = this._offset;
     }
     if (this._subject && typeof this._subject === 'object' && 'id' in this._subject) {
-      json.subject = (this._subject as any).id;
+      json.subject = (this._subject as NodeReferenceValue).id;
     }
     if (this._subjects && this._subjects.length > 0) {
       json.subjects = this._subjects.map((s) => s.id);

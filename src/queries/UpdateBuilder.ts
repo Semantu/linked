@@ -1,4 +1,4 @@
-import {Shape, ShapeType} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {resolveShape} from './resolveShape.js';
 import {AddId, UpdatePartial, NodeReferenceValue} from './QueryFactory.js';
 import {UpdateQueryFactory, UpdateQuery} from './UpdateQuery.js';
@@ -8,7 +8,7 @@ import {getQueryDispatch} from './queryDispatch.js';
  * Internal state bag for UpdateBuilder.
  */
 interface UpdateBuilderInit<S extends Shape> {
-  shape: ShapeType<S>;
+  shape: ShapeConstructor<S>;
   data?: UpdatePartial<S>;
   targetId?: string;
 }
@@ -30,7 +30,7 @@ interface UpdateBuilderInit<S extends Shape> {
 export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> = UpdatePartial<S>>
   implements PromiseLike<AddId<U>>, Promise<AddId<U>>
 {
-  private readonly _shape: ShapeType<S>;
+  private readonly _shape: ShapeConstructor<S>;
   private readonly _data?: UpdatePartial<S>;
   private readonly _targetId?: string;
 
@@ -53,7 +53,7 @@ export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
   // Static constructors
   // ---------------------------------------------------------------------------
 
-  static from<S extends Shape>(shape: ShapeType<S> | string): UpdateBuilder<S> {
+  static from<S extends Shape>(shape: ShapeConstructor<S> | string): UpdateBuilder<S> {
     const resolved = resolveShape<S>(shape);
     return new UpdateBuilder<S>({shape: resolved});
   }
@@ -90,7 +90,7 @@ export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
       );
     }
     const factory = new UpdateQueryFactory<S, UpdatePartial<S>>(
-      this._shape as any as typeof Shape,
+      this._shape,
       this._targetId,
       this._data,
     );

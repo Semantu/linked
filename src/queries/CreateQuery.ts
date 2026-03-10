@@ -1,4 +1,4 @@
-import {Shape} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {AddId, NodeDescriptionValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory} from './MutationQuery.js';
 import {IRCreateMutation} from './IntermediateRepresentation.js';
@@ -20,7 +20,7 @@ export class CreateQueryFactory<
   readonly description: NodeDescriptionValue;
 
   constructor(
-    public shapeClass: typeof Shape,
+    public shapeClass: ShapeConstructor<ShapeType>,
     updateObjectOrFn: U,
   ) {
     super();

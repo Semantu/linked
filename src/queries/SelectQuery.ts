@@ -1,4 +1,4 @@
-import {Shape,ShapeType} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {PropertyShape} from '../shapes/SHACL.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
 import {shacl} from '../ontologies/shacl.js';
@@ -862,13 +862,13 @@ export const processWhereClause = (
  * This is a standalone helper that replaces the need for the former SelectQueryFactory.sortBy().
  */
 export const evaluateSortCallback = <S extends Shape>(
-  shape: ShapeType<S>,
+  shape: ShapeConstructor<S>,
   sortFn: (p: any) => any,
   direction: 'ASC' | 'DESC' = 'ASC',
 ): SortByPath => {
   const proxy = createProxiedPathBuilder(shape);
   const response = sortFn(proxy);
-  const nodeShape = (shape as any).shape;
+  const nodeShape = shape.shape;
   const paths: PropertyPath[] = [];
   if (response instanceof QueryBuilderObject || response instanceof QueryPrimitiveSet) {
     paths.push(new PropertyPath(nodeShape, FieldSet.collectPropertySegments(response)));

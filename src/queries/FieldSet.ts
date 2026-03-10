@@ -1,5 +1,5 @@
 import type {NodeShape, PropertyShape} from '../shapes/SHACL.js';
-import type {Shape, ShapeType} from '../shapes/Shape.js';
+import type {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {PropertyPath, walkPropertyPath} from './PropertyPath.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {WherePath} from './SelectQuery.js';
@@ -140,12 +140,12 @@ export class FieldSet<R = any, Source = any> {
    * Fields can be string paths, PropertyPath instances, nested objects,
    * or a callback receiving a proxy for dot-access.
    */
-  static for<S extends Shape>(shape: ShapeType<S>, fields: FieldSetInput[]): FieldSet<any>;
-  static for<S extends Shape, R>(shape: ShapeType<S>, fn: (p: any) => R): FieldSet<R>;
+  static for<S extends Shape>(shape: ShapeConstructor<S>, fields: FieldSetInput[]): FieldSet<any>;
+  static for<S extends Shape, R>(shape: ShapeConstructor<S>, fn: (p: any) => R): FieldSet<R>;
   static for(shape: NodeShape | string, fields: FieldSetInput[]): FieldSet<any>;
   static for(shape: NodeShape | string, fn: (p: any) => any): FieldSet<any>;
   static for(
-    shape: ShapeType<any> | NodeShape | string,
+    shape: ShapeConstructor<any> | NodeShape | string,
     fieldsOrFn: FieldSetInput[] | ((p: any) => any),
   ): FieldSet<any> {
     const resolved = FieldSet.resolveShapeInput(shape);
@@ -195,9 +195,9 @@ export class FieldSet<R = any, Source = any> {
    *   - `depth=0`: throws — use a node reference instead.
    *   - `depth>1`: recursively includes nested shape properties up to the given depth.
    */
-  static all<S extends Shape>(shape: ShapeType<S>, opts?: {depth?: number}): FieldSet;
+  static all<S extends Shape>(shape: ShapeConstructor<S>, opts?: {depth?: number}): FieldSet;
   static all(shape: NodeShape | string, opts?: {depth?: number}): FieldSet;
-  static all(shape: ShapeType<any> | NodeShape | string, opts?: {depth?: number}): FieldSet {
+  static all(shape: ShapeConstructor<any> | NodeShape | string, opts?: {depth?: number}): FieldSet {
     const depth = opts?.depth ?? 1;
     if (depth < 1) {
       throw new Error(
@@ -403,19 +403,20 @@ export class FieldSet<R = any, Source = any> {
 
   /**
    * Resolves any of the accepted shape input types to a NodeShape and optional ShapeClass.
-   * Accepts: ShapeType (class with .shape), NodeShape, or IRI string.
+   * Accepts: ShapeConstructor (class with .shape), NodeShape, or IRI string.
    */
-  private static resolveShapeInput(shape: ShapeType<any> | NodeShape | string): {nodeShape: NodeShape; shapeClass?: ShapeType<any>} {
+  private static resolveShapeInput(shape: ShapeConstructor<any> | NodeShape | string): {nodeShape: NodeShape; shapeClass?: ShapeConstructor<any>} {
     if (typeof shape === 'string') {
       const shapeClass = getShapeClass(shape);
       if (!shapeClass || !shapeClass.shape) {
         throw new Error(`Cannot resolve shape for '${shape}'`);
       }
-      return {nodeShape: shapeClass.shape, shapeClass: shapeClass as ShapeType<any>};
+      // SAFETY: getShapeClass() returns `typeof Shape` (abstract), but at runtime it's always a concrete subclass.
+      return {nodeShape: shapeClass.shape, shapeClass: shapeClass as unknown as ShapeConstructor<any>};
     }
-    // ShapeType: has a static .shape property that is a NodeShape
+    // ShapeConstructor: has a static .shape property that is a NodeShape
     if ('shape' in shape && typeof shape.shape === 'object' && shape.shape !== null && 'id' in shape.shape) {
-      return {nodeShape: (shape as ShapeType<any>).shape, shapeClass: shape as ShapeType<any>};
+      return {nodeShape: (shape as ShapeConstructor<any>).shape, shapeClass: shape as ShapeConstructor<any>};
     }
     // NodeShape: has .id directly
     return {nodeShape: shape as NodeShape};
@@ -486,7 +487,7 @@ export class FieldSet<R = any, Source = any> {
    */
   private static traceFieldsWithProxy(
     nodeShape: NodeShape,
-    shapeClass: ShapeType<any>,
+    shapeClass: ShapeConstructor<any>,
     fn: (p: any) => any,
   ): FieldSetEntry[] {
     const proxy = createProxiedPathBuilder(shapeClass);

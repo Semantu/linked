@@ -1,4 +1,4 @@
-import {Shape, ShapeType} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {resolveShape} from './resolveShape.js';
 import {DeleteQueryFactory, DeleteQuery, DeleteResponse} from './DeleteQuery.js';
 import {NodeId} from './MutationQuery.js';
@@ -8,7 +8,7 @@ import {getQueryDispatch} from './queryDispatch.js';
  * Internal state bag for DeleteBuilder.
  */
 interface DeleteBuilderInit<S extends Shape> {
-  shape: ShapeType<S>;
+  shape: ShapeConstructor<S>;
   ids: NodeId[];
 }
 
@@ -25,7 +25,7 @@ interface DeleteBuilderInit<S extends Shape> {
 export class DeleteBuilder<S extends Shape = Shape>
   implements PromiseLike<DeleteResponse>, Promise<DeleteResponse>
 {
-  private readonly _shape: ShapeType<S>;
+  private readonly _shape: ShapeConstructor<S>;
   private readonly _ids: NodeId[];
 
   private constructor(init: DeleteBuilderInit<S>) {
@@ -41,7 +41,7 @@ export class DeleteBuilder<S extends Shape = Shape>
    * Create a DeleteBuilder for the given shape and target IDs.
    */
   static from<S extends Shape>(
-    shape: ShapeType<S> | string,
+    shape: ShapeConstructor<S> | string,
     ids: NodeId | NodeId[],
   ): DeleteBuilder<S> {
     const resolved = resolveShape<S>(shape);
@@ -59,7 +59,7 @@ export class DeleteBuilder<S extends Shape = Shape>
   /** Build the IR mutation. */
   build(): DeleteQuery {
     const factory = new DeleteQueryFactory<S, {}>(
-      this._shape as any as typeof Shape,
+      this._shape,
       this._ids,
     );
     return factory.build();

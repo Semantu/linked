@@ -1,4 +1,4 @@
-import {Shape, ShapeType} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {QueryBuilderObject, QueryShape} from './SelectQuery.js';
 
 /**
@@ -13,7 +13,7 @@ import {QueryBuilderObject, QueryShape} from './SelectQuery.js';
  * across the DSL and dynamic query building.
  */
 export function createProxiedPathBuilder<S extends Shape>(
-  shape: ShapeType<S> | QueryBuilderObject,
+  shape: ShapeConstructor<S> | QueryBuilderObject,
 ): QueryBuilderObject {
   if (shape instanceof QueryBuilderObject) {
     // When a QueryBuilderObject is passed directly (e.g. QueryPrimitives
@@ -24,6 +24,6 @@ export function createProxiedPathBuilder<S extends Shape>(
   // The proxy intercepts property access and resolves each property name
   // to its PropertyShape, building a chain of QueryBuilderObjects that
   // records which path was traversed.
-  const dummyShape = new (shape as any)();
+  const dummyShape = new shape();
   return QueryShape.create(dummyShape);
 }

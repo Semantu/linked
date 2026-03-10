@@ -37,6 +37,21 @@ export type ShapeType<S extends Shape = Shape> = (abstract new (
   targetClass?: NodeReferenceValue;
 };
 
+/**
+ * Concrete constructor type for Shape subclasses — used at runtime boundaries
+ * (Builder `from()` methods, Shape static `this` parameters, mutation factories).
+ *
+ * Unlike `ShapeType` (which uses `abstract new`), this uses a concrete `new`,
+ * so TypeScript allows direct instantiation (`new shape()`) and property access
+ * (`shape.shape`) without casts.
+ */
+export type ShapeConstructor<S extends Shape = Shape> = (new (
+  ...args: any[]
+) => S) & {
+  shape: NodeShape;
+  targetClass?: NodeReferenceValue;
+};
+
 export abstract class Shape {
   static targetClass: NodeReferenceValue = null;
   static shape: NodeShape;
@@ -95,47 +110,47 @@ export abstract class Shape {
    * @param selectFn
    */
   static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<S, ShapeType>[],
+    S extends Shape,
+    R = unknown,
+    ResultType = QueryResponseToResultType<R, S>[],
   >(
-    this: {new (...args: any[]): ShapeType; },
-    selectFn: QueryBuildFn<ShapeType, S>,
-  ): QueryBuilder<ShapeType, S, ResultType>;
+    this: ShapeConstructor<S>,
+    selectFn: QueryBuildFn<S, R>,
+  ): QueryBuilder<S, R, ResultType>;
   static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<S, ShapeType>[],
+    S extends Shape,
+    R = unknown,
+    ResultType = QueryResponseToResultType<R, S>[],
   >(
-    this: {new (...args: any[]): ShapeType},
-  ): QueryBuilder<ShapeType, S, ResultType>;
+    this: ShapeConstructor<S>,
+  ): QueryBuilder<S, R, ResultType>;
   static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<S, ShapeType>,
+    S extends Shape,
+    R = unknown,
+    ResultType = QueryResponseToResultType<R, S>,
   >(
-    this: {new (...args: any[]): ShapeType; },
-    subjects?: ShapeType | QResult<ShapeType>,
-    selectFn?: QueryBuildFn<ShapeType, S>,
-  ): QueryBuilder<ShapeType, S, ResultType>;
+    this: ShapeConstructor<S>,
+    subjects?: S | QResult<S>,
+    selectFn?: QueryBuildFn<S, R>,
+  ): QueryBuilder<S, R, ResultType>;
   static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<S, ShapeType>[],
+    S extends Shape,
+    R = unknown,
+    ResultType = QueryResponseToResultType<R, S>[],
   >(
-    this: {new (...args: any[]): ShapeType; },
-    subjects?: ICoreIterable<ShapeType> | QResult<ShapeType>[],
-    selectFn?: QueryBuildFn<ShapeType, S>,
-  ): QueryBuilder<ShapeType, S, ResultType>;
+    this: ShapeConstructor<S>,
+    subjects?: ICoreIterable<S> | QResult<S>[],
+    selectFn?: QueryBuildFn<S, R>,
+  ): QueryBuilder<S, R, ResultType>;
   static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<S, ShapeType>[],
+    S extends Shape,
+    R = unknown,
+    ResultType = QueryResponseToResultType<R, S>[],
   >(
-    this: {new (...args: any[]): ShapeType; },
-    targetOrSelectFn?: ShapeType | QueryBuildFn<ShapeType, S>,
-    selectFn?: QueryBuildFn<ShapeType, S>,
-  ): QueryBuilder<ShapeType, S, ResultType> {
+    this: ShapeConstructor<S>,
+    targetOrSelectFn?: S | QueryBuildFn<S, R>,
+    selectFn?: QueryBuildFn<S, R>,
+  ): QueryBuilder<S, R, ResultType> {
     let _selectFn;
     let subject;
     if (selectFn) {
@@ -145,14 +160,14 @@ export abstract class Shape {
       _selectFn = targetOrSelectFn;
     }
 
-    let builder = QueryBuilder.from(this as any) as QueryBuilder<ShapeType, any, any>;
+    let builder = QueryBuilder.from(this) as QueryBuilder<S, any, any>;
     if (_selectFn) {
       builder = builder.select(_selectFn as any);
     }
     if (subject) {
       builder = builder.for(subject as any);
     }
-    return builder as QueryBuilder<ShapeType, S, ResultType>;
+    return builder as QueryBuilder<S, R, ResultType>;
   }
 
   /**
@@ -160,78 +175,80 @@ export abstract class Shape {
    * Returns a single result if a single subject is provided, or an array of results if no subject is provided.
    */
   static selectAll<
-    ShapeType extends Shape,
+    S extends Shape,
     ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
+      SelectAllQueryResponse<S>,
+      S
     >[],
   >(
-    this: {new (...args: any[]): ShapeType; },
-  ): QueryBuilder<ShapeType, any, ResultType>;
+    this: ShapeConstructor<S>,
+  ): QueryBuilder<S, any, ResultType>;
   static selectAll<
-    ShapeType extends Shape,
+    S extends Shape,
     ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
+      SelectAllQueryResponse<S>,
+      S
     >,
   >(
-    this: {new (...args: any[]): ShapeType; },
-    subject: ShapeType | QResult<ShapeType>,
-  ): QueryBuilder<ShapeType, any, ResultType>;
+    this: ShapeConstructor<S>,
+    subject: S | QResult<S>,
+  ): QueryBuilder<S, any, ResultType>;
   static selectAll<
-    ShapeType extends Shape,
+    S extends Shape,
     ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
+      SelectAllQueryResponse<S>,
+      S
     >[],
   >(
-    this: {new (...args: any[]): ShapeType; },
-    subject?: ShapeType | QResult<ShapeType>,
-  ): QueryBuilder<ShapeType, any, ResultType> {
-    let builder = QueryBuilder.from(this as any).selectAll() as QueryBuilder<ShapeType, any, any>;
+    this: ShapeConstructor<S>,
+    subject?: S | QResult<S>,
+  ): QueryBuilder<S, any, ResultType> {
+    let builder = QueryBuilder.from(this).selectAll() as QueryBuilder<S, any, any>;
     if (subject) {
       builder = builder.for(subject as any);
     }
-    return builder as QueryBuilder<ShapeType, any, ResultType>;
+    return builder as QueryBuilder<S, any, ResultType>;
   }
 
 
-  static update<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    this: {new (...args: any[]): ShapeType; },
-    id: string | NodeReferenceValue | QShape<ShapeType>,
+  static update<S extends Shape, U extends UpdatePartial<S>>(
+    this: ShapeConstructor<S>,
+    id: string | NodeReferenceValue | QShape<S>,
     updateObjectOrFn?: U,
-  ): UpdateBuilder<ShapeType, U> {
-    let builder = UpdateBuilder.from(this as any) as UpdateBuilder<ShapeType, any>;
+  ): UpdateBuilder<S, U> {
+    let builder = UpdateBuilder.from(this) as UpdateBuilder<S, any>;
     builder = builder.for(id as any);
     if (updateObjectOrFn) {
       builder = builder.set(updateObjectOrFn);
     }
-    return builder as unknown as UpdateBuilder<ShapeType, U>;
+    return builder as unknown as UpdateBuilder<S, U>;
   }
 
-  static create<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    this: {new (...args: any[]): ShapeType; },
+  static create<S extends Shape, U extends UpdatePartial<S>>(
+    this: ShapeConstructor<S>,
     updateObjectOrFn?: U,
-  ): CreateBuilder<ShapeType, U> {
-    let builder = CreateBuilder.from(this as any) as CreateBuilder<ShapeType, any>;
+  ): CreateBuilder<S, U> {
+    let builder = CreateBuilder.from(this) as CreateBuilder<S, any>;
     if (updateObjectOrFn) {
       builder = builder.set(updateObjectOrFn);
     }
-    return builder as unknown as CreateBuilder<ShapeType, U>;
+    return builder as unknown as CreateBuilder<S, U>;
   }
 
-  static delete<ShapeType extends Shape>(
-    this: {new (...args: any[]): ShapeType; },
+  static delete<S extends Shape>(
+    this: ShapeConstructor<S>,
     id: NodeId | NodeId[] | NodeReferenceValue[],
-  ): DeleteBuilder<ShapeType> {
-    return DeleteBuilder.from(this as any, id as any) as DeleteBuilder<ShapeType>;
+  ): DeleteBuilder<S> {
+    return DeleteBuilder.from(this, id) as DeleteBuilder<S>;
   }
 
-  static mapPropertyShapes<ShapeType extends Shape, ResponseType = unknown>(
-    this: {new (...args: any[]): ShapeType; targetClass: any},
-    mapFunction?: PropertyShapeMapFunction<ShapeType, ResponseType>,
+  static mapPropertyShapes<S extends Shape, ResponseType = unknown>(
+    this: ShapeConstructor<S>,
+    mapFunction?: PropertyShapeMapFunction<S, ResponseType>,
   ): ResponseType {
-    let dummyShape = new (this as any)();
+    // SAFETY: dummyShape is used as a dynamic proxy target — we assign .proxy and
+    // access arbitrary property names on it, which S doesn't declare.
+    let dummyShape: any = new this();
     dummyShape.proxy = new Proxy(dummyShape, {
       get(target, key, receiver) {
         if (typeof key === 'string') {
@@ -257,7 +274,7 @@ export abstract class Shape {
   }
 
   static getSetOf<T extends Shape>(
-    this: {new (...args: any[]): T},
+    this: ShapeConstructor<T>,
     values: Iterable<T | NodeReferenceValue | string>,
   ): ShapeSet<T> {
     const set = new ShapeSet<T>();
@@ -265,7 +282,7 @@ export abstract class Shape {
       if (value instanceof Shape) {
         set.add(value as T);
       } else {
-        const instance = new (this as any)();
+        const instance = new this();
         instance.id = typeof value === 'string' ? value : value.id;
         set.add(instance);
       }
