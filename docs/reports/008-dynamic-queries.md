@@ -1,6 +1,5 @@
 ---
 summary: Final report for the Dynamic Queries system — FieldSet, QueryBuilder, Mutation Builders, and DSL alignment replacing the mutable SelectQueryFactory architecture.
-source: 003-dynamic-ir-construction
 plan: 001-dynamic-queries
 packages: [core]
 ---
@@ -445,17 +444,13 @@ Result type inference only works when `QueryBuilder.from(ShapeClass)` receives a
 
 | Item | Status |
 |------|--------|
-| Callback-style mutation updates (`Shape.update(entity, e => { e.name = 'Bob' })`) | Not implemented — UpdateBuilder handles object-style updates. Callback pattern needs proxy-tracing design. |
+| Callback-style mutation updates | See `docs/ideas/006-computed-expressions-and-update-functions.md` |
 | Scoped filter OR support | AND-only. OR deferred until needed in practice. |
-| `FieldSet.summary()` | CMS-layer concern, not core. |
-| Shared variable bindings / `.as()` activation | Deferred to plan 008. |
-| Shape remapping / ShapeAdapter | Deferred to plan 009. |
-| Computed expressions / L module | Deferred to plan 006. |
-| Raw IR helpers (`ir.select()`, `ir.shapeScan()`) | Future — power-user direct IR construction. |
-| Result typing for dynamic queries | `QueryBuilder.from<T>(shape)` type parameter for static result typing on dynamic paths. |
-| CONSTRUCT / MINUS query types | Deferred to plans 004, 007. |
-| Async shape loading | Speculative — needs shapes-only architecture first. |
-| Phase 16: CreateQResult simplification | Moved to `docs/ideas/011-query-type-system-refactor.md`. |
+| Shared variable bindings / `.as()` activation | See `docs/ideas/008-shared-variable-bindings.md` |
+| Shape remapping / ShapeAdapter | See `docs/ideas/009-shape-remapping.md` |
+| Computed expressions / L module | See `docs/ideas/006-computed-expressions-and-update-functions.md` |
+| Result typing + CreateQResult refactor | See `docs/ideas/011-query-type-system-refactor.md` |
+| CONSTRUCT / MINUS query types | See `docs/ideas/004-sparql-construct-support.md`, `007-advanced-query-patterns.md` |
 
 ---
 
@@ -463,8 +458,7 @@ Result type inference only works when `QueryBuilder.from(ShapeClass)` receives a
 
 | Document | Path |
 |----------|------|
-| Ideation doc (origin) | `docs/ideas/003-dynamic-ir-construction.md` |
-| Implementation plan | `docs/plans/001-dynamic-queries.md` |
+| Implementation plan (removed) | was `docs/plans/001-dynamic-queries.md` |
 | Dispatch registry report | `docs/reports/007-dispatch-registry-break-circular-deps.md` |
 | Nested sub-select IR report | `docs/reports/006-nested-subselect-ir-completeness.md` |
 | IR refactoring report | `docs/reports/003-ir-refactoring.md` |
