@@ -139,6 +139,34 @@ Since NOT EXISTS is already supported and covers the common cases, defer MINUS a
 - `.every()` for negation isn't obvious — `.minus()` reads more naturally
 - Doesn't expose the SPARQL MINUS pattern at all
 
+### Decision: Route A — emit SPARQL MINUS
+
+**Chosen:** Route A with extended callback support.
+
+`.minus()` accepts `ShapeConstructor` or `WhereClause<S>` (same callback types as `.select()`):
+
+```ts
+// By shape
+Person.select(p => p.name).minus(Employee)
+
+// Single property existence
+Order.select(o => o.id).minus(o => o.shippedDate)
+
+// Multi property (AND — both must exist)
+Person.select(p => p.name).minus(p => [p.email, p.phone])
+
+// Boolean condition
+Person.select(p => p.name).minus(p => p.status.equals('inactive'))
+
+// Nested
+Person.select(p => p.name).minus(p => p.friends.some(f => f.name.equals('Moa')))
+```
+
+**Implementation:**
+- Reuses existing callback processing from `.select()` — only the Shape overload is new
+- New `IRMinusPattern` through the pipeline, lands on existing `SparqlMinus` algebra + serialization
+- Chainable: `.minus(A).minus(B)` produces two separate `MINUS { }` blocks
+
 ---
 
 ## Feature 2: Bulk Delete (DELETE WHERE)
