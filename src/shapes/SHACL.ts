@@ -4,7 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 import {NodeReferenceValue} from '../utils/NodeReference.js';
-import {Shape} from './Shape.js';
+import {Shape, ShapeConstructor} from './Shape.js';
 import {shacl} from '../ontologies/shacl.js';
 import {URI} from '../utils/URI.js';
 import {toNodeReference} from '../utils/NodeReference.js';
@@ -202,6 +202,13 @@ const EXPLICIT_NODE_KIND_SYMBOL = Symbol('explicitNodeKind');
 const EXPLICIT_MIN_COUNT_SYMBOL = Symbol('explicitMinCount');
 const EXPLICIT_MAX_COUNT_SYMBOL = Symbol('explicitMaxCount');
 
+/** Internal symbol-keyed flags on PropertyShape to track which fields were explicitly configured. */
+interface ExplicitFlags {
+  [EXPLICIT_NODE_KIND_SYMBOL]?: boolean;
+  [EXPLICIT_MIN_COUNT_SYMBOL]?: boolean;
+  [EXPLICIT_MAX_COUNT_SYMBOL]?: boolean;
+}
+
 export interface ParameterConfig {
   optional?: number;
 }
@@ -245,16 +252,18 @@ export class NodeShape extends Shape {
       return [...this.propertyShapes];
     }
     const res: PropertyShape[] = [];
-    let shapeClass = getShapeClass(this.id);
+    let shapeClass: ShapeConstructor | undefined = getShapeClass(this.id);
     if (!shapeClass) {
       return [...this.propertyShapes];
     }
-    while (shapeClass && (shapeClass as typeof Shape).shape) {
-      res.push(...(shapeClass as typeof Shape).shape.propertyShapes);
-      if (shapeClass === Shape) {
+    while (shapeClass?.shape) {
+      res.push(...shapeClass.shape.propertyShapes);
+      // Stop at Shape base class. Cast needed: ShapeConstructor (concrete new) vs
+      // typeof Shape (abstract new) are structurally incompatible for ===.
+      if (shapeClass === (Shape as unknown)) {
         break;
       }
-      shapeClass = Object.getPrototypeOf(shapeClass);
+      shapeClass = Object.getPrototypeOf(shapeClass) as ShapeConstructor | undefined;
     }
     return res;
   }
@@ -275,20 +284,20 @@ export class NodeShape extends Shape {
     label: string,
     checkSubShapes: boolean = true,
   ): PropertyShape {
-    let shapeClass = getShapeClass(this.id);
+    let shapeClass: ShapeConstructor | undefined = getShapeClass(this.id);
     let res: PropertyShape;
     if (!shapeClass) {
       return this.propertyShapes.find((shape) => shape.label === label);
     }
-    while (!res && shapeClass && (shapeClass as typeof Shape).shape) {
-      res = (shapeClass as typeof Shape).shape.propertyShapes.find(
+    while (!res && shapeClass?.shape) {
+      res = shapeClass.shape.propertyShapes.find(
         (shape) => shape.label === label,
       );
       if (checkSubShapes) {
-        if (shapeClass === Shape) {
+        if (shapeClass === (Shape as unknown)) {
           break;
         }
-        shapeClass = Object.getPrototypeOf(shapeClass);
+        shapeClass = Object.getPrototypeOf(shapeClass) as ShapeConstructor | undefined;
       } else {
         break;
       }
@@ -442,13 +451,13 @@ export function registerPropertyShape(
   const inherited = shape.getPropertyShape(propertyShape.label, true);
   const existing = shape.getPropertyShape(propertyShape.label, false);
   if (!existing && inherited) {
-    if (!(propertyShape as any)[EXPLICIT_MIN_COUNT_SYMBOL]) {
+    if (!(propertyShape as unknown as ExplicitFlags)[EXPLICIT_MIN_COUNT_SYMBOL]) {
       propertyShape.minCount = inherited.minCount;
     }
-    if (!(propertyShape as any)[EXPLICIT_MAX_COUNT_SYMBOL]) {
+    if (!(propertyShape as unknown as ExplicitFlags)[EXPLICIT_MAX_COUNT_SYMBOL]) {
       propertyShape.maxCount = inherited.maxCount;
     }
-    if (!(propertyShape as any)[EXPLICIT_NODE_KIND_SYMBOL]) {
+    if (!(propertyShape as unknown as ExplicitFlags)[EXPLICIT_NODE_KIND_SYMBOL]) {
       propertyShape.nodeKind = inherited.nodeKind;
     }
     validateOverrideTightening(shape, inherited, propertyShape);
@@ -565,13 +574,13 @@ export function createPropertyShape<
   } else if (config.minCount !== undefined) {
     propertyShape.minCount = config.minCount;
   }
-  (propertyShape as any)[EXPLICIT_MIN_COUNT_SYMBOL] =
+  (propertyShape as unknown as ExplicitFlags)[EXPLICIT_MIN_COUNT_SYMBOL] =
     config.required === true || config.minCount !== undefined;
 
   if (config.maxCount !== undefined) {
     propertyShape.maxCount = config.maxCount;
   }
-  (propertyShape as any)[EXPLICIT_MAX_COUNT_SYMBOL] =
+  (propertyShape as unknown as ExplicitFlags)[EXPLICIT_MAX_COUNT_SYMBOL] =
     config.maxCount !== undefined;
   if ((config as LiteralPropertyShapeConfig).datatype) {
     propertyShape.datatype = toPlainNodeRef(
@@ -605,7 +614,7 @@ export function createPropertyShape<
   }
 
   propertyShape.nodeKind = normalizeNodeKind(config.nodeKind, defaultNodeKind);
-  (propertyShape as any)[EXPLICIT_NODE_KIND_SYMBOL] =
+  (propertyShape as unknown as ExplicitFlags)[EXPLICIT_NODE_KIND_SYMBOL] =
     config.nodeKind !== undefined;
 
   if (shapeClass) {
@@ -667,14 +676,14 @@ export function onShapeSetup(
     const nodeShapeId = getNodeShapeUri(packageName, shapeName);
     if (typeof document !== 'undefined') {
       window.addEventListener('load', () => {
-        shapeClass = getShapeClass(nodeShapeId);
-        if (!shapeClass) {
+        const resolved = getShapeClass(nodeShapeId);
+        if (!resolved) {
           console.warn(
             `Could not find value shape (${packageName}/${shapeName}) for accessor get ${propertyName}(). Likely because it is not bundled.`,
           );
           return;
         }
-        safeCallback(shapeClass, cb);
+        safeCallback(resolved as unknown as typeof Shape, cb);
       });
     } else {
       addNodeShapeCallback(nodeShapeId, cb);

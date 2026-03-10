@@ -177,8 +177,8 @@ describe('Query dispatch delegation', () => {
     LinkedStorage.setDefaultStore(store);
 
     const dispatch = getQueryDispatch();
-    const queryFactory = ContextPerson.query((p) => p.name);
-    const result = await dispatch.selectQuery(queryFactory.build());
+    const query = ContextPerson.select((p) => p.name);
+    const result = await dispatch.selectQuery(query.build());
 
     expect(store.selectQuery).toHaveBeenCalledTimes(1);
     expect(store.selectQuery.mock.calls[0][0]?.kind).toBe('select');
@@ -228,7 +228,7 @@ describe('QueryContext edge cases', () => {
     const context = getQueryContext('ctx');
     expect(context.id).toBe('ctx-2');
 
-    const query = ContextPerson.query((p) => p.name).where((p) =>
+    const query = ContextPerson.select((p) => p.name).where((p) =>
       p.bestFriend.equals(context),
     );
     const queryObject = query.toRawInput();

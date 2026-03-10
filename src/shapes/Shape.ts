@@ -3,26 +3,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-import nextTick from 'next-tick';
-import type {ICoreIterable} from '../interfaces/ICoreIterable.js';
 import type {NodeShape, PropertyShape} from './SHACL.js';
 import {
-  GetQueryResponseType,
-  PatchedQueryPromise,
-  QResult,
-  QShape,
   QueryBuildFn,
   QueryResponseToResultType,
   QueryShape,
   SelectAllQueryResponse,
-  SelectQueryFactory,
 } from '../queries/SelectQuery.js';
-import {getQueryDispatch} from '../queries/queryDispatch.js';
-import {AddId, NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
-import {CreateQueryFactory, CreateResponse} from '../queries/CreateQuery.js';
-import {DeleteQueryFactory, DeleteResponse} from '../queries/DeleteQuery.js';
+import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
 import {NodeId} from '../queries/MutationQuery.js';
-import {UpdateQueryFactory} from '../queries/UpdateQuery.js';
+import {QueryBuilder} from '../queries/QueryBuilder.js';
+import {CreateBuilder} from '../queries/CreateBuilder.js';
+import {UpdateBuilder} from '../queries/UpdateBuilder.js';
+import {DeleteBuilder} from '../queries/DeleteBuilder.js';
 import {getPropertyShapeByLabel} from '../utils/ShapeClass.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
 
@@ -34,7 +27,14 @@ type PropertyShapeMapFunction<T extends Shape, ResponseType> = (
   p: AccessPropertiesShape<T>,
 ) => ResponseType;
 
-export type ShapeType<S extends Shape = Shape> = (abstract new (
+/**
+ * Concrete constructor type for Shape subclasses — used at runtime boundaries
+ * (Builder `from()` methods, Shape static `this` parameters, mutation factories).
+ *
+ * Uses concrete `new` (not `abstract new`), so TypeScript allows direct
+ * instantiation (`new shape()`) and property access (`shape.shape`) without casts.
+ */
+export type ShapeConstructor<S extends Shape = Shape> = (new (
   ...args: any[]
 ) => S) & {
   shape: NodeShape;
@@ -92,200 +92,102 @@ export abstract class Shape {
     this.typesToShapes.get(typeId).add(shapeClass);
   }
 
-  static query<S extends Shape, R = unknown>(
-    this: {new (...args: any[]): S; targetClass: any},
-    subject: S | QShape<S> | QResult<S>,
-    queryFn: QueryBuildFn<S, R>,
-  ): SelectQueryFactory<S, R>;
-  static query<S extends Shape, R = unknown>(
-    this: {new (...args: any[]): S; targetClass: any},
-    queryFn: QueryBuildFn<S, R>,
-  ): SelectQueryFactory<S, R>;
-  static query<S extends Shape, R = unknown>(
-    this: {new (...args: any[]): S; targetClass: any},
-    subject: S | QShape<S> | QResult<S> | QueryBuildFn<S, R>,
-    queryFn?: QueryBuildFn<S, R>,
-  ): SelectQueryFactory<S, R> {
-    const _queryFn =
-      subject && queryFn ? queryFn : (subject as QueryBuildFn<S, R>);
-    let _subject: S | QResult<S> = queryFn ? (subject as S) : undefined;
-    if (_subject instanceof QueryShape) {
-      _subject = {id: _subject.id} as QResult<S>;
-    }
-    const query = new SelectQueryFactory<S>(this as any, _queryFn, _subject);
-    return query;
-  }
-
   /**
    * Select properties of instances of this shape.
-   * Returns a single result if a single subject is provided, or an array of results if no subjects are provided.
-   * The select function (first or second argument) receives a proxy of the shape that allows you to virtually access any property you want up to any level of depth.
-   * @param selectFn
+   * Chain `.for(id)` to target a single entity, or `.forAll(ids)` for multiple.
+   * The select callback receives a proxy of the shape for type-safe property access.
    */
   static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<S, ShapeType>[],
+    S extends Shape,
+    R = unknown,
+    ResultType = QueryResponseToResultType<R, S>[],
   >(
-    this: {new (...args: any[]): ShapeType; },
-    selectFn: QueryBuildFn<ShapeType, S>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+    this: ShapeConstructor<S>,
+    selectFn: QueryBuildFn<S, R>,
+  ): QueryBuilder<S, R, ResultType>;
   static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<
-      GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
-      ShapeType
-    >[],
+    S extends Shape,
+    R = unknown,
+    ResultType = QueryResponseToResultType<R, S>[],
   >(
-    this: {new (...args: any[]): ShapeType},
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+    this: ShapeConstructor<S>,
+  ): QueryBuilder<S, R, ResultType>;
   static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<
-      GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
-      ShapeType
-    >,
+    S extends Shape,
+    R = unknown,
+    ResultType = QueryResponseToResultType<R, S>[],
   >(
-    this: {new (...args: any[]): ShapeType; },
-    subjects?: ShapeType | QResult<ShapeType>,
-    selectFn?: QueryBuildFn<ShapeType, S>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
-  static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<
-      GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
-      ShapeType
-    >[],
-  >(
-    this: {new (...args: any[]): ShapeType; },
-    subjects?: ICoreIterable<ShapeType> | QResult<ShapeType>[],
-    selectFn?: QueryBuildFn<ShapeType, S>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
-  static select<
-    ShapeType extends Shape,
-    S = unknown,
-    ResultType = QueryResponseToResultType<
-      GetQueryResponseType<SelectQueryFactory<ShapeType, S>>,
-      ShapeType
-    >[],
-  >(
-    this: {new (...args: any[]): ShapeType; },
-    targetOrSelectFn?: ShapeType | QueryBuildFn<ShapeType, S>,
-    selectFn?: QueryBuildFn<ShapeType, S>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType> {
-    let _selectFn;
-    let subject;
+    this: ShapeConstructor<S>,
+    selectFn?: QueryBuildFn<S, R>,
+  ): QueryBuilder<S, R, ResultType> {
+    let builder = QueryBuilder.from(this) as QueryBuilder<S, any, any>;
     if (selectFn) {
-      _selectFn = selectFn;
-      subject = targetOrSelectFn;
-    } else {
-      _selectFn = targetOrSelectFn;
+      builder = builder.select(selectFn as any);
     }
-
-    const query = new SelectQueryFactory<ShapeType, S>(
-      this as any,
-      _selectFn,
-      subject,
-    );
-    let p = new Promise<ResultType>((resolve, reject) => {
-      nextTick(() => {
-        getQueryDispatch().selectQuery(query.build())
-          .then((result) => {
-            resolve(result as ResultType);
-          })
-          .catch((err) => {
-            reject(err);
-          });
-      });
-    });
-    return query.patchResultPromise<ResultType>(p);
+    return builder as QueryBuilder<S, R, ResultType>;
   }
 
   /**
    * Select all decorated properties of this shape.
-   * Returns a single result if a single subject is provided, or an array of results if no subject is provided.
+   * Chain `.for(id)` to target a single entity.
    */
   static selectAll<
-    ShapeType extends Shape,
+    S extends Shape,
     ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
+      SelectAllQueryResponse<S>,
+      S
     >[],
   >(
-    this: {new (...args: any[]): ShapeType; },
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
-  static selectAll<
-    ShapeType extends Shape,
-    ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
-    >,
-  >(
-    this: {new (...args: any[]): ShapeType; },
-    subject: ShapeType | QResult<ShapeType>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
-  static selectAll<
-    ShapeType extends Shape,
-    ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<ShapeType>,
-      ShapeType
-    >[],
-  >(
-    this: {new (...args: any[]): ShapeType; },
-    subject?: ShapeType | QResult<ShapeType>,
-  ): Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType> {
-    const propertyLabels = (this as any)
-      .shape.getUniquePropertyShapes()
-      .map((propertyShape: PropertyShape) => propertyShape.label);
-    return (this as any).select(subject as any, (shape: ShapeType) =>
-      propertyLabels.map((label) => (shape as any)[label]),
-    ) as Promise<ResultType> & PatchedQueryPromise<ResultType, ShapeType>;
+    this: ShapeConstructor<S>,
+  ): QueryBuilder<S, any, ResultType> {
+    return QueryBuilder.from(this).selectAll() as QueryBuilder<S, any, ResultType>;
   }
 
 
-  static update<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    this: {new (...args: any[]): ShapeType; },
-    id: string | NodeReferenceValue | QShape<ShapeType>,
+  /**
+   * Update properties of an instance of this shape.
+   * Chain `.for(id)` to target a specific entity.
+   *
+   * ```typescript
+   * await Person.update({name: 'Alice'}).for({id: '...'});
+   * ```
+   */
+  static update<S extends Shape, U extends UpdatePartial<S>>(
+    this: ShapeConstructor<S>,
+    data?: U,
+  ): UpdateBuilder<S, U> {
+    let builder = UpdateBuilder.from(this) as UpdateBuilder<S, any>;
+    if (data) {
+      builder = builder.set(data);
+    }
+    return builder as unknown as UpdateBuilder<S, U>;
+  }
+
+  static create<S extends Shape, U extends UpdatePartial<S>>(
+    this: ShapeConstructor<S>,
     updateObjectOrFn?: U,
-  ): Promise<AddId<U>> {
-    const factory = new UpdateQueryFactory<ShapeType, U>(
-      this as any as typeof Shape,
-      id,
-      updateObjectOrFn,
-    );
-    return getQueryDispatch().updateQuery(factory.build());
+  ): CreateBuilder<S, U> {
+    let builder = CreateBuilder.from(this) as CreateBuilder<S, any>;
+    if (updateObjectOrFn) {
+      builder = builder.set(updateObjectOrFn);
+    }
+    return builder as unknown as CreateBuilder<S, U>;
   }
 
-  static create<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    this: {new (...args: any[]): ShapeType; },
-    updateObjectOrFn?: U,
-  ): Promise<CreateResponse<U>> {
-    const factory = new CreateQueryFactory<ShapeType, U>(
-      this as any as typeof Shape,
-      updateObjectOrFn,
-    );
-    return getQueryDispatch().createQuery(factory.build());
-  }
-
-  static delete<ShapeType extends Shape, U extends UpdatePartial<ShapeType>>(
-    this: {new (...args: any[]): ShapeType; },
+  static delete<S extends Shape>(
+    this: ShapeConstructor<S>,
     id: NodeId | NodeId[] | NodeReferenceValue[],
-  ): Promise<DeleteResponse> {
-    const factory = new DeleteQueryFactory<Shape, {}>(
-      this as any as typeof Shape,
-      id,
-    );
-    return getQueryDispatch().deleteQuery(factory.build());
+  ): DeleteBuilder<S> {
+    return DeleteBuilder.from(this, id) as DeleteBuilder<S>;
   }
 
-  static mapPropertyShapes<ShapeType extends Shape, ResponseType = unknown>(
-    this: {new (...args: any[]): ShapeType; targetClass: any},
-    mapFunction?: PropertyShapeMapFunction<ShapeType, ResponseType>,
+  static mapPropertyShapes<S extends Shape, ResponseType = unknown>(
+    this: ShapeConstructor<S>,
+    mapFunction?: PropertyShapeMapFunction<S, ResponseType>,
   ): ResponseType {
-    let dummyShape = new (this as any)();
+    // SAFETY: dummyShape is used as a dynamic proxy target — we assign .proxy and
+    // access arbitrary property names on it, which S doesn't declare.
+    let dummyShape: any = new this();
     dummyShape.proxy = new Proxy(dummyShape, {
       get(target, key, receiver) {
         if (typeof key === 'string') {
@@ -311,7 +213,7 @@ export abstract class Shape {
   }
 
   static getSetOf<T extends Shape>(
-    this: {new (...args: any[]): T},
+    this: ShapeConstructor<T>,
     values: Iterable<T | NodeReferenceValue | string>,
   ): ShapeSet<T> {
     const set = new ShapeSet<T>();
@@ -319,7 +221,7 @@ export abstract class Shape {
       if (value instanceof Shape) {
         set.add(value as T);
       } else {
-        const instance = new (this as any)();
+        const instance = new this();
         instance.id = typeof value === 'string' ? value : value.id;
         set.add(instance);
       }

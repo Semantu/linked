@@ -185,9 +185,40 @@ Already serialized by `algebraToString.ts` as `BIND(expr AS ?var)`.
 - `MutationQuery.ts:33` TODO can be resolved by this feature
 - Expression builder functions should validate argument types at build time where possible
 
+## Callback-style mutation updates
+
+Currently `UpdateBuilder` only supports object-style updates (pass a plain object with new values). The TODO at `MutationQuery.ts:33` also envisions a **callback-style** API where a proxy lets you assign properties imperatively:
+
+```ts
+// Object-style (already works via UpdateBuilder)
+Person.update(entity, { name: 'Bob', age: 30 })
+
+// Callback-style (not yet implemented)
+Person.update(entity, p => {
+  p.name = 'Bob';
+  p.age = L.plus(p.age, 1);  // combine with expressions
+})
+```
+
+### Why callback-style matters
+
+- **Reads + writes in one callback** — the proxy can trace which properties are read (for DELETE old values) and which are written (for INSERT new values), generating correct DELETE/INSERT WHERE in one pass
+- **Natural fit with expressions** — `p.age = L.plus(p.age, 1)` reads the current value and writes a computed new value, which is awkward to express in a plain object
+- **Consistency with select** — `Person.select(p => ...)` already uses proxy callbacks; mutations should follow the same pattern
+
+### Implementation approach
+
+The callback needs a **write-tracing proxy** (unlike the read-only proxy used in `select()`):
+- Property **reads** (`p.age`) produce the same `QueryPrimitive` / `QueryShape` proxies as in select, which can be passed to `L.*` functions
+- Property **writes** (`p.name = 'Bob'`) are intercepted via the proxy `set` trap and recorded as mutation entries
+- After the callback executes, the recorded writes are converted to `IRFieldValue` or `IRExpression` entries in the mutation IR
+
+This reuses the `ProxiedPathBuilder` infrastructure from the query cleanup — the main new work is the `set` trap and wiring mutations into `UpdateBuilder`.
+
 ## Open questions
 
 - Should `L` be the module name, or something more descriptive? (`Expr`, `Fn`, `Q`?)
 - Should comparison functions be usable both in `.where()` and in HAVING clauses?
 - How should null/undefined handling work for computed expressions (COALESCE automatically)?
 - Should there be a `.updateAll()` method for bulk expression-based updates, separate from `.update(id, ...)`?
+- For callback-style updates: should the proxy support deleting properties (`delete p.name`) to generate triple removal?

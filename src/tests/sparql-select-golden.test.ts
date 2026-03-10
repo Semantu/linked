@@ -1076,4 +1076,12 @@ WHERE {
   }
 }`);
   });
+
+  test('QueryBuilder.preload() produces same SPARQL as DSL preloadFor', async () => {
+    const sparql = await goldenSelect(queryFactories.queryBuilderPreload);
+    // QueryBuilder.preload adds name selection + bestFriend preload
+    expect(sparql).toContain('OPTIONAL');
+    expect(sparql).toContain(`<${P}/bestFriend>`);
+    expect(sparql).toContain(`<${P}/name>`);
+  });
 });

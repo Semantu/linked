@@ -367,6 +367,7 @@ export const lowerSelectQuery = (
     limit: canonical.limit,
     offset: canonical.offset,
     subjectId: canonical.subjectId,
+    subjectIds: canonical.subjectIds,
     singleResult: canonical.singleResult,
     resultMap: resultMapEntries,
   };
