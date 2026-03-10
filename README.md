@@ -682,7 +682,7 @@ fs.paths();   // [PropertyPath, PropertyPath]
 **Use cases:**
 
 ```typescript
-// CMS: user picks fields from a UI
+// Dynamically selected fields from a UI
 const fields = FieldSet.for(Person, userSelectedFields);
 const results = await QueryBuilder.from(Person).select(fields);
 
