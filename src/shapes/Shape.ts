@@ -3,11 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-import type {ICoreIterable} from '../interfaces/ICoreIterable.js';
 import type {NodeShape, PropertyShape} from './SHACL.js';
 import {
-  QResult,
-  QShape,
   QueryBuildFn,
   QueryResponseToResultType,
   QueryShape,
@@ -97,9 +94,8 @@ export abstract class Shape {
 
   /**
    * Select properties of instances of this shape.
-   * Returns a single result if a single subject is provided, or an array of results if no subjects are provided.
-   * The select function (first or second argument) receives a proxy of the shape that allows you to virtually access any property you want up to any level of depth.
-   * @param selectFn
+   * Chain `.for(id)` to target a single entity, or `.forAll(ids)` for multiple.
+   * The select callback receives a proxy of the shape for type-safe property access.
    */
   static select<
     S extends Shape,
@@ -119,52 +115,21 @@ export abstract class Shape {
   static select<
     S extends Shape,
     R = unknown,
-    ResultType = QueryResponseToResultType<R, S>,
-  >(
-    this: ShapeConstructor<S>,
-    subjects?: S | QResult<S>,
-    selectFn?: QueryBuildFn<S, R>,
-  ): QueryBuilder<S, R, ResultType>;
-  static select<
-    S extends Shape,
-    R = unknown,
     ResultType = QueryResponseToResultType<R, S>[],
   >(
     this: ShapeConstructor<S>,
-    subjects?: ICoreIterable<S> | QResult<S>[],
-    selectFn?: QueryBuildFn<S, R>,
-  ): QueryBuilder<S, R, ResultType>;
-  static select<
-    S extends Shape,
-    R = unknown,
-    ResultType = QueryResponseToResultType<R, S>[],
-  >(
-    this: ShapeConstructor<S>,
-    targetOrSelectFn?: S | QueryBuildFn<S, R>,
     selectFn?: QueryBuildFn<S, R>,
   ): QueryBuilder<S, R, ResultType> {
-    let _selectFn;
-    let subject;
-    if (selectFn) {
-      _selectFn = selectFn;
-      subject = targetOrSelectFn;
-    } else {
-      _selectFn = targetOrSelectFn;
-    }
-
     let builder = QueryBuilder.from(this) as QueryBuilder<S, any, any>;
-    if (_selectFn) {
-      builder = builder.select(_selectFn as any);
-    }
-    if (subject) {
-      builder = builder.for(subject as any);
+    if (selectFn) {
+      builder = builder.select(selectFn as any);
     }
     return builder as QueryBuilder<S, R, ResultType>;
   }
 
   /**
    * Select all decorated properties of this shape.
-   * Returns a single result if a single subject is provided, or an array of results if no subject is provided.
+   * Chain `.for(id)` to target a single entity.
    */
   static selectAll<
     S extends Shape,
@@ -174,44 +139,26 @@ export abstract class Shape {
     >[],
   >(
     this: ShapeConstructor<S>,
-  ): QueryBuilder<S, any, ResultType>;
-  static selectAll<
-    S extends Shape,
-    ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<S>,
-      S
-    >,
-  >(
-    this: ShapeConstructor<S>,
-    subject: S | QResult<S>,
-  ): QueryBuilder<S, any, ResultType>;
-  static selectAll<
-    S extends Shape,
-    ResultType = QueryResponseToResultType<
-      SelectAllQueryResponse<S>,
-      S
-    >[],
-  >(
-    this: ShapeConstructor<S>,
-    subject?: S | QResult<S>,
   ): QueryBuilder<S, any, ResultType> {
-    let builder = QueryBuilder.from(this).selectAll() as QueryBuilder<S, any, any>;
-    if (subject) {
-      builder = builder.for(subject as any);
-    }
-    return builder as QueryBuilder<S, any, ResultType>;
+    return QueryBuilder.from(this).selectAll() as QueryBuilder<S, any, ResultType>;
   }
 
 
+  /**
+   * Update properties of an instance of this shape.
+   * Chain `.for(id)` to target a specific entity.
+   *
+   * ```typescript
+   * await Person.update({name: 'Alice'}).for({id: '...'});
+   * ```
+   */
   static update<S extends Shape, U extends UpdatePartial<S>>(
     this: ShapeConstructor<S>,
-    id: string | NodeReferenceValue | QShape<S>,
-    updateObjectOrFn?: U,
+    data?: U,
   ): UpdateBuilder<S, U> {
     let builder = UpdateBuilder.from(this) as UpdateBuilder<S, any>;
-    builder = builder.for(id as any);
-    if (updateObjectOrFn) {
-      builder = builder.set(updateObjectOrFn);
+    if (data) {
+      builder = builder.set(data);
     }
     return builder as unknown as UpdateBuilder<S, U>;
   }

@@ -172,12 +172,12 @@ export const queryFactories = {
   selectFriends: () => Person.select((p) => p.friends),
   selectBirthDate: () => Person.select((p) => p.birthDate),
   selectIsRealPerson: () => Person.select((p) => p.isRealPerson),
-  selectById: () => Person.select(entity('p1'), (p) => p.name),
-  selectByIdReference: () => Person.select(entity('p1'), (p) => p.name),
+  selectById: () => Person.select((p) => p.name).for(entity('p1')),
+  selectByIdReference: () => Person.select((p) => p.name).for(entity('p1')),
   selectNonExisting: () =>
-    Person.select({id: 'https://does.not/exist'}, (p) => p.name),
+    Person.select((p) => p.name).for({id: 'https://does.not/exist'}),
   selectUndefinedOnly: () =>
-    Person.select(entity('p3'), (p) => [p.hobby, p.bestFriend]),
+    Person.select((p) => [p.hobby, p.bestFriend]).for(entity('p3')),
   selectFriendsName: () => Person.select((p) => p.friends.name),
   selectNestedFriendsName: () => Person.select((p) => p.friends.friends.name),
   selectMultiplePaths: () =>
@@ -313,7 +313,7 @@ export const queryFactories = {
   sortByAsc: () => Person.select((p) => p.name).sortBy((p) => p.name),
   sortByDesc: () =>
     Person.select((p) => p.name).sortBy((p) => p.name, 'DESC'),
-  updateSimple: () => Person.update(entity('p1'), updateSimple),
+  updateSimple: () => Person.update(updateSimple).for(entity('p1')),
   createSimple: () => Person.create({name: 'Test Create', hobby: 'Chess'}),
   createWithFriends: () =>
     Person.create({
@@ -332,24 +332,24 @@ export const queryFactories = {
     Person.delete([entity('to-delete-1'), entity('to-delete-2')]),
   deleteMultipleFull: () =>
     Person.delete([entity('to-delete-1'), entity('to-delete-2')]),
-  updateOverwriteSet: () => Person.update(entity('p1'), updateOverwriteSet),
+  updateOverwriteSet: () => Person.update(updateOverwriteSet).for(entity('p1')),
   updateUnsetSingleUndefined: () =>
-    Person.update(entity('p1'), updateUnsetSingleUndefined),
+    Person.update(updateUnsetSingleUndefined).for(entity('p1')),
   updateUnsetSingleNull: () =>
-    Person.update(entity('p1'), updateUnsetSingleNull),
+    Person.update(updateUnsetSingleNull).for(entity('p1')),
   updateOverwriteNested: () =>
-    Person.update(entity('p1'), updateOverwriteNested),
+    Person.update(updateOverwriteNested).for(entity('p1')),
   updatePassIdReferences: () =>
-    Person.update(entity('p1'), updatePassIdReferences),
+    Person.update(updatePassIdReferences).for(entity('p1')),
   updateAddRemoveMulti: () =>
-    Person.update(entity('p1'), updateAddRemoveMulti),
-  updateRemoveMulti: () => Person.update(entity('p1'), updateRemoveMulti),
-  updateAddRemoveSame: () => Person.update(entity('p1'), updateAddRemoveSame),
+    Person.update(updateAddRemoveMulti).for(entity('p1')),
+  updateRemoveMulti: () => Person.update(updateRemoveMulti).for(entity('p1')),
+  updateAddRemoveSame: () => Person.update(updateAddRemoveSame).for(entity('p1')),
   updateUnsetMultiUndefined: () =>
-    Person.update(entity('p1'), updateUnsetMultiUndefined),
+    Person.update(updateUnsetMultiUndefined).for(entity('p1')),
   updateNestedWithPredefinedId: () =>
-    Person.update(entity('p1'), updateNestedWithPredefinedId),
-  updateBirthDate: () => Person.update(entity('p1'), updateBirthDate),
+    Person.update(updateNestedWithPredefinedId).for(entity('p1')),
+  updateBirthDate: () => Person.update(updateBirthDate).for(entity('p1')),
   preloadBestFriend: () =>
     Person.select((p) => p.bestFriend.preloadFor(componentLike)),
   preloadBestFriendWithFieldSet: () =>

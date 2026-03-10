@@ -3,6 +3,7 @@ import {Person, tmpEntityBase} from '../test-helpers/query-fixtures';
 import {captureQuery} from '../test-helpers/query-capture-store';
 import {entity, captureDslIR, sanitize} from '../test-helpers/test-utils';
 import {QueryBuilder} from '../queries/QueryBuilder';
+import {UpdateBuilder} from '../queries/UpdateBuilder';
 import {walkPropertyPath} from '../queries/PropertyPath';
 import {FieldSet} from '../queries/FieldSet';
 import {setQueryContext} from '../queries/QueryContext';
@@ -138,7 +139,7 @@ describe('QueryBuilder — IR equivalence with DSL', () => {
 
   test('selectById', async () => {
     const dslIR = await captureDslIR(() =>
-      Person.select(entity('p1'), (p) => p.name),
+      Person.select((p) => p.name).for(entity('p1')),
     );
     const builderIR = QueryBuilder.from(Person)
       .select((p) => p.name)
@@ -511,5 +512,81 @@ describe('QueryBuilder — direct IR generation', () => {
       .select((p) => p.friends.select((f: any) => [f.name, f.hobby]))
       .build();
     expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+});
+
+// =============================================================================
+// .for() and .forAll() chaining tests
+// =============================================================================
+
+describe('Shape.select().for() / .forAll() chaining', () => {
+  test('Person.select(callback).for(id) produces single-result IR', () => {
+    const ir = Person.select((p) => p.name).for(entity('p1')).build();
+    expect(ir.subjectId).toBe(entity('p1').id);
+    expect(ir.singleResult).toBe(true);
+  });
+
+  test('Person.select(callback).for(string) accepts string id', () => {
+    const ir = Person.select((p) => p.name).for(`${tmpEntityBase}p1`).build();
+    expect(ir.subjectId).toBe(`${tmpEntityBase}p1`);
+    expect(ir.singleResult).toBe(true);
+  });
+
+  test('Person.select().for(id) with no callback selects nothing', () => {
+    const ir = Person.select().for(entity('p1')).build();
+    expect(ir.subjectId).toBe(entity('p1').id);
+    expect(ir.singleResult).toBe(true);
+  });
+
+  test('Person.selectAll().for(id) selects all fields for a single entity', () => {
+    const ir = Person.selectAll().for(entity('p1')).build();
+    expect(ir.subjectId).toBe(entity('p1').id);
+    expect(ir.singleResult).toBe(true);
+    expect(ir.projection.length).toBeGreaterThan(0);
+  });
+
+  test('.for(id) produces same IR as old select(id, callback)', async () => {
+    const newIR = Person.select((p) => p.name).for(entity('p1')).build();
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => p.name)
+      .for(entity('p1'))
+      .build();
+    expect(sanitize(newIR)).toEqual(sanitize(builderIR));
+  });
+
+  test('.forAll(ids) targets multiple entities', () => {
+    const ir = QueryBuilder.from(Person)
+      .select((p) => p.name)
+      .forAll([entity('p1'), entity('p2')])
+      .build();
+    expect(ir.subjectIds).toEqual([entity('p1').id, entity('p2').id]);
+    expect(ir.singleResult).toBeFalsy();
+  });
+});
+
+describe('Person.update(data).for(id) chaining', () => {
+  test('Person.update(data).for(id) produces correct IR', () => {
+    const ir = Person.update({hobby: 'Chess'}).for(entity('p1')).build();
+    expect(ir).toBeDefined();
+  });
+
+  test('Person.update().for(id).set(data) produces same IR as update(data).for(id)', () => {
+    const ir1 = Person.update({hobby: 'Chess'}).for(entity('p1')).build();
+    const ir2 = Person.update().for(entity('p1')).set({hobby: 'Chess'}).build();
+    expect(sanitize(ir1)).toEqual(sanitize(ir2));
+  });
+
+  test('Person.update(data).for(string) accepts string id', () => {
+    const ir = Person.update({hobby: 'Chess'}).for(`${tmpEntityBase}p1`).build();
+    expect(ir).toBeDefined();
+  });
+
+  test('UpdateBuilder.from(Person).for(id).set(data) matches Person.update(data).for(id)', () => {
+    const dslIR = Person.update({hobby: 'Chess'}).for(entity('p1')).build();
+    const builderIR = UpdateBuilder.from(Person)
+      .for(entity('p1'))
+      .set({hobby: 'Chess'})
+      .build();
+    expect(sanitize(dslIR)).toEqual(sanitize(builderIR));
   });
 });

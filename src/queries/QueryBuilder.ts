@@ -197,10 +197,10 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     return this.clone({offset: n});
   }
 
-  /** Target a single entity by ID. Implies singleResult. */
-  for(id: string | NodeReferenceValue): QueryBuilder<S, R, Result> {
+  /** Target a single entity by ID. Implies singleResult; unwraps array Result type. */
+  for(id: string | NodeReferenceValue): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result> {
     const subject: NodeReferenceValue = typeof id === 'string' ? {id} : id;
-    return this.clone({subject, subjects: undefined, singleResult: true});
+    return this.clone({subject, subjects: undefined, singleResult: true}) as any;
   }
 
   /** Target multiple entities by ID, or all if no ids given. */

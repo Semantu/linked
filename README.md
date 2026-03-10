@@ -246,10 +246,9 @@ const allFriends = await Person.select((p) => p.knows.selectAll());
 
 **3) Apply a simple mutation**
 ```typescript
-const myNode = {id: 'https://my.app/node1'};
-const updated = await Person.update(myNode, {
+const updated = await Person.update({
   name: 'Alicia',
-});
+}).for({id: 'https://my.app/node1'});
 /* updated: {id: string} & UpdatePartial<Person> */
 ```
 
@@ -322,10 +321,9 @@ const flags = await Person.select((p) => p.isRealPerson);
 
 #### Target a specific subject
 ```typescript
-const myNode = {id: 'https://my.app/node1'};
-/* Result: {id: string; name: string} | null */
-const one = await Person.select(myNode, (p) => p.name);
-const missing = await Person.select({id: 'https://my.app/missing'}, (p) => p.name); // null
+/* Result: {id: string; name: string} */
+const one = await Person.select((p) => p.name).for({id: 'https://my.app/node1'});
+const missing = await Person.select((p) => p.name).for({id: 'https://my.app/missing'}); // null
 ```
 
 #### Multiple paths + nested paths
@@ -449,10 +447,10 @@ Where UpdatePartial<Shape> reflects the created properties.
 
 #### Update
 
-Update will patch any property that you send as payload and leave the rest untouched.
+Update will patch any property that you send as payload and leave the rest untouched. Chain `.for(id)` to target the entity:
 ```typescript
 /* Result: {id: string} & UpdatePartial<Person> */
-const updated = await Person.update({id: 'https://my.app/node1'}, {name: 'Alicia'});
+const updated = await Person.update({name: 'Alicia'}).for({id: 'https://my.app/node1'});
 ```
 Returns:
 ```json
@@ -468,9 +466,9 @@ When updating a property that holds multiple values (one that returns an array i
 To overwrite all values:
 ```typescript
 // Overwrite the full set of "knows" values.
-const overwriteFriends = await Person.update({id: 'https://my.app/person1'}, {
+const overwriteFriends = await Person.update({
   knows: [{id: 'https://my.app/person2'}],
-});
+}).for({id: 'https://my.app/person1'});
 ```
 The result will contain an object with `updatedTo`, to indicate that previous values were overwritten to this new set of values:
 ```json
@@ -480,17 +478,17 @@ The result will contain an object with `updatedTo`, to indicate that previous va
     updatedTo: [{id:"https://my.app/person2"}],
   }
 }
-``` 
+```
 
 To make incremental changes to the current set of values you can provide an object with `add` and/or `remove` keys:
 ```typescript
 // Add one value and remove one value without replacing the whole set.
-const addRemoveFriends = await Person.update({id: 'https://my.app/person1'}, {
+const addRemoveFriends = await Person.update({
   knows: {
     add: [{id: 'https://my.app/person2'}],
     remove: [{id: 'https://my.app/person3'}],
   },
-});
+}).for({id: 'https://my.app/person1'});
 ```
 This returns an object with the added and removed items
 ```json
@@ -713,7 +711,7 @@ const created = await CreateBuilder.from(Person)
   .set({name: 'Alice'})
   .withId('https://my.app/alice');
 
-// Update — equivalent to Person.update({id: '...'}, {name: 'Alicia'})
+// Update — equivalent to Person.update({name: 'Alicia'}).for({id: '...'})
 const updated = await UpdateBuilder.from(Person)
   .for({id: 'https://my.app/alice'})
   .set({name: 'Alicia'});

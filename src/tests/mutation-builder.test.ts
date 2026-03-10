@@ -59,7 +59,7 @@ describe('CreateBuilder — IR equivalence', () => {
 describe('UpdateBuilder — IR equivalence', () => {
   test('update — simple', async () => {
     const dslIR = await captureDslIR(() =>
-      Person.update(entity('p1'), {hobby: 'Chess'}),
+      Person.update({hobby: 'Chess'}).for(entity('p1')),
     );
     const builderIR = UpdateBuilder.from(Person)
       .for(entity('p1'))
@@ -70,9 +70,9 @@ describe('UpdateBuilder — IR equivalence', () => {
 
   test('update — add/remove multi', async () => {
     const dslIR = await captureDslIR(() =>
-      Person.update(entity('p1'), {
+      Person.update({
         friends: {add: [entity('p2')], remove: [entity('p3')]},
-      }),
+      }).for(entity('p1')),
     );
     const builderIR = UpdateBuilder.from(Person)
       .for(entity('p1'))
@@ -83,9 +83,9 @@ describe('UpdateBuilder — IR equivalence', () => {
 
   test('update — nested with predefined id', async () => {
     const dslIR = await captureDslIR(() =>
-      Person.update(entity('p1'), {
+      Person.update({
         bestFriend: {id: `${tmpEntityBase}p3-best-friend`, name: 'Bestie'},
-      }),
+      }).for(entity('p1')),
     );
     const builderIR = UpdateBuilder.from(Person)
       .for(entity('p1'))
@@ -98,7 +98,7 @@ describe('UpdateBuilder — IR equivalence', () => {
 
   test('update — overwrite set', async () => {
     const dslIR = await captureDslIR(() =>
-      Person.update(entity('p1'), {friends: [entity('p2')]}),
+      Person.update({friends: [entity('p2')]}).for(entity('p1')),
     );
     const builderIR = UpdateBuilder.from(Person)
       .for(entity('p1'))
@@ -109,7 +109,7 @@ describe('UpdateBuilder — IR equivalence', () => {
 
   test('update — birth date', async () => {
     const dslIR = await captureDslIR(() =>
-      Person.update(entity('p1'), {birthDate: new Date('2020-01-01')}),
+      Person.update({birthDate: new Date('2020-01-01')}).for(entity('p1')),
     );
     const builderIR = UpdateBuilder.from(Person)
       .for(entity('p1'))
