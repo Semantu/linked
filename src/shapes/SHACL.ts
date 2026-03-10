@@ -258,6 +258,8 @@ export class NodeShape extends Shape {
     }
     while (shapeClass?.shape) {
       res.push(...shapeClass.shape.propertyShapes);
+      // Stop at Shape base class. Cast needed: ShapeConstructor (concrete new) vs
+      // typeof Shape (abstract new) are structurally incompatible for ===.
       if (shapeClass === (Shape as unknown)) {
         break;
       }

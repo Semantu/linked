@@ -1354,7 +1354,11 @@ export class Evaluation {
 class SetEvaluation extends Evaluation {}
 
 /**
- * The class that is used for when JS primitives are converted to a QueryValue
+ * Concrete query wrapper for JS primitive values (string, number, boolean, Date).
+ *
+ * Replaces the former abstract class + subclasses (QueryString, QueryNumber,
+ * QueryBoolean, QueryDate) — the type parameter T carries the primitive type,
+ * so separate subclasses are unnecessary.
  */
 export class QueryPrimitive<
   T,

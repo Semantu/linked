@@ -151,12 +151,12 @@ export interface LinkedPackageObject
   registerPackageExport: (exportedObject: any) => void;
 
   /**
-   * A method to get a shape class in this package by its name.
-   * This is helpful to avoid circular dependencies between shapes.
-   * For example see Thing.ts which uses get image():ImageObject.
-   * ImageObject extends Things.
-   * So get image() is implemented with getOneAs(...,getPackageShape('ImageObject'))
-   * @param name
+   * Get a Shape subclass registered in this package by name.
+   * Returns undefined if the shape is not registered or bundled.
+   *
+   * Useful for avoiding circular dependencies between shapes.
+   * E.g. `getOneAs(..., getPackageShape('ImageObject'))` in Thing.ts
+   * avoids importing ImageObject (which extends Thing).
    */
   getPackageShape: (name: string) => ShapeConstructor | undefined;
   /**

@@ -53,11 +53,13 @@ export type FieldSetEntry = {
   path: PropertyPath;
   alias?: string;
   scopedFilter?: WherePath;
+  /** Nested object selection — the user explicitly selected sub-fields (e.g. `p.friends.select(...)`) */
   subSelect?: FieldSet;
   aggregation?: 'count';
   customKey?: string;
   evaluation?: {method: string; wherePath: any};
-  /** The component's FieldSet for preload composition. */
+  /** Component preload composition — the FieldSet comes from a linked component's own query,
+   *  merged in via `preloadFor()`. Distinct from subSelect which is a user-authored nested query. */
   preloadSubSelect?: FieldSet;
 };
 
@@ -617,8 +619,12 @@ export class FieldSet<R = any, Source = any> {
   }
 
   /**
-   * Extract a FieldSet from a component-like object (has .fields or .query).
-   * Used to get the component's selection for preload composition.
+   * Extract a FieldSet from a component-like object for preload composition.
+   *
+   * Supports multiple component interfaces:
+   * - `.fields` as a FieldSet directly
+   * - `.query` as a FieldSet, QueryBuilder (duck-typed via .fields()), or
+   *   Record<string, QueryBuilder> (e.g. `{person: PersonQuery}`)
    */
   static extractComponentFieldSet(component: any): FieldSet | undefined {
     // Prefer .fields if it's a FieldSet
