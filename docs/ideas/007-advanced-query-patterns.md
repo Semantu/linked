@@ -253,6 +253,47 @@ Person.delete().where(() => true)                         // all (explicit)
 - "Delete all" is a common operation and `.where(() => true)` is awkward
 - Missing a `.where()` call accidentally could be confusing (should it error or delete all?)
 
+### Decision: `.deleteAll()` + `.delete().where()`, schema-aware blank node cleanup
+
+**Chosen:** Hybrid of Route A and B.
+
+- `Shape.deleteAll()` — explicit bulk delete, no safety gate needed
+- `Shape.delete().where(cb)` — conditional delete
+- `Shape.deleteWhere(cb)` — optional sugar for `.delete().where(cb)`
+- `Shape.delete(id)` — existing by-ID (unchanged)
+- Returns `void`
+
+**SPARQL generation — schema-aware blank node cleanup:**
+
+Uses explicit property paths from the shape tree to navigate to blank nodes, then wildcards their properties. Recursively walks as deep as blank-node-typed properties nest. `FILTER(isBlank())` always present (essential for `sh:BlankNodeOrIRI`).
+
+Example for `Person` with `address: BlankNode → Address { street, city, geo: BlankNodeOrIRI → GeoPoint { lat, lon } }`:
+
+```sparql
+DELETE {
+  ?a0 ?p ?o .
+  ?addr ?p1 ?o1 .
+  ?geo ?p2 ?o2 .
+}
+WHERE {
+  ?a0 a <Person> .
+  ?a0 ?p ?o .
+  OPTIONAL {
+    ?a0 <address> ?addr . FILTER(isBlank(?addr)) .
+    ?addr ?p1 ?o1 .
+    OPTIONAL {
+      ?addr <geo> ?geo . FILTER(isBlank(?geo)) .
+      ?geo ?p2 ?o2 .
+    }
+  }
+}
+```
+
+- Root: `?a0 ?p ?o` catches everything including `rdf:type` — no need for explicit `?a0 a <Person>` in DELETE
+- Blank node traversal: explicit property paths (`<address>`, `<geo>`) — efficient, no scanning
+- Blank node cleanup: `?addr ?p1 ?o1` wildcard — catches all properties on the blank node
+- Recursion depth: determined at codegen by walking the shape tree
+
 ---
 
 ## Feature 3: Conditional Update (`update().where()`)
