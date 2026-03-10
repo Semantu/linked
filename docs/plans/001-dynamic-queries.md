@@ -3365,3 +3365,31 @@ Remaining ~31 `as any` casts are inherent to proxy/dynamic patterns (callback ge
 | **QueryContext NullQueryShape** (QueryContext.ts:8) | Feature work — needs design decision on what default/null query behavior should look like |
 | **Async shape loading** (SelectQuery.ts:693–697) | Speculative — comment says "not sure if that's even possible with dynamic import paths known only at runtime". Needs shapes-only architecture first |
 | **Generic naming consistency** (`QShapeType` vs `ShapeType` vs `T`) | Opportunistic — address during other refactors, not worth a dedicated pass |
+
+---
+
+## REVIEW
+
+**Wrapup completed.** All 19 phases implemented and validated.
+
+### PR-readiness checklist
+
+- [x] TypeScript compilation clean (`npx tsc --noEmit` — 0 errors)
+- [x] All 629 tests passing (`npm test` — 22 suites)
+- [x] No existing tests deleted or weakened
+- [x] Documentation updated (README: Dynamic Query Building section, updated examples)
+- [x] Changeset created (`.changeset/dynamic-queries-2.0.md` — major)
+- [x] Breaking changes documented in changeset with migration examples
+- [x] New features documented in changeset and README
+- [x] Dead code removed (Phases 13, 17, 18)
+- [x] Clarifying comments added across changed files
+- [x] Report created at `docs/reports/008-dynamic-queries.md`
+
+### Final commit history
+
+21 commits covering: ProxiedPathBuilder extraction, QueryBuilder, FieldSet, mutation builders, serialization, component integration, forAll, unified callback tracing, direct IR generation, sub-queries, SelectQueryFactory removal, API hardening, typed FieldSet, dead code removal, type safety, QueryPrimitive consolidation, getQueryPaths cleanup, SelectPath IR removal, ShapeConstructor type, clarifying comments, README update, breaking API cleanup (select/update id removal), changeset.
+
+### Deferred items
+
+- Phase 16 (CreateQResult simplification) → `docs/ideas/011-query-type-system-refactor.md`
+- OR scoped filters, raw IR helpers, callback-style mutations — see report §7
