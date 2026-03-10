@@ -8,7 +8,7 @@ import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 // Duck-type helpers for runtime detection.
 // These check structural shape since the classes live in SelectQuery.ts (runtime circular dep).
 // QueryBuilderObject has .property (PropertyShape) and .subject (QueryBuilderObject).
-// SetSize has .subject and extends QueryNumber.
+// SetSize has .subject and extends QueryPrimitive<number>.
 type QueryBuilderObjectLike = {
   property?: PropertyShape;
   subject?: QueryBuilderObjectLike;

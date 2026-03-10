@@ -185,7 +185,7 @@ export type ToQueryBuilderObject<
           ? AT extends Date | string | number
             ? QueryPrimitiveSet<ToQueryPrimitive<AT, Source, Property>>
             : AT extends boolean
-              ? QueryBoolean
+              ? QueryPrimitive<boolean>
               : AT[]
           : //added support for get/set methods that return NodeReferenceValue, treating them as plain Shapes
             T extends NodeReferenceValue
@@ -197,13 +197,13 @@ export type ToQueryPrimitive<
   Source,
   Property extends string | number | symbol = '',
 > = T extends string
-  ? QueryString<Source, Property>
+  ? QueryPrimitive<string, Source, Property>
   : T extends number
-    ? QueryNumber<Source, Property>
+    ? QueryPrimitive<number, Source, Property>
     : T extends Date
-      ? QueryDate<Source, Property>
+      ? QueryPrimitive<Date, Source, Property>
       : T extends boolean
-        ? QueryBoolean<Source, Property>
+        ? QueryPrimitive<boolean, Source, Property>
         : never & {__error: 'ToQueryPrimitive: no matching primitive type'};
 
 export type WherePath = WhereEvaluationPath | WhereAndOr;
@@ -365,7 +365,7 @@ export type GetQueryObjectResultType<
               ? GetQueryObjectResultType<QPrim, null, null, true>
               : QV extends Array<infer Type>
                 ? UnionToIntersection<QueryResponseToResultType<Type>>
-                : QV extends QueryBoolean<any, any>
+                : QV extends QueryPrimitive<boolean, any, any>
                   ? 'bool'
                   : never & {__error: 'GetQueryObjectResultType: unmatched query value type'};
 
@@ -386,7 +386,7 @@ type GetQueryObjectOriginal<T> =
       : never;
 /**
  * Converts an intersection of QueryBuilderObjects into a plain JS object
- * i.e. QueryString<Person,"name"> | QueryString<Person,"hobby"> --> {name: string, hobby: string}
+ * i.e. QueryPrimitive<string,Person,"name"> | QueryPrimitive<string,Person,"hobby"> --> {name: string, hobby: string}
  * To do this we get the Property of each QueryBuilderObject, and use it as the key in the resulting object
  * and, we get the Original type of each QueryBuilderObject, and use it as the value in the resulting object
  */
@@ -618,13 +618,13 @@ export class QueryBuilderObject<
     } else if (originalValue instanceof ShapeSet) {
       return QueryShapeSet.create(originalValue, property, subject);
     } else if (typeof originalValue === 'string') {
-      return new QueryString(originalValue, property, subject);
+      return new QueryPrimitive<string>(originalValue, property, subject);
     } else if (typeof originalValue === 'number') {
-      return new QueryNumber(originalValue, property, subject);
+      return new QueryPrimitive<number>(originalValue, property, subject);
     } else if (typeof originalValue === 'boolean') {
-      return new QueryBoolean(originalValue, property, subject);
+      return new QueryPrimitive<boolean>(originalValue, property, subject);
     } else if (originalValue instanceof Date) {
-      return new QueryDate(originalValue, property, subject);
+      return new QueryPrimitive<Date>(originalValue, property, subject);
     } else if (Array.isArray(originalValue)) {
       return new QueryPrimitiveSet(originalValue, property, subject);
     } else if (
@@ -669,21 +669,21 @@ export class QueryBuilderObject<
     if (datatype) {
       if (singleValue) {
         if (isSameRef(datatype, xsd.integer)) {
-          return new QueryNumber(0, property, subject);
+          return new QueryPrimitive<number>(0, property, subject);
         } else if (isSameRef(datatype, xsd.boolean)) {
-          return new QueryBoolean(false, property, subject);
+          return new QueryPrimitive<boolean>(false, property, subject);
         } else if (
           isSameRef(datatype, xsd.dateTime) ||
           isSameRef(datatype, xsd.date)
         ) {
-          return new QueryDate(new Date(), property, subject);
+          return new QueryPrimitive<Date>(new Date(), property, subject);
         } else if (isSameRef(datatype, xsd.string)) {
-          return new QueryString('', property, subject);
+          return new QueryPrimitive<string>('', property, subject);
         }
       } else {
         //TODO review this, do we need property & subject in both of these? currently yes, but why
         return new QueryPrimitiveSet([''], property, subject, [
-          new QueryString('', property, subject),
+          new QueryPrimitive<string>('', property, subject),
         ]);
       }
     }
@@ -716,11 +716,11 @@ export class QueryBuilderObject<
     ) {
       if (singleValue) {
         //default to string if no datatype is set
-        return new QueryString('', property, subject);
+        return new QueryPrimitive<string>('', property, subject);
       } else {
         //TODO review this, do we need property & subject in both of these? currently yes, but why
         return new QueryPrimitiveSet([''], property, subject, [
-          new QueryString('', property, subject),
+          new QueryPrimitive<string>('', property, subject),
         ]);
       }
     }
@@ -738,7 +738,7 @@ export class QueryBuilderObject<
 
   static getOriginalSource(endValue: Shape): Shape;
 
-  static getOriginalSource(endValue: QueryString): Shape | string;
+  static getOriginalSource(endValue: QueryPrimitive<any>): Shape | string;
 
   static getOriginalSource(
     endValue: string[] | QueryBuilderObject,
@@ -761,7 +761,7 @@ export class QueryBuilderObject<
         ),
       ) as ShapeSet;
     }
-    if (endValue instanceof QueryString) {
+    if (endValue instanceof QueryPrimitive) {
       return endValue.subject
         ? this.getOriginalSource(endValue.subject as QueryShapeSet)
         : endValue.originalValue;
@@ -1535,9 +1535,8 @@ class SetEvaluation extends Evaluation {}
 
 /**
  * The class that is used for when JS primitives are converted to a QueryValue
- * This is extended by QueryString, QueryNumber, QueryBoolean, etc
  */
-export abstract class QueryPrimitive<
+export class QueryPrimitive<
   T,
   Source = any,
   Property extends string | number | symbol = any,
@@ -1557,33 +1556,12 @@ export abstract class QueryPrimitive<
 
   where(validation: WhereClause<string>): this {
     // let nodeShape = this.subject.getOriginalValue().nodeShape;
-    this.wherePath = processWhereClause(validation, new QueryString(''));
+    this.wherePath = processWhereClause(validation, new QueryPrimitive(''));
     //return this because after Shape.friends.where() we can call other methods of Shape.friends
     return this as any;
   }
 }
 
-//@TODO: QueryString, QueryNumber, QueryBoolean, QueryDate can all be replaced with QueryPrimitive, and we can infer the original type, no need for these extra classes
-//UPDATE some of this has started. Query response to result conversion is using QueryPrimitive only
-export class QueryString<
-  Source = any,
-  Property extends string | number | symbol = '',
-> extends QueryPrimitive<string, Source, Property> {}
-
-export class QueryDate<
-  Source = any,
-  Property extends string | number | symbol = any,
-> extends QueryPrimitive<Date, Source, Property> {}
-
-export class QueryNumber<
-  Source = any,
-  Property extends string | number | symbol = any,
-> extends QueryPrimitive<number, Source, Property> {}
-
-export class QueryBoolean<
-  Source = any,
-  Property extends string | number | symbol = any,
-> extends QueryPrimitive<boolean, Source, Property> {}
 
 export class QueryPrimitiveSet<
   QPrimitive extends QueryPrimitive<any> = null,
@@ -1617,7 +1595,7 @@ export class QueryPrimitiveSet<
     ) as this;
   }
 
-  //TODO: see if we can merge these methods of QueryString and QueryPrimitiveSet and soon other things like QueryNumber
+  //TODO: see if we can merge these methods of QueryPrimitive and QueryPrimitiveSet
   // so that they're only defined once
   equals(other) {
     return new Evaluation(this, WhereMethods.EQUALS, [other]);
@@ -1661,7 +1639,7 @@ export class QueryPrimitiveSet<
   }
 }
 
-export class SetSize<Source = null> extends QueryNumber<Source> {
+export class SetSize<Source = null> extends QueryPrimitive<number, Source> {
   constructor(
     public subject: QueryShapeSet | QueryShape | QueryPrimitiveSet,
     public countable?: QueryBuilderObject,
