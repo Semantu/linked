@@ -3345,50 +3345,189 @@ Factor the `getQueryPaths` monkey-patch into the FieldSet class properly. Curren
 
 ---
 
-### Phase 18: FieldSet → Desugar Direct Pipeline
+### Phase 18: Remove Old SelectPath IR
 
-**Effort: Medium–High | Impact: Architecture — eliminates SelectPath bridge**
+**Effort: High | Impact: Architecture — removes entire intermediate representation layer**
 
-Make `desugarSelectQuery()` accept FieldSet directly, eliminating the `fieldSetToSelectPath()` bridge. This collapses the pipeline from `FieldSet → SelectPath → desugar → IRSelectQuery` to `FieldSet → desugar → IRSelectQuery`.
+**Goal:** Eliminate the `SelectPath` / `QueryPath` / `QueryStep` intermediate representation and the `fieldSetToSelectPath()` / `entryToQueryPath()` bridge functions. Make `desugarSelectQuery()` accept FieldSet entries directly instead of parsing the SelectPath format back into the same structures FieldSet already has.
 
-**Current pipeline:**
+No backward compatibility needed — SelectPath types are not publicly exported.
+
+#### Current pipeline (wasteful roundtrip)
+
 ```
-QueryBuilder._buildDirectRawInput()
-  → fieldSetToSelectPath(fs)  // converts FieldSet entries to SelectPath
-  → constructs RawSelectInput { select: SelectPath, ... }
-  → desugarSelectQuery(rawInput)
-  → IRSelectQuery
+FieldSet entries (clean data: PropertyPath, scopedFilter, subSelect, aggregation, ...)
+    ↓
+fieldSetToSelectPath() + entryToQueryPath()     ← SERIALIZE to old format
+    ↓
+SelectPath (QueryPath[], CustomQueryObject, PropertyQueryStep, SizeStep, ...)
+    ↓
+RawSelectInput { select: SelectPath, where: WherePath, sortBy: SortByPath, ... }
+    ↓
+desugarSelectQuery()                            ← RE-PARSE from old format
+    ↓
+DesugaredSelectQuery (DesugaredPropertyStep, DesugaredCountStep, DesugaredSubSelect, ...)
+    ↓
+canonicalizeDesugaredSelectQuery() → lowerSelectQuery() → IRSelectQuery
 ```
 
-**Target pipeline:**
+The middle two steps serialize FieldSet data into SelectPath only for desugar to parse it back. FieldSet entries already contain everything desugar needs (PropertyShape segments, scopedFilter, aggregation, subSelect, evaluation, customKey).
+
+#### Target pipeline
+
 ```
-QueryBuilder._buildDirectRawInput()
-  → constructs RawFieldSetInput { fieldSet: FieldSet, ... }
-  → desugarFieldSetQuery(rawFieldSetInput)
-  → IRSelectQuery
+FieldSet entries
+    ↓
+desugarSelectQuery(entries, ...)                ← DIRECT conversion
+    ↓
+DesugaredSelectQuery
+    ↓
+canonicalizeDesugaredSelectQuery() → lowerSelectQuery() → IRSelectQuery
 ```
+
+#### 3 consumers of SelectPath today
+
+| # | Consumer | Uses SelectPath for | Elimination strategy |
+|---|---|---|---|
+| 1 | `QueryBuilder._buildDirectRawInput()` | Packages FieldSet → `RawSelectInput.select` | Pass FieldSet entries directly to desugar |
+| 2 | `QueryBuilder.getQueryPaths()` | Returns SelectPath for BoundComponent | Replace: return FieldSet directly, let consumers use entries |
+| 3 | `BoundComponent.getComponentQueryPaths()` | Builds preload SelectPath from component query | Replace: extract FieldSet from component, store as preloadFieldSet |
+
+Consumer 3 (preload) is the trickiest — `BoundComponent.getPropertyPath()` builds a `ComponentQueryPath` using the old `QueryStep`/`SubQueryPaths` types. This path gets stored as `entry.preloadQueryPath` and passed through to desugar. Eliminating this requires changing how preloads store their data.
+
+#### Sub-phases
+
+---
+
+##### Phase 18A: Direct FieldSet → Desugar conversion
+
+**Effort: Medium | Risk: Low (parity tests)**
+
+Write `desugarFieldSetEntries()` — converts `FieldSetEntry[]` directly to `DesugaredSelection[]`, bypassing SelectPath entirely. Each entry maps cleanly:
+
+| FieldSetEntry field | → | Desugared output |
+|---|---|---|
+| `path.segments` (PropertyShape[]) | → | `DesugaredPropertyStep[]` (via `.id`) |
+| `scopedFilter` (WherePath) | → | `DesugaredPropertyStep.where` (via existing `toWhere()`) |
+| `aggregation === 'count'` | → | `DesugaredCountStep` |
+| `subSelect` (FieldSet) | → | `DesugaredSubSelect` (recursive) |
+| `evaluation` | → | `DesugaredEvaluationSelect` |
+| `customKey` on all entries | → | `DesugaredCustomObjectSelect` |
+| `preloadQueryPath` | → | **Pass-through** (handled in 18C) |
 
 | # | Task |
 |---|---|
-| 18.1 | Create `RawFieldSetInput` type — same as `RawSelectInput` but with `fieldSet: FieldSet` instead of `select: SelectPath` |
-| 18.2 | Implement `desugarFieldSetQuery()` — walks FieldSet entries directly to produce `DesugaredSelectQuery`, bypassing SelectPath entirely |
-| 18.3 | Each FieldSetEntry already has `path.segments`, `scopedFilter`, `subSelect`, `aggregation`, `customKey` — map these directly to `DesugaredPropertyStep`, `DesugaredCountStep`, etc. |
-| 18.4 | Update `QueryBuilder._buildDirectRawInput()` to call the new path |
-| 18.5 | Keep `fieldSetToSelectPath()` and `desugarSelectQuery()` available for backward compat — deprecate but don't remove yet |
-| 18.6 | Add tests that verify FieldSet-direct and SelectPath-bridge produce identical `DesugaredSelectQuery` output for all existing test cases |
+| 18A.1 | Write `desugarFieldSetEntries(entries: FieldSetEntry[]): DesugaredSelection[]` in IRDesugar.ts |
+| 18A.2 | Write `desugarFieldSetEntry(entry: FieldSetEntry): DesugaredSelection` — handles each entry type |
+| 18A.3 | For `preloadQueryPath` entries, temporarily fall back to existing `toSelection()` (pass-through old path until 18C) |
+| 18A.4 | Create new `RawFieldSetInput` type (replaces `RawSelectInput`): `{ entries: FieldSetEntry[], where?, sortBy?, subject?, ... }` |
+| 18A.5 | Write `desugarFieldSetQuery(input: RawFieldSetInput): DesugaredSelectQuery` — uses `desugarFieldSetEntries` + existing `toWhere`/`toSortBy` |
+| 18A.6 | Add parity tests: for every existing desugar test case, assert both paths produce identical `DesugaredSelectQuery` |
 
-**Stubs for parallel execution:** If running before Phase 17, the FieldSet `getQueryPaths` monkey-patch can be ignored — this phase only needs FieldSet entries, not `getQueryPaths`.
+**Validation:**
+- Parity test: `desugarFieldSetQuery(fieldSetInput)` deep-equals `desugarSelectQuery(rawSelectInput)` for all fixtures
+- `npx tsc --noEmit` exits 0, `npm test` passes
+
+**Open question: `toWhere()` and `toSortBy()` reuse.**
+These functions in IRDesugar.ts convert `WherePath` → `DesugaredWhere` and `SortByPath` → `DesugaredSortBy`. Both operate on `WherePath`/`SortByPath` types which are produced by `processWhereClause()` and `evaluateSortCallback()` in SelectQuery.ts. These are NOT part of the SelectPath layer — they're produced independently by evaluating where/sort callbacks through the proxy. **Decision:** Keep `toWhere()` and `toSortBy()` as-is. They don't need refactoring. The `WherePath`/`SortByPath` types stay because they come from proxy evaluation, not from FieldSet.
+
+---
+
+##### Phase 18B: Switch QueryBuilder to the new path
+
+**Effort: Low | Risk: Low**
+
+Update `QueryBuilder._buildDirectRawInput()` to construct `RawFieldSetInput` and call `desugarFieldSetQuery()` instead of going through `fieldSetToSelectPath()`.
+
+| # | Task |
+|---|---|
+| 18B.1 | Update `_buildDirectRawInput()` → build `RawFieldSetInput` with FieldSet entries directly |
+| 18B.2 | Update `buildSelectQuery()` in IRPipeline.ts to accept `RawFieldSetInput | RawSelectInput | IRSelectQuery` |
+| 18B.3 | Remove `fieldSetToSelectPath` import from QueryBuilder.ts |
+| 18B.4 | Update `QueryBuilder.getQueryPaths()` — returns `fieldSetToSelectPath(fs)` currently. Options: (a) remove if no longer needed, (b) keep but have it return FieldSet directly |
+
+**Open question: What to do with `getQueryPaths()`?**
+It's used by `BoundComponent.getComponentQueryPaths()` for preload path building. If we remove it, we break preload. If we keep it, it still depends on `fieldSetToSelectPath`.
+
+**Option A:** Keep `getQueryPaths()` for now, tackle preload in 18C.
+**Option B:** Change `getQueryPaths()` to return FieldSet, update BoundComponent to work with FieldSet.
+**Recommendation:** Option A — keep getQueryPaths temporarily. Preload is complex enough to deserve its own sub-phase.
+
+**Validation:**
+- All existing tests pass (same IR output, just different entry point)
+- `fieldSetToSelectPath` no longer imported by QueryBuilder (except if keeping getQueryPaths temporarily)
+
+---
+
+##### Phase 18C: Refactor preload to use FieldSet directly
+
+**Effort: Medium | Risk: Medium — preload path-building is intricate**
+
+Currently preload works by:
+1. `BoundComponent.getPropertyPath()` builds a `ComponentQueryPath` (old SelectPath types) by merging source path + component query paths
+2. This gets stored as `entry.preloadQueryPath` (typed `any`)
+3. `entryToQueryPath` passes it through to desugar unchanged
+4. `desugarSelectQuery` has to parse it like any other SelectPath
+
+The cleaner model: preload entries should store a FieldSet (from the component) + the source path segments. Desugar can then process the preload FieldSet directly.
+
+| # | Task |
+|---|---|
+| 18C.1 | Change `FieldSetEntry.preloadQueryPath` to `preloadFieldSet?: FieldSet` + `preloadSourceSegments?: PropertyShape[]` |
+| 18C.2 | Update `FieldSet.convertTraceResult()` (line 580-587) — for BoundComponent, extract the component's FieldSet and source segments instead of calling `getPropertyPath()` |
+| 18C.3 | Update `desugarFieldSetEntry()` — for preload entries, produce `DesugaredSubSelect` from preloadFieldSet + preloadSourceSegments |
+| 18C.4 | Remove `BoundComponent.getComponentQueryPaths()` and `BoundComponent.getPropertyPath()` — no longer needed |
+| 18C.5 | Remove `QueryBuilder.getQueryPaths()` — its only remaining consumer was BoundComponent |
+
+**Open question: Is the preload system well-tested?**
+Need to verify preload test coverage before refactoring. If preload tests are thin, add tests first.
+
+**Validation:**
+- All preload-related tests pass
+- `grep -rn 'getComponentQueryPaths\|getPropertyPath' src/queries/` — only legitimate non-preload uses remain
+- `grep -rn 'preloadQueryPath' src/` — zero hits (replaced with preloadFieldSet)
+
+---
+
+##### Phase 18D: Delete old SelectPath types and bridge functions
+
+**Effort: Low | Risk: Low (everything should be unused by now)**
+
+Remove all dead code from the old IR layer.
+
+| # | Task |
+|---|---|
+| 18D.1 | Remove `fieldSetToSelectPath()` and `entryToQueryPath()` from SelectQuery.ts |
+| 18D.2 | Remove old `desugarSelectQuery()` (the SelectPath-based version) from IRDesugar.ts. Rename `desugarFieldSetQuery()` → `desugarSelectQuery()` |
+| 18D.3 | Remove `RawSelectInput` type from IRDesugar.ts |
+| 18D.4 | Remove SelectPath types from SelectQuery.ts: `SelectPath`, `QueryPath`, `QueryPropertyPath`, `QueryStep`, `PropertyQueryStep`, `SizeStep`, `SubQueryPaths`, `CustomQueryObject`, `ComponentQueryPath` |
+| 18D.5 | Remove type guards from IRDesugar.ts: `isPropertyQueryStep`, `isSizeStep`, `isCustomQueryObject` |
+| 18D.6 | Remove `toStep()`, `toPropertyStepOnly()`, `toSelections()`, `toSelection()`, `toSubSelections()`, `toCustomObjectSelect()`, `toSelectionPath()` from IRDesugar.ts |
+| 18D.7 | Update test helpers: `captureRawQuery` in query-capture-store.ts — capture `RawFieldSetInput` instead of `RawSelectInput` |
+| 18D.8 | Update desugar tests in ir-desugar.test.ts — pass FieldSet entries instead of RawSelectInput |
+| 18D.9 | Update any remaining imports/references across the codebase |
 
 **Validation:**
 - `npx tsc --noEmit` exits 0
 - `npm test` — all tests pass
-- New test: for every existing `desugarSelectQuery` test case, assert `desugarFieldSetQuery` produces an identical `DesugaredSelectQuery`
-- `fieldSetToSelectPath()` call count in QueryBuilder reduced to 0 (only used in deprecated/compat paths)
+- `grep -rn 'SelectPath\|QueryPath\|QueryStep\|SizeStep\|PropertyQueryStep\|fieldSetToSelectPath\|entryToQueryPath\|RawSelectInput' src/queries/` — zero hits (only in comments/changelogs)
+- Total lines removed from queries/ directory > 150
 
-**Open questions:**
-1. **Deprecate `fieldSetToSelectPath()` or remove?** It's used in 10 places currently. After this phase, QueryBuilder won't need it, but it may still be useful for debugging/inspection. **Recommendation:** Deprecate with `@deprecated` JSDoc — keep available but mark for future removal. Remove from QueryBuilder's imports.
-2. **New function name: `desugarFieldSetQuery` or overload `desugarSelectQuery`?** An overload keeps one entry point. A new function is clearer about the two code paths. **Recommendation:** New function `desugarFieldSetQuery()` — clearer separation, easier to trace, and the old function stays untouched for backward compat.
-3. **Should FieldSet carry `where`, `sortBy`, `limit`, `offset` directly?** Currently these live on QueryBuilder, not FieldSet. The new `RawFieldSetInput` still needs these from QueryBuilder. **Recommendation:** Keep them on QueryBuilder for now — FieldSet is the "what to select", QueryBuilder is the "how to query". Don't conflate concerns.
+---
+
+#### Execution order
+
+```
+18A (write new desugar path + parity tests) — safe, additive
+  ↓
+18B (switch QueryBuilder) — swaps hot path, parity tests validate
+  ↓
+18C (refactor preload) — most complex, isolated to preload subsystem
+  ↓
+18D (delete dead code) — pure removal, everything should be unused
+```
+
+18A and 18B can potentially be done together if confidence is high. 18C is the riskiest and most isolated. 18D is trivial cleanup.
 
 ---
 
