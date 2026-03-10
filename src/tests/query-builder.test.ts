@@ -339,11 +339,11 @@ describe('QueryBuilder — preload', () => {
     expect(ir.projection.length).toBeGreaterThanOrEqual(1);
   });
 
-  test('getQueryPaths() returns valid SelectPath', () => {
+  test('fields() returns FieldSet for use by pipeline', () => {
     const builder = QueryBuilder.from(Person).select((p) => [p.name]);
-    const paths = builder.getQueryPaths();
-    expect(Array.isArray(paths)).toBe(true);
-    expect((paths as any[]).length).toBeGreaterThan(0);
+    const fs = builder.fields();
+    expect(fs).toBeDefined();
+    expect(fs!.entries.length).toBeGreaterThan(0);
   });
 });
 

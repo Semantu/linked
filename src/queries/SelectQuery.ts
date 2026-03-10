@@ -58,34 +58,23 @@ export type QueryBuildFn<T extends Shape, ResponseType> = (
 export type QueryWrapperObject<ShapeType extends Shape = any> = {
   [key: string]: FieldSet<any, any>;
 };
-export type CustomQueryObject = {[key: string]: QueryPath};
 
-export type SelectPath = QueryPath[] | CustomQueryObject;
 export type SortByPath = {
-  paths: QueryPath[];
+  paths: QueryPropertyPath[];
   direction: 'ASC' | 'DESC';
 };
 
-export type SubQueryPaths = SelectPath;
-
 /**
- * A QueryPath is an array of QuerySteps, representing the path of properties that were requested to reach a certain value
- */
-export type QueryPath = (QueryStep | SubQueryPaths)[] | WherePath;
-
-/**
- * Much like a querypath, except it can only contain QuerySteps
+ * A property-only query path, used by where/sort proxy tracing.
  */
 export type QueryPropertyPath = QueryStep[];
 
 /**
- * A QueryStep is a single step in a query path
- * It contains the property that was requested, and optionally a where clause
+ * A QueryStep is a single step in a query path.
  */
 export type QueryStep =
   | PropertyQueryStep
   | SizeStep
-  | CustomQueryObject
   | ShapeReferenceValue;
 export type SizeStep = {
   count: QueryPropertyPath;
@@ -235,7 +224,6 @@ export type ArgPath = {
   subject: ShapeReferenceValue;
 };
 
-export type ComponentQueryPath = (QueryStep | SubQueryPaths)[] | WherePath;
 
 export type QueryComponentLike<ShapeType extends Shape, CompQueryResult> = {
   query:
@@ -827,98 +815,6 @@ export class QueryBuilderObject<
   }
 }
 
-/**
- * Convert a single FieldSetEntry to a QueryPath.
- */
-function entryToQueryPath(entry: {
-  path: {segments: PropertyShape[]};
-  scopedFilter?: unknown;
-  aggregation?: string;
-  customKey?: string;
-  subSelect?: FieldSet;
-  evaluation?: {method: string; wherePath: any};
-  preloadQueryPath?: any;
-}): QueryPath {
-  const segments = entry.path.segments;
-
-  // Preload → emit the pre-built query path from BoundComponent.getPropertyPath()
-  if (entry.preloadQueryPath) {
-    return entry.preloadQueryPath;
-  }
-
-  // Evaluation → emit the WherePath directly (boolean column projection)
-  if (entry.evaluation) {
-    return entry.evaluation.wherePath;
-  }
-
-  // Count aggregation → SizeStep
-  if (entry.aggregation === 'count') {
-    if (segments.length === 0) return [];
-    const lastSegment = segments[segments.length - 1];
-    const countStep: SizeStep = {
-      count: [{property: lastSegment}],
-      label: entry.customKey || lastSegment.label,
-    };
-    if (segments.length === 1) {
-      return [countStep];
-    }
-    const parentSteps: QueryStep[] = segments.slice(0, -1).map((seg) => ({property: seg}));
-    return [...parentSteps, countStep];
-  }
-
-  // Zero segments with filter/sub-select is invalid — return empty path
-  if (segments.length === 0) {
-    return [];
-  }
-
-  // Build property steps, attaching scopedFilter to the last segment
-  const steps: QueryStep[] = segments.map((segment, i) => {
-    const step: PropertyQueryStep = {property: segment};
-    if (entry.scopedFilter && i === segments.length - 1) {
-      step.where = entry.scopedFilter as unknown as WherePath;
-    }
-    return step;
-  });
-
-  // SubSelect → append nested paths as sub-query
-  if (entry.subSelect) {
-    const nestedPaths = fieldSetToSelectPath(entry.subSelect);
-    return [...steps, nestedPaths] as unknown as QueryPath;
-  }
-
-  return steps;
-}
-
-/**
- * Convert a FieldSet's entries to a SelectPath.
- * Returns CustomQueryObject when all entries have customKey, QueryPath[] otherwise.
- * Handles extended entry fields: scopedFilter → step.where, aggregation → SizeStep,
- * subSelect → nested QueryPath[].
- */
-export function fieldSetToSelectPath(fieldSet: FieldSet): SelectPath {
-  const entries = fieldSet.entries as unknown as Array<{
-    path: {segments: PropertyShape[]};
-    scopedFilter?: unknown;
-    aggregation?: string;
-    customKey?: string;
-    subSelect?: FieldSet;
-    evaluation?: {method: string; wherePath: any};
-    preloadQueryPath?: any;
-  }>;
-
-  // If all entries have customKey, produce a CustomQueryObject
-  const allCustom = entries.length > 0 && entries.every((e) => e.customKey);
-  if (allCustom) {
-    const obj: CustomQueryObject = {};
-    for (const entry of entries) {
-      obj[entry.customKey!] = entryToQueryPath(entry);
-    }
-    return obj;
-  }
-
-  return entries.map((entry) => entryToQueryPath(entry));
-}
-
 export class BoundComponent<
   Source extends QueryBuilderObject,
   CompQueryResult = any,
@@ -930,68 +826,6 @@ export class BoundComponent<
     super(null, null);
   }
 
-  /**
-   * Extract the component's query paths from whatever query type was provided.
-   * Handles FieldSet (sub-select), QueryBuilder (duck-typed), and Record forms.
-   */
-  getComponentQueryPaths(): SelectPath {
-    // If component exposes a FieldSet via .fields, prefer it
-    if (this.originalValue.fields instanceof FieldSet) {
-      return fieldSetToSelectPath(this.originalValue.fields);
-    }
-
-    const query = this.originalValue.query;
-
-    if (query instanceof FieldSet) {
-      return fieldSetToSelectPath(query);
-    }
-    // Duck-type check for QueryBuilder (has getQueryPaths method)
-    if (query && typeof (query as any).getQueryPaths === 'function') {
-      return (query as any).getQueryPaths();
-    }
-    // Record case
-    if (typeof query === 'object') {
-      if (Object.keys(query).length > 1) {
-        throw new Error(
-          'Only one key is allowed to map a query to a property for linkedSetComponents',
-        );
-      }
-      for (let key in query) {
-        const value = (query as Record<string, any>)[key];
-        if (value && typeof value.getQueryPaths === 'function') {
-          return value.getQueryPaths();
-        }
-        throw new Error(
-          'Unknown value type for query object. Expected a QueryBuilder',
-        );
-      }
-    }
-    throw new Error(
-      'Unknown data query type. Expected a QueryBuilder or FieldSet',
-    );
-  }
-
-  getPropertyPath() {
-    let sourcePath: ComponentQueryPath = this.source.getPropertyPath();
-    let compSelectQuery: SelectPath = this.getComponentQueryPaths();
-
-    if (Array.isArray(sourcePath)) {
-      if (Array.isArray(compSelectQuery)) {
-        // QueryPath[] — unwrap single-element arrays for compact representation
-        const unwrapped =
-          compSelectQuery.length === 1
-            ? Array.isArray(compSelectQuery[0]) && compSelectQuery[0].length === 1
-              ? compSelectQuery[0][0]
-              : compSelectQuery[0]
-            : compSelectQuery;
-        sourcePath.push(unwrapped as QueryStep | SubQueryPaths);
-      } else {
-        // CustomQueryObject
-        sourcePath.push(compSelectQuery);
-      }
-    }
-    return sourcePath as QueryPropertyPath;
-  }
 }
 
 /**
@@ -1033,7 +867,7 @@ export const evaluateSortCallback = <S extends Shape>(
 ): SortByPath => {
   const proxy = createProxiedPathBuilder(shape);
   const response = sortFn(proxy);
-  const paths: QueryPath[] = [];
+  const paths: QueryPropertyPath[] = [];
   if (response instanceof QueryBuilderObject || response instanceof QueryPrimitiveSet) {
     paths.push(response.getPropertyPath());
   } else if (Array.isArray(response)) {

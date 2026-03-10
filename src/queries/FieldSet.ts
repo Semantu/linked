@@ -43,8 +43,7 @@ const isBoundComponent = (obj: any): boolean =>
   obj !== null &&
   typeof obj === 'object' &&
   'source' in obj &&
-  'originalValue' in obj &&
-  typeof obj.getComponentQueryPaths === 'function';
+  'originalValue' in obj;
 
 /**
  * A single entry in a FieldSet: a property path with optional alias, scoped filter,
@@ -58,7 +57,8 @@ export type FieldSetEntry = {
   aggregation?: 'count';
   customKey?: string;
   evaluation?: {method: string; wherePath: any};
-  preloadQueryPath?: any;
+  /** The component's FieldSet for preload composition. */
+  preloadSubSelect?: FieldSet;
 };
 
 /**
@@ -116,7 +116,7 @@ export class FieldSet<R = any, Source = any> {
 
   /**
    * For sub-select FieldSets: the parent query path leading to this sub-select.
-   * Used by fieldSetToSelectPath() to nest the sub-select under its parent.
+   * Used during proxy tracing to associate sub-selects with their parent property.
    */
   readonly parentQueryPath?: any;
 
@@ -575,15 +575,13 @@ export class FieldSet<R = any, Source = any> {
     }
 
     // BoundComponent → preload composition (e.g. p.bestFriend.preloadFor(component))
-    // BoundComponent extends QueryBuilderObject and has getPropertyPath() which returns
-    // the full merged path (source chain + component query paths appended).
+    // Extract the component's FieldSet and store it as preloadSubSelect.
     if (isBoundComponent(obj)) {
-      const preloadQueryPath = obj.getPropertyPath();
-      // Extract the source segments for the PropertyPath (the path to the preload point)
       const segments = FieldSet.collectPropertySegments(obj.source);
+      const componentFieldSet = FieldSet.extractComponentFieldSet(obj.originalValue);
       return {
         path: new PropertyPath(rootShape, segments),
-        preloadQueryPath,
+        preloadSubSelect: componentFieldSet,
       };
     }
 
@@ -621,6 +619,35 @@ export class FieldSet<R = any, Source = any> {
       current = current.subject;
     }
     return segments;
+  }
+
+  /**
+   * Extract a FieldSet from a component-like object (has .fields or .query).
+   * Used to get the component's selection for preload composition.
+   */
+  static extractComponentFieldSet(component: any): FieldSet | undefined {
+    // Prefer .fields if it's a FieldSet
+    if (component.fields instanceof FieldSet) {
+      return component.fields;
+    }
+    const query = component.query;
+    if (query instanceof FieldSet) {
+      return query;
+    }
+    // QueryBuilder duck-type — has .fields() method
+    if (query && typeof query.fields === 'function') {
+      return query.fields();
+    }
+    // Record form: { propName: QueryBuilder }
+    if (typeof query === 'object') {
+      for (const key in query) {
+        const value = (query as Record<string, any>)[key];
+        if (value && typeof value.fields === 'function') {
+          return value.fields();
+        }
+      }
+    }
+    return undefined;
   }
 
   /**

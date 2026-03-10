@@ -8,11 +8,10 @@ import {
   QueryResponseToResultType,
   SelectAllQueryResponse,
   QueryComponentLike,
-  fieldSetToSelectPath,
   processWhereClause,
   evaluateSortCallback,
 } from './SelectQuery.js';
-import type {SelectPath, SortByPath, WherePath} from './SelectQuery.js';
+import type {SortByPath, WherePath} from './SelectQuery.js';
 import type {RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
@@ -360,31 +359,21 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   // ---------------------------------------------------------------------------
 
   /**
-   * Get the select paths for this query.
-   * Used by BoundComponent to merge component query paths into a parent query.
-   */
-  getQueryPaths(): SelectPath {
-    const fs = this.fields();
-    return fs ? fieldSetToSelectPath(fs) : [];
-  }
-
-  /**
    * Get the raw pipeline input.
    *
-   * Constructs RawSelectInput directly from FieldSet + where/sort callbacks.
+   * Constructs RawSelectInput directly from FieldSet entries.
    */
   toRawInput(): RawSelectInput {
     return this._buildDirectRawInput();
   }
 
   /**
-   * Build RawSelectInput directly from FieldSet.
+   * Build RawSelectInput directly from FieldSet entries.
    */
   private _buildDirectRawInput(): RawSelectInput {
     let fs = this.fields();
 
     // When preloads exist, trace them through the proxy and merge with the FieldSet.
-    // This replaces the legacy _buildFactory() approach that wrapped preloads into selectFn.
     if (this._preloads && this._preloads.length > 0) {
       const preloadFn = (p: any) => {
         const results: any[] = [];
@@ -404,7 +393,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       }
     }
 
-    const select: SelectPath = fs ? fieldSetToSelectPath(fs) : [];
+    const entries = fs ? fs.entries : [];
 
     // Evaluate where callback
     let where: WherePath | undefined;
@@ -423,7 +412,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     }
 
     const input: RawSelectInput = {
-      select,
+      entries,
       subject: this._subject,
       limit: this._limit,
       offset: this._offset,
