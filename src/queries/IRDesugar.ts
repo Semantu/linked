@@ -2,6 +2,10 @@ import {
   ArgPath,
   isWhereEvaluationPath,
   JSNonNullPrimitive,
+  PropertyQueryStep,
+  QueryPropertyPath,
+  QueryStep,
+  SizeStep,
   SortByPath,
   WhereAndOr,
   WhereMethods,
@@ -256,50 +260,48 @@ const desugarFieldSetEntries = (entries: readonly FieldSetEntry[]): DesugaredSel
   return (entries as FieldSetEntry[]).map((e) => desugarEntry(e));
 };
 
+const isSizeStep = (step: QueryStep): step is SizeStep => 'count' in step;
+const isPropertyStep = (step: QueryStep): step is PropertyQueryStep =>
+  'property' in step && !('count' in step);
+
 /**
- * Convert a WherePath QueryPropertyPath to a DesugaredSelectionPath.
- * Handles PropertyQueryStep (.property.id), SizeStep (.count), and ShapeReferenceValue (.id + .shape).
+ * Convert a where-clause QueryPropertyPath to a DesugaredSelectionPath.
  */
-const toSelectionPath = (path: unknown): DesugaredSelectionPath => {
-  if (!Array.isArray(path)) {
-    throw new Error('Unsupported non-array path in desugar selection pass');
-  }
-  return {
-    kind: 'selection_path',
-    steps: path.map((step: any): DesugaredStep => {
-      // SizeStep: { count: PropertyQueryStep[], label?: string }
-      if (step && typeof step === 'object' && 'count' in step) {
-        return {
-          kind: 'count_step',
-          path: (step.count as any[]).map((s: any) => ({
-            kind: 'property_step' as const,
-            propertyShapeId: s.property.id,
-          })),
-          label: step.label,
-        };
+const toSelectionPath = (path: QueryPropertyPath): DesugaredSelectionPath => ({
+  kind: 'selection_path',
+  steps: path.map((step): DesugaredStep => {
+    if (isSizeStep(step)) {
+      return {
+        kind: 'count_step',
+        path: step.count.filter(isPropertyStep).map((s) => ({
+          kind: 'property_step' as const,
+          propertyShapeId: s.property.id,
+        })),
+        label: step.label,
+      };
+    }
+    if (isShapeRef(step)) {
+      return {
+        kind: 'type_cast_step',
+        shapeId: step.id,
+      };
+    }
+    if (isPropertyStep(step)) {
+      const result: DesugaredPropertyStep = {
+        kind: 'property_step',
+        propertyShapeId: step.property.id,
+      };
+      if (step.where) {
+        result.where = toWhere(step.where);
       }
-      // ShapeReferenceValue: { id: string, shape: ... }
-      if (step && typeof step === 'object' && 'id' in step && 'shape' in step) {
-        return {
-          kind: 'type_cast_step',
-          shapeId: step.id,
-        };
-      }
-      // PropertyQueryStep: { property: { id: string }, where?: WherePath }
-      if (step && typeof step === 'object' && 'property' in step && step.property?.id) {
-        const result: DesugaredPropertyStep = {
-          kind: 'property_step',
-          propertyShapeId: step.property.id,
-        };
-        if (step.where) {
-          result.where = toWhere(step.where as WherePath);
-        }
-        return result;
-      }
-      throw new Error('Unsupported step in where/sort path: ' + JSON.stringify(step));
-    }),
-  };
-};
+      return result;
+    }
+    throw new Error('Unsupported step in where path');
+  }),
+});
+
+const isArgPath = (arg: unknown): arg is ArgPath =>
+  !!arg && typeof arg === 'object' && 'path' in arg && 'subject' in arg;
 
 const toWhereArg = (arg: unknown): DesugaredWhereArg => {
   if (
@@ -317,16 +319,14 @@ const toWhereArg = (arg: unknown): DesugaredWhereArg => {
     return arg;
   }
   if (arg && typeof arg === 'object') {
-    if (isWhereEvaluationPath(arg as WherePath) || 'firstPath' in (arg as Record<string, unknown>)) {
+    if (isWhereEvaluationPath(arg as WherePath) || 'firstPath' in (arg as object)) {
       return toWhere(arg as WherePath);
     }
-
-    if ('path' in (arg as ArgPath)) {
-      const pathArg = arg as ArgPath;
+    if (isArgPath(arg)) {
       return {
         kind: 'arg_path',
-        subject: pathArg.subject,
-        path: toSelectionPath(pathArg.path),
+        subject: arg.subject,
+        path: toSelectionPath(arg.path),
       };
     }
   }
