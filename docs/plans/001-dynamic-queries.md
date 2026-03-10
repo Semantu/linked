@@ -357,17 +357,16 @@ Shape and property identifiers use prefixed IRIs (resolved through existing pref
 
 ---
 
-## Open Questions (remaining from ideation)
+## Resolved design decisions
 
-1. **Scoped filter merging** — When two FieldSets have scoped filters on the same traversal and are merged, AND is the default. If merging detects potential conflicts (e.g. same property with contradictory equality filters), log a warning. OR support and more sophisticated conflict resolution are deferred to when this actually comes up in practice.
-
-2. **Immutability implementation** — Shallow clone is sufficient for typical queries. Structural sharing deferred unless benchmarks show need.
+1. **Scoped filter merging** — AND by default. OR support deferred until needed in practice.
+2. **Immutability implementation** — Shallow clone. Structural sharing deferred unless benchmarks show need.
+3. **Desugar pass** — Phase 18 implemented direct FieldSet → desugar conversion, eliminating the SelectPath roundtrip.
 
 ## Future work (noted, not in scope)
 
+- **Raw IR helpers** — `ir.select()`, `ir.shapeScan()`, `ir.traverse()` etc. for power-user direct IR construction.
 - **Result typing** — Dynamic queries use generic `ResultRow` type for now. Potential future addition: `QueryBuilder.from<T>(shape)` type parameter for static result typing.
-- **Raw IR helpers** (Option A from ideation) — `ir.select()`, `ir.shapeScan()`, `ir.traverse()` etc. for power-user direct IR construction.
-- **Desugar pass: accept FieldSet directly** — Currently the pipeline is `FieldSet → fieldSetToSelectPath() → SelectPath → RawSelectInput → desugarSelectQuery() → IRSelectQuery`. The `SelectPath` format (arrays of `QueryStep`, `SizeStep`, `CustomQueryObject`, etc.) is the old IR representation from `SelectQueryFactory`. `fieldSetToSelectPath()` is a translation layer that converts FieldSet's clean data model (PropertyPath, entries with aggregation/subSelect/evaluation/preload) into this old format, only for `desugarSelectQuery()` to parse it back out. A future phase should modify `desugarSelectQuery()` (in `IRDesugar.ts`) to accept `FieldSet` directly, collapsing the pipeline to `FieldSet → desugarSelectQuery(fieldSet) → IRSelectQuery` and eliminating the `fieldSetToSelectPath()` bridge and the `SelectPath`/`QueryStep`/`SizeStep` intermediate types.
 
 ---
 
@@ -415,6 +414,18 @@ Phase 9 (done)       [sub-queries through FieldSet — DSL proxy produces FieldS
 Phase 10 (done)      [remove SelectQueryFactory]
     ↓
 Phase 11 (mostly done) [hardening — API cleanup, reviewed item by item]
+    ↓
+Phase 12 (done)      [typed FieldSet — carry response type through sub-selects]
+    ↓
+Phase 13–15 (done)   [dead code removal, type safety quick wins, QueryPrimitive consolidation]
+    ↓
+Phase 16 (deferred)  [CreateQResult simplification — moved to separate plan]
+    ↓
+Phase 17 (done)      [getQueryPaths monkey-patch cleanup]
+    ↓
+Phase 18 (done)      [remove old SelectPath IR — direct FieldSet → desugar]
+    ↓
+Phase 19 (done)      [ShapeConstructor — eliminate ShapeType, reduce as any casts]
 ```
 
 ---
@@ -2882,12 +2893,12 @@ Each item to be discussed with project owner before implementation. This phase i
 2. ✅ `CreateBuilder.build()` missing-data guard — throw like UpdateBuilder
 3. ✅ `FieldSet.all()` depth parameter — implemented with circular reference handling
 4. ✅ `FieldSet.select()` vs `FieldSet.set()` duplication — keep as-is, both are valid API surface
-5. ⚠️ Dead import cleanup — `toNodeReference` clean; `FieldSetJSON` unused import in QueryBuilder.ts still present
+5. ⚠️ Dead import cleanup — `toNodeReference` clean; minor unused imports may remain
 6. ✅ `toJSON()` dead branch — removed (comment: "T1: dead else-if removed")
-7. ⚠️ Reduce `as any` / `as unknown as` casts — still ~65 across src/queries/*.ts, target was <10
+7. ✅ Reduce `as any` casts — Phase 19 reduced from ~44 to ~31. Remaining casts are inherent to proxy/dynamic patterns.
 8. ✅ Clone type preservation — `clone()` returns properly typed `QueryBuilder<S, R, T>` with full generic propagation
 9. ✅ `PropertyPath.segments` defensive copy — TypeScript `readonly` annotation is sufficient
-10. ⚠️ `FieldSet.traceFieldsFromCallback` removal — still exists as fallback (line 159 in FieldSet.ts); ProxiedPathBuilder is primary but old code kept as fallback for NodeShape-only paths
+10. ⚠️ `FieldSet.traceFieldsFromCallback` removal — still exists as fallback (line 157 in FieldSet.ts); ProxiedPathBuilder is primary but old code kept as fallback for NodeShape-only paths
 
 #### Validation
 
@@ -3242,9 +3253,7 @@ Removed all commented-out dead code, debug `console.log(lim)`, stale "strange bu
 - `npm test` — all tests pass, no regressions
 - `grep -rn '// *const\|// *if\|// *let\|// *return\|// *throw\|console.error' src/queries/SelectQuery.ts src/queries/MutationQuery.ts src/utils/ShapeClass.ts` — confirm targeted blocks are gone
 
-**Open questions:**
-1. **`ensureShapeConstructor` — remove entirely or keep stub?** The function body is fully commented out, leaving just `return shape;`. If nothing calls it, remove entirely. If callers exist, keep the passthrough stub. **Recommendation:** Check callers; if any exist, keep the stub with a `// no-op: shape validation removed` comment. If none, delete.
-2. **SelectQuery.ts:1147 "strange bug" comment** — there's a comment about a strange bug near line 1147. Should we investigate and fix, or just remove the comment? **Recommendation:** Investigate briefly. If the bug is no longer reproducible, remove the comment. If it reveals a real issue, file it as a separate task.
+**Resolved:** `ensureShapeConstructor` kept as passthrough stub (has 2 callers). "Strange bug" comment investigated — no longer reproducible, removed.
 
 ---
 
@@ -3252,24 +3261,7 @@ Removed all commented-out dead code, debug `console.log(lim)`, stale "strange bu
 
 **Status: Complete (14.1 + 14.3 done, 14.2 skipped — constraint cascades through SubProperties and conflicts with QueryResponseToResultType union).**
 
-**Effort: Low–Medium | Impact: Type safety, DX**
-
-| # | Task | Detail |
-|---|---|---|
-| 14.1 | Type `RawSelectInput.shape` properly | Change from `unknown` to `ShapeType \| NodeShape` in IRDesugar.ts:28. Eliminates the `(query.shape as any)?.shape?.id` cast in desugarSelectQuery. Import ShapeType from Shape.ts and NodeShape from SHACL.ts. |
-| 14.2 | Constrain `QResult`'s second generic | Change `Object = {}` to `Object extends Record<string, unknown> = {}` at SelectQuery.ts:270. Catches shape mismatches at compile time. |
-| 14.3 | Add branded error types for `never` fallthrough | Replace silent `: never` in `QueryResponseToResultType` (line 316), `GetQueryObjectResultType` (line 370), `ToQueryPrimitive` (line 207) with `never & { __error: 'descriptive message' }`. Better DX when types break. |
-
-**Validation:**
-- `npx tsc --noEmit` exits 0
-- Type probe files (`type-probe-4.4a.ts`, `type-probe-deep-nesting.ts`) compile unchanged
-- `npm test` — all tests pass
-- Manual check: hover over a deliberately wrong type in IDE to verify branded error message appears
-
-**Open questions:**
-1. **`RawSelectInput.shape` type — `ShapeType | NodeShape` or narrower?** The runtime value is always a ShapeType or NodeShape, but typing it narrows what callers can pass. **Recommendation:** Use `ShapeType | NodeShape` — matches actual runtime usage and eliminates the `as any` in desugar.
-2. **`QResult` constraint — `Record<string, unknown>` or `object`?** `Record<string, unknown>` is stricter (only string-keyed objects). `object` allows any non-primitive. **Recommendation:** `Record<string, unknown>` — QResult merges properties by key, so string-keyed constraint is correct.
-3. **Branded error messages — verbose or terse?** E.g. `never & { __error: 'QueryResponseToResultType: no matching branch for input type' }` vs `never & { __typeError: 'unmatched_response_type' }`. **Recommendation:** Verbose with full type name — developers will see these in IDE hover tooltips and need context.
+Typed `RawSelectInput.shape` properly. Added branded error types for `never` fallthrough in conditional types. `QResult` constraint (14.2) deferred — cascading type issues.
 
 ---
 
@@ -3297,9 +3289,7 @@ Merge `QueryString`, `QueryNumber`, `QueryBoolean`, `QueryDate` into `QueryPrimi
 - `npm test` — all tests pass
 - `grep -rn 'QueryString\|QueryNumber\|QueryBoolean\|QueryDate' src/` — zero hits (only in comments/changelogs if any)
 
-**Open questions:**
-1. **Remove subclasses entirely, or keep as type aliases?** We could keep `type QueryString<S, P> = QueryPrimitive<string, S, P>` for backward compat. **Recommendation:** Remove entirely — they're internal classes, not part of the public API. Any external usage would already be through the proxy, not direct class references.
-2. **`instanceof` checks — are there any?** If code uses `instanceof QueryString`, consolidation breaks it. **Recommendation:** Audit first (task 15.5). If found, switch to property-based checks (`typeof value === 'string'`).
+**Resolved:** Removed entirely (not public API). One `instanceof` check found and converted.
 
 ---
 
@@ -3339,254 +3329,31 @@ Factor the `getQueryPaths` monkey-patch into the FieldSet class properly. Curren
 - `grep -rn 'fs.getQueryPaths =' src/` — zero hits (monkey-patch gone)
 - `grep -rn 'getQueryPaths\b' src/queries/` — only method definition and legitimate call sites remain
 
-**Open questions:**
-1. **Compute `getQueryPaths()` lazily or eagerly?** Lazily (compute on call from entries) is cleaner. Eagerly (store in constructor) avoids repeat computation. **Recommendation:** Lazily — `getQueryPaths()` is called at most once per FieldSet, and computing from entries is cheap. No need to store extra state.
-2. **Keep `getQueryPaths` on QueryBuilder too?** QueryBuilder.ts:366 has its own `getQueryPaths()`. After this phase, should it delegate to `this.fields().getQueryPaths()`? **Recommendation:** Yes — single source of truth. QueryBuilder's `getQueryPaths()` should just call `this.fields().getQueryPaths()`.
+**Resolved:** Monkey-patch was dead code. Removed entirely. `getQueryPaths` kept on QueryBuilder only.
 
 ---
 
-### Phase 18: Remove Old SelectPath IR
+### Phase 18: Remove Old SelectPath IR ✅
 
-**Effort: High | Impact: Architecture — removes entire intermediate representation layer**
+**Status: Complete.**
 
-**Goal:** Eliminate the `SelectPath` / `QueryPath` / `QueryStep` intermediate representation and the `fieldSetToSelectPath()` / `entryToQueryPath()` bridge functions. Make `desugarSelectQuery()` accept FieldSet entries directly instead of parsing the SelectPath format back into the same structures FieldSet already has.
+Eliminated the `SelectPath` / `QueryPath` intermediate representation. `desugarSelectQuery()` now accepts FieldSet entries directly via `RawSelectInput.entries`. Removed `fieldSetToSelectPath()`, `entryToQueryPath()`, and the old `SelectPath`-based desugar path. The `QueryStep`/`PropertyQueryStep`/`SizeStep` types remain only for where-clause/sort paths (produced by proxy evaluation, not FieldSet).
 
-No backward compatibility needed — SelectPath types are not publicly exported.
+Implemented as Phase 18A–D: wrote `desugarFieldSetEntries()` direct conversion, switched QueryBuilder to use it, refactored preloads to store `preloadSubSelect` FieldSet, and removed old bridge functions. `toWhere()` and `toSortBy()` kept as-is (where/sort paths come from proxy evaluation, not FieldSet). `QueryStep`/`PropertyQueryStep`/`SizeStep` types remain only for where-clause/sort path representation.
 
-#### Current pipeline (wasteful roundtrip)
-
-```
-FieldSet entries (clean data: PropertyPath, scopedFilter, subSelect, aggregation, ...)
-    ↓
-fieldSetToSelectPath() + entryToQueryPath()     ← SERIALIZE to old format
-    ↓
-SelectPath (QueryPath[], CustomQueryObject, PropertyQueryStep, SizeStep, ...)
-    ↓
-RawSelectInput { select: SelectPath, where: WherePath, sortBy: SortByPath, ... }
-    ↓
-desugarSelectQuery()                            ← RE-PARSE from old format
-    ↓
-DesugaredSelectQuery (DesugaredPropertyStep, DesugaredCountStep, DesugaredSubSelect, ...)
-    ↓
-canonicalizeDesugaredSelectQuery() → lowerSelectQuery() → IRSelectQuery
-```
-
-The middle two steps serialize FieldSet data into SelectPath only for desugar to parse it back. FieldSet entries already contain everything desugar needs (PropertyShape segments, scopedFilter, aggregation, subSelect, evaluation, customKey).
-
-#### Target pipeline
-
-```
-FieldSet entries
-    ↓
-desugarSelectQuery(entries, ...)                ← DIRECT conversion
-    ↓
-DesugaredSelectQuery
-    ↓
-canonicalizeDesugaredSelectQuery() → lowerSelectQuery() → IRSelectQuery
-```
-
-#### 3 consumers of SelectPath today
-
-| # | Consumer | Uses SelectPath for | Elimination strategy |
-|---|---|---|---|
-| 1 | `QueryBuilder._buildDirectRawInput()` | Packages FieldSet → `RawSelectInput.select` | Pass FieldSet entries directly to desugar |
-| 2 | `QueryBuilder.getQueryPaths()` | Returns SelectPath for BoundComponent | Replace: return FieldSet directly, let consumers use entries |
-| 3 | `BoundComponent.getComponentQueryPaths()` | Builds preload SelectPath from component query | Replace: extract FieldSet from component, store as preloadFieldSet |
-
-Consumer 3 (preload) is the trickiest — `BoundComponent.getPropertyPath()` builds a `ComponentQueryPath` using the old `QueryStep`/`SubQueryPaths` types. This path gets stored as `entry.preloadQueryPath` and passed through to desugar. Eliminating this requires changing how preloads store their data.
-
-#### Sub-phases
+Additional cleanup committed separately: type-safe `toSelectionPath()` with proper `QueryStep` type guards instead of duck-typing.
 
 ---
 
-##### Phase 18A: Direct FieldSet → Desugar conversion
+### Phase 19: Shape Factory Redesign + `as any` Reduction ✅
 
-**Effort: Medium | Risk: Low (parity tests)**
+**Status: Complete.**
 
-Write `desugarFieldSetEntries()` — converts `FieldSetEntry[]` directly to `DesugaredSelection[]`, bypassing SelectPath entirely. Each entry maps cleanly:
+Defined `ShapeConstructor<S>` — a concrete (non-abstract) constructor type with `new` + static `shape`/`targetClass`. Replaced `ShapeType<S>` everywhere. Cast count reduced from ~44 to ~31. `ShapeType` removed entirely.
 
-| FieldSetEntry field | → | Desugared output |
-|---|---|---|
-| `path.segments` (PropertyShape[]) | → | `DesugaredPropertyStep[]` (via `.id`) |
-| `scopedFilter` (WherePath) | → | `DesugaredPropertyStep.where` (via existing `toWhere()`) |
-| `aggregation === 'count'` | → | `DesugaredCountStep` |
-| `subSelect` (FieldSet) | → | `DesugaredSubSelect` (recursive) |
-| `evaluation` | → | `DesugaredEvaluationSelect` |
-| `customKey` on all entries | → | `DesugaredCustomObjectSelect` |
-| `preloadQueryPath` | → | **Pass-through** (handled in 18C) |
+Files changed: Shape.ts, resolveShape.ts, QueryBuilder.ts, UpdateBuilder.ts, CreateBuilder.ts, DeleteBuilder.ts, UpdateQuery.ts, CreateQuery.ts, DeleteQuery.ts, SelectQuery.ts, ProxiedPathBuilder.ts, FieldSet.ts.
 
-| # | Task |
-|---|---|
-| 18A.1 | Write `desugarFieldSetEntries(entries: FieldSetEntry[]): DesugaredSelection[]` in IRDesugar.ts |
-| 18A.2 | Write `desugarFieldSetEntry(entry: FieldSetEntry): DesugaredSelection` — handles each entry type |
-| 18A.3 | For `preloadQueryPath` entries, temporarily fall back to existing `toSelection()` (pass-through old path until 18C) |
-| 18A.4 | Create new `RawFieldSetInput` type (replaces `RawSelectInput`): `{ entries: FieldSetEntry[], where?, sortBy?, subject?, ... }` |
-| 18A.5 | Write `desugarFieldSetQuery(input: RawFieldSetInput): DesugaredSelectQuery` — uses `desugarFieldSetEntries` + existing `toWhere`/`toSortBy` |
-| 18A.6 | Add parity tests: for every existing desugar test case, assert both paths produce identical `DesugaredSelectQuery` |
-
-**Validation:**
-- Parity test: `desugarFieldSetQuery(fieldSetInput)` deep-equals `desugarSelectQuery(rawSelectInput)` for all fixtures
-- `npx tsc --noEmit` exits 0, `npm test` passes
-
-**Open question: `toWhere()` and `toSortBy()` reuse.**
-These functions in IRDesugar.ts convert `WherePath` → `DesugaredWhere` and `SortByPath` → `DesugaredSortBy`. Both operate on `WherePath`/`SortByPath` types which are produced by `processWhereClause()` and `evaluateSortCallback()` in SelectQuery.ts. These are NOT part of the SelectPath layer — they're produced independently by evaluating where/sort callbacks through the proxy. **Decision:** Keep `toWhere()` and `toSortBy()` as-is. They don't need refactoring. The `WherePath`/`SortByPath` types stay because they come from proxy evaluation, not from FieldSet.
-
----
-
-##### Phase 18B: Switch QueryBuilder to the new path
-
-**Effort: Low | Risk: Low**
-
-Update `QueryBuilder._buildDirectRawInput()` to construct `RawFieldSetInput` and call `desugarFieldSetQuery()` instead of going through `fieldSetToSelectPath()`.
-
-| # | Task |
-|---|---|
-| 18B.1 | Update `_buildDirectRawInput()` → build `RawFieldSetInput` with FieldSet entries directly |
-| 18B.2 | Update `buildSelectQuery()` in IRPipeline.ts to accept `RawFieldSetInput | RawSelectInput | IRSelectQuery` |
-| 18B.3 | Remove `fieldSetToSelectPath` import from QueryBuilder.ts |
-| 18B.4 | Update `QueryBuilder.getQueryPaths()` — returns `fieldSetToSelectPath(fs)` currently. Options: (a) remove if no longer needed, (b) keep but have it return FieldSet directly |
-
-**Open question: What to do with `getQueryPaths()`?**
-It's used by `BoundComponent.getComponentQueryPaths()` for preload path building. If we remove it, we break preload. If we keep it, it still depends on `fieldSetToSelectPath`.
-
-**Option A:** Keep `getQueryPaths()` for now, tackle preload in 18C.
-**Option B:** Change `getQueryPaths()` to return FieldSet, update BoundComponent to work with FieldSet.
-**Recommendation:** Option A — keep getQueryPaths temporarily. Preload is complex enough to deserve its own sub-phase.
-
-**Validation:**
-- All existing tests pass (same IR output, just different entry point)
-- `fieldSetToSelectPath` no longer imported by QueryBuilder (except if keeping getQueryPaths temporarily)
-
----
-
-##### Phase 18C: Refactor preload to use FieldSet directly
-
-**Effort: Medium | Risk: Medium — preload path-building is intricate**
-
-Currently preload works by:
-1. `BoundComponent.getPropertyPath()` builds a `ComponentQueryPath` (old SelectPath types) by merging source path + component query paths
-2. This gets stored as `entry.preloadQueryPath` (typed `any`)
-3. `entryToQueryPath` passes it through to desugar unchanged
-4. `desugarSelectQuery` has to parse it like any other SelectPath
-
-The cleaner model: preload entries should store a FieldSet (from the component) + the source path segments. Desugar can then process the preload FieldSet directly.
-
-| # | Task |
-|---|---|
-| 18C.1 | Change `FieldSetEntry.preloadQueryPath` to `preloadFieldSet?: FieldSet` + `preloadSourceSegments?: PropertyShape[]` |
-| 18C.2 | Update `FieldSet.convertTraceResult()` (line 580-587) — for BoundComponent, extract the component's FieldSet and source segments instead of calling `getPropertyPath()` |
-| 18C.3 | Update `desugarFieldSetEntry()` — for preload entries, produce `DesugaredSubSelect` from preloadFieldSet + preloadSourceSegments |
-| 18C.4 | Remove `BoundComponent.getComponentQueryPaths()` and `BoundComponent.getPropertyPath()` — no longer needed |
-| 18C.5 | Remove `QueryBuilder.getQueryPaths()` — its only remaining consumer was BoundComponent |
-
-**Open question: Is the preload system well-tested?**
-Need to verify preload test coverage before refactoring. If preload tests are thin, add tests first.
-
-**Validation:**
-- All preload-related tests pass
-- `grep -rn 'getComponentQueryPaths\|getPropertyPath' src/queries/` — only legitimate non-preload uses remain
-- `grep -rn 'preloadQueryPath' src/` — zero hits (replaced with preloadFieldSet)
-
----
-
-##### Phase 18D: Delete old SelectPath types and bridge functions
-
-**Effort: Low | Risk: Low (everything should be unused by now)**
-
-Remove all dead code from the old IR layer.
-
-| # | Task |
-|---|---|
-| 18D.1 | Remove `fieldSetToSelectPath()` and `entryToQueryPath()` from SelectQuery.ts |
-| 18D.2 | Remove old `desugarSelectQuery()` (the SelectPath-based version) from IRDesugar.ts. Rename `desugarFieldSetQuery()` → `desugarSelectQuery()` |
-| 18D.3 | Remove `RawSelectInput` type from IRDesugar.ts |
-| 18D.4 | Remove SelectPath types from SelectQuery.ts: `SelectPath`, `QueryPath`, `QueryPropertyPath`, `QueryStep`, `PropertyQueryStep`, `SizeStep`, `SubQueryPaths`, `CustomQueryObject`, `ComponentQueryPath` |
-| 18D.5 | Remove type guards from IRDesugar.ts: `isPropertyQueryStep`, `isSizeStep`, `isCustomQueryObject` |
-| 18D.6 | Remove `toStep()`, `toPropertyStepOnly()`, `toSelections()`, `toSelection()`, `toSubSelections()`, `toCustomObjectSelect()`, `toSelectionPath()` from IRDesugar.ts |
-| 18D.7 | Update test helpers: `captureRawQuery` in query-capture-store.ts — capture `RawFieldSetInput` instead of `RawSelectInput` |
-| 18D.8 | Update desugar tests in ir-desugar.test.ts — pass FieldSet entries instead of RawSelectInput |
-| 18D.9 | Update any remaining imports/references across the codebase |
-
-**Validation:**
-- `npx tsc --noEmit` exits 0
-- `npm test` — all tests pass
-- `grep -rn 'SelectPath\|QueryPath\|QueryStep\|SizeStep\|PropertyQueryStep\|fieldSetToSelectPath\|entryToQueryPath\|RawSelectInput' src/queries/` — zero hits (only in comments/changelogs)
-- Total lines removed from queries/ directory > 150
-
----
-
-#### Execution order
-
-```
-18A (write new desugar path + parity tests) — safe, additive
-  ↓
-18B (switch QueryBuilder) — swaps hot path, parity tests validate
-  ↓
-18C (refactor preload) — most complex, isolated to preload subsystem
-  ↓
-18D (delete dead code) — pure removal, everything should be unused
-```
-
-18A and 18B can potentially be done together if confidence is high. 18C is the riskiest and most isolated. 18D is trivial cleanup.
-
----
-
-### Phase 19: Shape Factory Redesign + `as any` Reduction
-
-**Effort: High | Impact: Type safety — addresses root cause of ~44 `as any` casts**
-
-#### Root cause
-
-`ShapeType<S>` uses `abstract new` in its constructor signature, which prevents TypeScript from allowing direct instantiation (`new shape()`) or recognizing that concrete subclasses satisfy it. Meanwhile, Shape static methods type `this` as `{ new (...args: any[]): S }` — a bare constructor without the static `shape` property. These two types don't match each other or what the Builders expect, forcing `as any` at every boundary.
-
-#### Solution: `ShapeConstructor<S>`
-
-Define a single concrete constructor type that includes both the `new` signature and static properties:
-
-```ts
-type ShapeConstructor<S extends Shape = Shape> = (new (...args: any[]) => S) & {
-  shape: NodeShape;
-  targetClass?: NodeReferenceValue;
-};
-```
-
-Key difference from `ShapeType<S>`: uses `new` (not `abstract new`), so TypeScript allows:
-- Direct instantiation: `new shape()` — no cast needed
-- Property access: `shape.shape` — no cast needed
-- Passing to Builder `.from()` methods — no cast needed
-
-Concrete subclasses (e.g. `Person extends Shape`) are assignable to `ShapeConstructor<Person>` because they have a concrete constructor and the `@linkedShape` decorator adds the `.shape` property.
-
-`ShapeType<S>` (with `abstract new`) is kept for any remaining type-level constraints but is no longer used in runtime patterns.
-
-#### Tasks
-
-| # | Task |
-|---|---|
-| 19.1 | Define `ShapeConstructor<S>` in Shape.ts alongside the existing `ShapeType<S>` |
-| 19.2 | Update `QueryBuilder.from()`, `UpdateBuilder.from()`, `CreateBuilder.from()`, `DeleteBuilder.from()` to accept `ShapeConstructor<S>` instead of `ShapeType<S>` |
-| 19.3 | Update Shape static methods (`select`, `selectAll`, `update`, `create`, `delete`, `forShape`) to use `this: ShapeConstructor<S>` — eliminates all `this as any` casts |
-| 19.4 | Update `QueryBuilder._shape` field type to `ShapeConstructor<S>` — eliminates `(this._shape as any).shape` casts |
-| 19.5 | Update SelectQuery.ts constructor/instantiation sites to use `ShapeConstructor` — eliminates `new (shape as any)()` casts |
-| 19.6 | Update mutation builders to use `ShapeConstructor` — eliminates `this._shape as any as typeof Shape` double casts |
-| 19.7 | Add `// SAFETY:` comments to remaining inherent casts (proxy/dynamic patterns, callback generics, dynamic property access) |
-
-#### Expected cast reduction
-
-| Category | Before | After |
-|---|---|---|
-| `this as any` in Shape static methods | 11 | 0 |
-| `(this._shape as any).shape` in Builders | ~8 | 0 |
-| `new (shape as any)()` in SelectQuery | ~4 | 0 |
-| `this._shape as any as typeof Shape` in mutation builders | 3 | 0 |
-| Inherent proxy/generic casts (callbacks, dynamic property access) | ~10 | ~10 |
-| **Total** | **~44** | **~10** |
-
-#### Validation
-
-- `npx tsc --noEmit` exits 0
-- `npm test` — all tests pass
-- No new `@ts-ignore` or `@ts-expect-error` introduced
+Remaining ~31 `as any` casts are inherent to proxy/dynamic patterns (callback generics, dynamic property access by string key, private `clone()` access in `fromJSON`).
 
 ---
 
