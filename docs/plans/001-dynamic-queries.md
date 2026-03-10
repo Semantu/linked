@@ -2881,12 +2881,12 @@ Each item to be discussed with project owner before implementation. This phase i
 1. ✅ `FieldSet.merge()` shape validation — throw on mismatched shapes
 2. ✅ `CreateBuilder.build()` missing-data guard — throw like UpdateBuilder
 3. ✅ `FieldSet.all()` depth parameter — implemented with circular reference handling
-4. ❌ `FieldSet.select()` vs `FieldSet.set()` duplication — remove one (both still exist and are identical)
+4. ✅ `FieldSet.select()` vs `FieldSet.set()` duplication — keep as-is, both are valid API surface
 5. ⚠️ Dead import cleanup — `toNodeReference` clean; `FieldSetJSON` unused import in QueryBuilder.ts still present
 6. ✅ `toJSON()` dead branch — removed (comment: "T1: dead else-if removed")
 7. ⚠️ Reduce `as any` / `as unknown as` casts — still ~65 across src/queries/*.ts, target was <10
 8. ✅ Clone type preservation — `clone()` returns properly typed `QueryBuilder<S, R, T>` with full generic propagation
-9. ❌ `PropertyPath.segments` defensive copy — no freeze/slice, only `readonly` type annotation
+9. ✅ `PropertyPath.segments` defensive copy — TypeScript `readonly` annotation is sufficient
 10. ⚠️ `FieldSet.traceFieldsFromCallback` removal — still exists as fallback (line 159 in FieldSet.ts); ProxiedPathBuilder is primary but old code kept as fallback for NodeShape-only paths
 
 #### Validation
