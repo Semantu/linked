@@ -3248,7 +3248,9 @@ Removed all commented-out dead code, debug `console.log(lim)`, stale "strange bu
 
 ---
 
-### Phase 14: Type Safety Quick Wins
+### Phase 14: Type Safety Quick Wins ✅
+
+**Status: Complete (14.1 + 14.3 done, 14.2 skipped — constraint cascades through SubProperties and conflicts with QueryResponseToResultType union).**
 
 **Effort: Low–Medium | Impact: Type safety, DX**
 
