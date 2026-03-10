@@ -321,8 +321,14 @@ export function selectToAlgebra(
     }
   }
 
-  // 6. SubjectId → Filter
-  if (query.subjectId) {
+  // 6. SubjectId → Filter / SubjectIds → VALUES
+  if (query.subjectIds && query.subjectIds.length > 0) {
+    // Multiple subjects: use VALUES clause for efficient filtering
+    algebra = joinNodes(
+      {type: 'values', variable: rootAlias, iris: query.subjectIds},
+      algebra,
+    );
+  } else if (query.subjectId) {
     const subjectFilter: SparqlExpression = {
       kind: 'binary_expr',
       op: '=',

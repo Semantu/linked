@@ -1,4 +1,4 @@
-import {Shape} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {NodeReferenceValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory, NodeId} from './MutationQuery.js';
 import {IRDeleteMutation} from './IntermediateRepresentation.js';
@@ -37,7 +37,7 @@ export class DeleteQueryFactory<
   readonly ids: NodeReferenceValue[];
 
   constructor(
-    public shapeClass: typeof Shape,
+    public shapeClass: ShapeConstructor<ShapeType>,
     ids: NodeId[] | NodeId,
   ) {
     super();

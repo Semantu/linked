@@ -100,7 +100,7 @@ export class MutationQueryFactory extends QueryFactory {
   }
 
   protected convertNodeDescription(
-    obj: Object,
+    obj: Record<string, unknown>,
     shape: NodeShape,
   ): NodeDescriptionValue {
     const props = shape.getPropertyShapes(true);
@@ -114,8 +114,8 @@ export class MutationQueryFactory extends QueryFactory {
     } else if (obj && 'id' in obj) {
       //if the object has an id key alongside other data properties,
       //treat it as a nested create with a predefined ID
-      id = (obj as any).id.toString();
-      delete (obj as any).id;
+      id = String(obj.id);
+      delete obj.id;
     }
     for (var key in obj) {
       let propShape = props.find((p) => p.label === key);
@@ -262,11 +262,6 @@ export class MutationQueryFactory extends QueryFactory {
   }
 
   protected convertNodeReference(obj: {id: string}): NodeReferenceValue {
-    //ensure there are no other properties in the object
-    // if (Object.keys(obj).length > 1)
-    // {
-    //   throw new Error('Cannot have id and other properties in the same value object');
-    // }
     return {id: obj.id};
   }
 }

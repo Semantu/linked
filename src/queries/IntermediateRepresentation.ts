@@ -17,6 +17,7 @@ export type IRSelectQuery = {
   limit?: number;
   offset?: number;
   subjectId?: string;
+  subjectIds?: string[];
   singleResult?: boolean;
   resultMap?: IRResultMapEntry[];
 };

@@ -14,14 +14,15 @@ Run only when the user explicitly confirms plan mode (for example: converting id
 1. Create/update `docs/plans/<nnn>-<topic>.md`. This on-disk plan file is mandatory.
    - When creating a new plan doc (including ideation -> plan conversion), `<nnn>` MUST be the next available 3-digit prefix in `docs/plans`.
 2. Focus on chosen route(s), not all explored options.
-3. Include:
+3. **Carry forward all decided features and details from the ideation doc.** Every feature, API surface, design detail, and example that was explored and not explicitly rejected must appear in the plan. No idea can be silently dropped. If unsure whether something was tentatively discussed or firmly decided, ask the user for clarification rather than omitting it.
+4. Include:
    - Main architecture decisions
    - Files expected to change
    - Small code examples
    - Potential pitfalls
    - Remaining unclear areas/decisions
    - **Inter-component contracts**: When the architecture has separable parts (layers, modules, packages), make the contracts between them explicit — type definitions, function signatures, shared data structures. These contracts enable parallel implementation in tasks mode.
-4. Mention tradeoffs only to explain why chosen paths were selected.
+5. Mention tradeoffs only to explain why chosen paths were selected.
 5. Continuously refine the plan with user feedback until it is explicitly approved for implementation.
 
 ## Guardrails

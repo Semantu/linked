@@ -21,7 +21,8 @@ export type SparqlAlgebraNode =
   | SparqlUnion
   | SparqlMinus
   | SparqlExtend
-  | SparqlGraph;
+  | SparqlGraph
+  | SparqlValues;
 
 export type SparqlBGP = {
   type: 'bgp';
@@ -70,6 +71,12 @@ export type SparqlGraph = {
   type: 'graph';
   iri: string;
   inner: SparqlAlgebraNode;
+};
+
+export type SparqlValues = {
+  type: 'values';
+  variable: string;
+  iris: string[];
 };
 
 // --- Expressions ---

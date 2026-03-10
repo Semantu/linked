@@ -1,4 +1,4 @@
-import {Shape} from '../shapes/Shape.js';
+import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {
   AddId,
   NodeDescriptionValue,
@@ -24,7 +24,7 @@ export class UpdateQueryFactory<
   readonly fields: NodeDescriptionValue;
 
   constructor(
-    public shapeClass: typeof Shape,
+    public shapeClass: ShapeConstructor<ShapeType>,
     id: string | NodeReferenceValue,
     updateObjectOrFn: U,
   ) {

@@ -132,8 +132,13 @@ export class Employee extends Person {
   }
 }
 
-const componentQuery = Person.query((p) => ({name: p.name}));
-const componentLike = {query: componentQuery};
+import {QueryBuilder} from '../queries/QueryBuilder';
+import {FieldSet} from '../queries/FieldSet';
+
+const componentLike = {query: Person.select((p) => ({name: p.name}))};
+
+const componentFieldSet = FieldSet.for(Person.shape, ['name']);
+const componentLikeWithFieldSet = {query: componentFieldSet, fields: componentFieldSet};
 
 const updateSimple: UpdatePartial<Person> = {hobby: 'Chess'};
 const updateOverwriteSet: UpdatePartial<Person> = {friends: [entity('p2')]};
@@ -167,12 +172,12 @@ export const queryFactories = {
   selectFriends: () => Person.select((p) => p.friends),
   selectBirthDate: () => Person.select((p) => p.birthDate),
   selectIsRealPerson: () => Person.select((p) => p.isRealPerson),
-  selectById: () => Person.select(entity('p1'), (p) => p.name),
-  selectByIdReference: () => Person.select(entity('p1'), (p) => p.name),
+  selectById: () => Person.select((p) => p.name).for(entity('p1')),
+  selectByIdReference: () => Person.select((p) => p.name).for(entity('p1')),
   selectNonExisting: () =>
-    Person.select({id: 'https://does.not/exist'}, (p) => p.name),
+    Person.select((p) => p.name).for({id: 'https://does.not/exist'}),
   selectUndefinedOnly: () =>
-    Person.select(entity('p3'), (p) => [p.hobby, p.bestFriend]),
+    Person.select((p) => [p.hobby, p.bestFriend]).for(entity('p3')),
   selectFriendsName: () => Person.select((p) => p.friends.name),
   selectNestedFriendsName: () => Person.select((p) => p.friends.friends.name),
   selectMultiplePaths: () =>
@@ -308,7 +313,7 @@ export const queryFactories = {
   sortByAsc: () => Person.select((p) => p.name).sortBy((p) => p.name),
   sortByDesc: () =>
     Person.select((p) => p.name).sortBy((p) => p.name, 'DESC'),
-  updateSimple: () => Person.update(entity('p1'), updateSimple),
+  updateSimple: () => Person.update(updateSimple).for(entity('p1')),
   createSimple: () => Person.create({name: 'Test Create', hobby: 'Chess'}),
   createWithFriends: () =>
     Person.create({
@@ -327,25 +332,114 @@ export const queryFactories = {
     Person.delete([entity('to-delete-1'), entity('to-delete-2')]),
   deleteMultipleFull: () =>
     Person.delete([entity('to-delete-1'), entity('to-delete-2')]),
-  updateOverwriteSet: () => Person.update(entity('p1'), updateOverwriteSet),
+  updateOverwriteSet: () => Person.update(updateOverwriteSet).for(entity('p1')),
   updateUnsetSingleUndefined: () =>
-    Person.update(entity('p1'), updateUnsetSingleUndefined),
+    Person.update(updateUnsetSingleUndefined).for(entity('p1')),
   updateUnsetSingleNull: () =>
-    Person.update(entity('p1'), updateUnsetSingleNull),
+    Person.update(updateUnsetSingleNull).for(entity('p1')),
   updateOverwriteNested: () =>
-    Person.update(entity('p1'), updateOverwriteNested),
+    Person.update(updateOverwriteNested).for(entity('p1')),
   updatePassIdReferences: () =>
-    Person.update(entity('p1'), updatePassIdReferences),
+    Person.update(updatePassIdReferences).for(entity('p1')),
   updateAddRemoveMulti: () =>
-    Person.update(entity('p1'), updateAddRemoveMulti),
-  updateRemoveMulti: () => Person.update(entity('p1'), updateRemoveMulti),
-  updateAddRemoveSame: () => Person.update(entity('p1'), updateAddRemoveSame),
+    Person.update(updateAddRemoveMulti).for(entity('p1')),
+  updateRemoveMulti: () => Person.update(updateRemoveMulti).for(entity('p1')),
+  updateAddRemoveSame: () => Person.update(updateAddRemoveSame).for(entity('p1')),
   updateUnsetMultiUndefined: () =>
-    Person.update(entity('p1'), updateUnsetMultiUndefined),
+    Person.update(updateUnsetMultiUndefined).for(entity('p1')),
   updateNestedWithPredefinedId: () =>
-    Person.update(entity('p1'), updateNestedWithPredefinedId),
-  updateBirthDate: () => Person.update(entity('p1'), updateBirthDate),
+    Person.update(updateNestedWithPredefinedId).for(entity('p1')),
+  updateBirthDate: () => Person.update(updateBirthDate).for(entity('p1')),
   preloadBestFriend: () =>
     Person.select((p) => p.bestFriend.preloadFor(componentLike)),
+  preloadBestFriendWithFieldSet: () =>
+    Person.select((p) => p.bestFriend.preloadFor(componentLikeWithFieldSet)),
+  queryBuilderPreload: () =>
+    QueryBuilder.from(Person).select((p) => [p.name]).preload('bestFriend', componentLike),
   selectAllEmployeeProperties: () => Employee.selectAll(),
+
+  // --- Deep nesting boundary tests (Phase 12 validation) ---
+
+  // Triple-nested sub-selects: 3 levels of .select()
+  tripleNestedSubSelect: () =>
+    Person.select((p) =>
+      p.friends.select((f) =>
+        f.bestFriend.select((bf) =>
+          bf.friends.select((ff) => ({name: ff.name, hobby: ff.hobby})),
+        ),
+      ),
+    ),
+
+  // Double nested: singular → plural
+  doubleNestedSingularPlural: () =>
+    Person.select((p) =>
+      p.bestFriend.select((bf) =>
+        bf.friends.select((f) => ({name: f.name, hobby: f.hobby})),
+      ),
+    ),
+
+  // Double nested: plural → singular
+  doubleNestedPluralSingular: () =>
+    Person.select((p) =>
+      p.friends.select((f) =>
+        f.bestFriend.select((bf) => ({name: bf.name, isReal: bf.isRealPerson})),
+      ),
+    ),
+
+  // Sub-select returning array of paths (not custom object)
+  subSelectArrayOfPaths: () =>
+    Person.select((p) =>
+      p.friends.select((f) => [f.name, f.hobby, f.birthDate]),
+    ),
+
+  // Sub-select on singular returning array of paths
+  subSelectSingularArrayPaths: () =>
+    Person.select((p) =>
+      p.bestFriend.select((bf) => [bf.name, bf.hobby, bf.isRealPerson]),
+    ),
+
+  // Sub-select with count in custom object
+  subSelectWithCount: () =>
+    Person.select((p) =>
+      p.friends.select((f) => ({
+        name: f.name,
+        numFriends: f.friends.size(),
+      })),
+    ),
+
+  // Mixed: plain path + sub-select in array
+  mixedPathAndSubSelect: () =>
+    Person.select((p) => [
+      p.name,
+      p.friends.select((f) => ({name: f.name, hobby: f.hobby})),
+    ]),
+
+  // Multiple sub-selects in array
+  multipleSubSelectsInArray: () =>
+    Person.select((p) => [
+      p.friends.select((f) => ({name: f.name})),
+      p.bestFriend.select((bf) => ({hobby: bf.hobby})),
+    ]),
+
+  // Sub-select + one() unwrap
+  subSelectWithOne: () =>
+    Person.select((p) =>
+      p.friends.select((f) => ({name: f.name, hobby: f.hobby})),
+    )
+      .where((p) => p.equals(entity('p1')))
+      .one(),
+
+  // selectAll() on sub-select plural
+  subSelectAllPlural: () =>
+    Person.select((p) => p.friends.selectAll()),
+
+  // selectAll() on sub-select singular
+  subSelectAllSingular: () =>
+    Person.select((p) => p.bestFriend.selectAll()),
+
+  // Employee sub-select (inheritance)
+  employeeSubSelect: () =>
+    Employee.select((e) =>
+      e.bestFriend.select((bf) => ({name: bf.name, dept: bf.department})),
+    ),
 };

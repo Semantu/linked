@@ -7,6 +7,7 @@ Linked core gives you a type-safe, schema-parameterized query language and SHACL
 
 - **Schema-Parameterized Query DSL**: TypeScript-embedded queries driven by your Shape definitions.
 - **Fully Inferred Result Types**: The TypeScript return type of every query is automatically inferred from the selected paths — no manual type annotations needed. Select `p.name` and get `{id: string; name: string}[]`. Select `p.friends.name` and get nested result types. This works for all operations: select, create, update, and delete.
+- **Dynamic Query Building**: Build queries programmatically with `QueryBuilder`, compose field selections with `FieldSet`, and serialize/deserialize queries as JSON — for CMS dashboards, dynamic forms, and API-driven query construction.
 - **Shape Classes (SHACL)**: TypeScript classes that generate SHACL shape metadata.
 - **Object-Oriented Data Operations**: Query, create, update, and delete data using the same Shape-based API.
 - **Storage Routing**: `LinkedStorage` routes query objects to your configured store(s) that implement `IQuadStore`.
@@ -245,10 +246,9 @@ const allFriends = await Person.select((p) => p.knows.selectAll());
 
 **3) Apply a simple mutation**
 ```typescript
-const myNode = {id: 'https://my.app/node1'};
-const updated = await Person.update(myNode, {
+const updated = await Person.update({
   name: 'Alicia',
-});
+}).for({id: 'https://my.app/node1'});
 /* updated: {id: string} & UpdatePartial<Person> */
 ```
 
@@ -295,6 +295,10 @@ The query DSL is schema-parameterized: you define your own SHACL shapes, and Lin
 - Query context variables
 - Preloading (`preloadFor`) for component-like queries
 - Create / Update / Delete mutations
+- Dynamic query building with `QueryBuilder`
+- Composable field sets with `FieldSet`
+- Mutation builders (`CreateBuilder`, `UpdateBuilder`, `DeleteBuilder`)
+- Query and FieldSet JSON serialization / deserialization
 
 ### Query examples
 
@@ -317,10 +321,9 @@ const flags = await Person.select((p) => p.isRealPerson);
 
 #### Target a specific subject
 ```typescript
-const myNode = {id: 'https://my.app/node1'};
-/* Result: {id: string; name: string} | null */
-const one = await Person.select(myNode, (p) => p.name);
-const missing = await Person.select({id: 'https://my.app/missing'}, (p) => p.name); // null
+/* Result: {id: string; name: string} */
+const one = await Person.select((p) => p.name).for({id: 'https://my.app/node1'});
+const missing = await Person.select((p) => p.name).for({id: 'https://my.app/missing'}); // null
 ```
 
 #### Multiple paths + nested paths
@@ -444,10 +447,10 @@ Where UpdatePartial<Shape> reflects the created properties.
 
 #### Update
 
-Update will patch any property that you send as payload and leave the rest untouched.
+Update will patch any property that you send as payload and leave the rest untouched. Chain `.for(id)` to target the entity:
 ```typescript
 /* Result: {id: string} & UpdatePartial<Person> */
-const updated = await Person.update({id: 'https://my.app/node1'}, {name: 'Alicia'});
+const updated = await Person.update({name: 'Alicia'}).for({id: 'https://my.app/node1'});
 ```
 Returns:
 ```json
@@ -463,9 +466,9 @@ When updating a property that holds multiple values (one that returns an array i
 To overwrite all values:
 ```typescript
 // Overwrite the full set of "knows" values.
-const overwriteFriends = await Person.update({id: 'https://my.app/person1'}, {
+const overwriteFriends = await Person.update({
   knows: [{id: 'https://my.app/person2'}],
-});
+}).for({id: 'https://my.app/person1'});
 ```
 The result will contain an object with `updatedTo`, to indicate that previous values were overwritten to this new set of values:
 ```json
@@ -475,17 +478,17 @@ The result will contain an object with `updatedTo`, to indicate that previous va
     updatedTo: [{id:"https://my.app/person2"}],
   }
 }
-``` 
+```
 
 To make incremental changes to the current set of values you can provide an object with `add` and/or `remove` keys:
 ```typescript
 // Add one value and remove one value without replacing the whole set.
-const addRemoveFriends = await Person.update({id: 'https://my.app/person1'}, {
+const addRemoveFriends = await Person.update({
   knows: {
     add: [{id: 'https://my.app/person2'}],
     remove: [{id: 'https://my.app/person3'}],
   },
-});
+}).for({id: 'https://my.app/person1'});
 ```
 This returns an object with the added and removed items
 ```json
@@ -558,6 +561,198 @@ Override behavior:
 - Overrides must be tighten-only for `minCount`, `maxCount`, and `nodeKind` (widening is rejected at registration time).
 - If an override omits `minCount`, `maxCount`, or `nodeKind`, inherited values are kept.
 - Current scope: compatibility checks for `datatype`, `class`, and `pattern` are not enforced yet.
+
+## Dynamic Query Building
+
+The DSL (`Person.select(...)`) is ideal when you know shapes at compile time. For apps that need to build queries at runtime — CMS dashboards, configurable reports, API endpoints that accept field selections — use `QueryBuilder` and `FieldSet`.
+
+### QueryBuilder
+
+`QueryBuilder` provides a fluent, chainable API for constructing queries programmatically. It accepts a Shape class or a shape IRI string.
+
+```typescript
+import {QueryBuilder} from '@_linked/core';
+
+// From a Shape class
+const query = QueryBuilder.from(Person)
+  .select(p => [p.name, p.knows])
+  .where(p => p.name.equals('Semmy'))
+  .limit(10);
+
+// From a shape IRI string (when the Shape class isn't available at compile time)
+const query = QueryBuilder.from('https://schema.org/Person')
+  .select(['name', 'knows'])
+  .where(p => p.name.equals('Semmy'));
+
+// QueryBuilder is PromiseLike — await it directly
+const results = await query;
+
+// Or inspect the compiled IR without executing
+const ir = query.build();
+```
+
+**Target specific entities:**
+```typescript
+// Single entity — result is unwrapped (not an array)
+const person = await QueryBuilder.from(Person)
+  .for({id: 'https://my.app/person1'})
+  .select(p => p.name);
+
+// Multiple entities
+const people = await QueryBuilder.from(Person)
+  .forAll([{id: 'https://my.app/p1'}, {id: 'https://my.app/p2'}])
+  .select(p => p.name);
+```
+
+**Sorting, limiting, and single results:**
+```typescript
+const topFive = await QueryBuilder.from(Person)
+  .select(p => p.name)
+  .orderBy(p => p.name, 'ASC')
+  .limit(5);
+
+const first = await QueryBuilder.from(Person)
+  .select(p => p.name)
+  .one();
+```
+
+**Select with a FieldSet:**
+```typescript
+const fields = FieldSet.for(Person, ['name', 'knows']);
+const results = await QueryBuilder.from(Person).select(fields);
+```
+
+### FieldSet — composable field selections
+
+`FieldSet` is an independent, reusable object that describes which fields to select from a shape. Create them, compose them, and feed them into queries.
+
+**Creating a FieldSet:**
+```typescript
+import {FieldSet} from '@_linked/core';
+
+// From a Shape class with string field names
+const fs = FieldSet.for(Person, ['name', 'knows']);
+
+// From a Shape class with a type-safe callback
+const fs = FieldSet.for(Person, p => [p.name, p.knows]);
+
+// From a shape IRI string (when you only have the shape's IRI)
+const fs = FieldSet.for('https://schema.org/Person', ['name', 'knows']);
+
+// Select all decorated properties
+const allFields = FieldSet.all(Person);
+
+// Select all properties with depth (includes nested shapes)
+const deep = FieldSet.all(Person, {depth: 2});
+```
+
+**Nested fields:**
+```typescript
+// Dot-separated paths for nested properties
+const fs = FieldSet.for(Person, ['name', 'knows.name']);
+
+// Object form for nested sub-selections
+const fs = FieldSet.for(Person, [{knows: ['name', 'hobby']}]);
+```
+
+**Composing FieldSets:**
+```typescript
+const base = FieldSet.for(Person, ['name']);
+
+// Add fields
+const extended = base.add(['knows', 'birthDate']);
+
+// Remove fields
+const minimal = extended.remove(['birthDate']);
+
+// Pick specific fields
+const picked = extended.pick(['name', 'knows']);
+
+// Merge multiple FieldSets
+const merged = FieldSet.merge([fieldSet1, fieldSet2]);
+```
+
+**Inspecting a FieldSet:**
+```typescript
+const fs = FieldSet.for(Person, ['name', 'knows']);
+fs.labels();  // ['name', 'knows']
+fs.paths();   // [PropertyPath, PropertyPath]
+```
+
+**Use cases:**
+
+```typescript
+// Dynamically selected fields from a UI
+const fields = FieldSet.for(Person, userSelectedFields);
+const results = await QueryBuilder.from(Person).select(fields);
+
+// API gateway: accept fields as query parameters
+const fields = FieldSet.for(Person, req.query.fields.split(','));
+const results = await QueryBuilder.from(Person).select(fields);
+
+// Component composition: merge field sets from child components
+const merged = FieldSet.merge([headerFields, sidebarFields, contentFields]);
+const results = await QueryBuilder.from(Person).select(merged);
+
+// Progressive loading: start minimal, add detail on demand
+const summary = FieldSet.for(Person, ['name']);
+const detail = summary.add(['email', 'knows', 'birthDate']);
+```
+
+### Mutation Builders
+
+The mutation builders are the programmatic equivalent of `Person.create(...)`, `Person.update(...)`, and `Person.delete(...)`. They accept Shape classes or shape IRI strings.
+
+```typescript
+import {CreateBuilder, UpdateBuilder, DeleteBuilder} from '@_linked/core';
+
+// Create — equivalent to Person.create({name: 'Alice'})
+const created = await CreateBuilder.from(Person)
+  .set({name: 'Alice'})
+  .withId('https://my.app/alice');
+
+// Update — equivalent to Person.update({name: 'Alicia'}).for({id: '...'})
+const updated = await UpdateBuilder.from(Person)
+  .for({id: 'https://my.app/alice'})
+  .set({name: 'Alicia'});
+
+// Delete — equivalent to Person.delete({id: '...'})
+const deleted = await DeleteBuilder.from(Person).for({id: 'https://my.app/alice'});
+
+// All builders are PromiseLike — await them or call .build() for the IR
+const ir = CreateBuilder.from(Person).set({name: 'Alice'}).build();
+```
+
+### JSON Serialization
+
+Queries and FieldSets can be serialized to JSON and reconstructed — useful for saving query configurations, sending them over the wire, or building query editor UIs.
+
+```typescript
+// Serialize a QueryBuilder
+const query = QueryBuilder.from(Person)
+  .select(p => [p.name, p.knows])
+  .where(p => p.name.equals('Semmy'));
+
+const json = query.toJSON();
+// json is a plain object — store it, send it, etc.
+
+// Reconstruct from JSON
+const restored = QueryBuilder.fromJSON(json);
+const results = await restored;
+
+// FieldSet serialization works the same way
+const fs = FieldSet.for(Person, ['name', 'knows']);
+const fsJson = fs.toJSON();
+const restoredFs = FieldSet.fromJSON(fsJson);
+```
+
+Example JSON output for `QueryBuilder.from(Person).select(p => p.name).toJSON()`:
+```json
+{
+  "shape": "https://schema.org/Person",
+  "fields": [{"path": "name"}]
+}
+```
 
 ## TODO
 
