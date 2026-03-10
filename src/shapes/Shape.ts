@@ -30,20 +30,12 @@ type PropertyShapeMapFunction<T extends Shape, ResponseType> = (
   p: AccessPropertiesShape<T>,
 ) => ResponseType;
 
-export type ShapeType<S extends Shape = Shape> = (abstract new (
-  ...args: any[]
-) => S) & {
-  shape: NodeShape;
-  targetClass?: NodeReferenceValue;
-};
-
 /**
  * Concrete constructor type for Shape subclasses — used at runtime boundaries
  * (Builder `from()` methods, Shape static `this` parameters, mutation factories).
  *
- * Unlike `ShapeType` (which uses `abstract new`), this uses a concrete `new`,
- * so TypeScript allows direct instantiation (`new shape()`) and property access
- * (`shape.shape`) without casts.
+ * Uses concrete `new` (not `abstract new`), so TypeScript allows direct
+ * instantiation (`new shape()`) and property access (`shape.shape`) without casts.
  */
 export type ShapeConstructor<S extends Shape = Shape> = (new (
   ...args: any[]
