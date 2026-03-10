@@ -717,7 +717,7 @@ const updated = await UpdateBuilder.from(Person)
   .set({name: 'Alicia'});
 
 // Delete — equivalent to Person.delete({id: '...'})
-const deleted = await DeleteBuilder.from(Person, {id: 'https://my.app/alice'});
+const deleted = await DeleteBuilder.from(Person).for({id: 'https://my.app/alice'});
 
 // All builders are PromiseLike — await them or call .build() for the IR
 const ir = CreateBuilder.from(Person).set({name: 'Alice'}).build();

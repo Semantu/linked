@@ -245,8 +245,9 @@ class UpdateBuilder<S> implements PromiseLike<UpdateResponse> {
 }
 
 class DeleteBuilder<S> implements PromiseLike<DeleteResponse> {
-  static from<S>(shape: ShapeConstructor<S>, ids: NodeId | NodeId[]): DeleteBuilder<S>;
-  build(): IRDeleteMutation;
+  static from<S>(shape: ShapeConstructor<S>, ids?: NodeId | NodeId[]): DeleteBuilder<S>;
+  for(ids: NodeId | NodeId[]): DeleteBuilder<S>;
+  build(): IRDeleteMutation;  // throws if no IDs specified
   exec(): Promise<DeleteResponse>;
 }
 ```
