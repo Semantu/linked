@@ -1,18 +1,20 @@
 ---
-summary: Decompose the deeply nested conditional types (CreateQResult, GetQueryObjectResultType, CreateShapeSetQResult) into smaller, testable helper types for readability and maintainability.
+summary: Decompose the deeply nested conditional types (CreateQResult, GetQueryObjectResultType, CreateShapeSetQResult) into smaller, testable helper types. Add result typing for dynamic queries.
 packages: [core]
 depends_on: []
 ---
 
 # Query Type System Refactor
 
-## Status: idea (deferred from cleanup plan Phase 16)
+## Status: idea
 
 ## Why
 
 The result-type inference pipeline (`GetQueryObjectResultType` → `CreateQResult` / `CreateShapeSetQResult`) is the most complex part of the type system. It works correctly and is covered by type probes, but the deep nesting makes it hard to read, debug, and extend. A refactor would improve maintainability without changing runtime behavior.
 
-Deferred because: the types are stable, rarely modified, and the risk of silently breaking type inference outweighs the readability benefit during a cleanup pass. This should be done as a dedicated effort with careful before/after `.d.ts` diffing.
+Additionally, dynamic queries built via `QueryBuilder` currently use a generic `ResultRow` type — there's no way to carry static result types through the builder chain. Adding a type parameter (e.g. `QueryBuilder.from<T>(shape)`) would let TypeScript infer result shapes for dynamic queries the same way it does for the DSL.
+
+Both efforts are best done together since they touch the same type machinery.
 
 ## Current State
 
@@ -139,6 +141,30 @@ type CreateQResultLeaf<SourceShapeType, Value, Property, SubProperties> =
 ### Quick win: Remove dead branch
 
 The `QV extends QueryPrimitive<boolean>` branch in `GetQueryObjectResultType` (line ~368) is unreachable — `QV extends QueryPrimitive` on line ~333 already catches all primitives including booleans. This can be safely removed as a standalone cleanup.
+
+## Result typing for dynamic queries
+
+Currently `QueryBuilder.from(Person).select(...)` returns untyped results. The goal is to support a type parameter that threads through the builder chain:
+
+```ts
+// Future API — typed dynamic queries
+const qb = QueryBuilder.from<Person>(Person)
+  .select(p => [p.name, p.age]);
+
+const results = await qb; // type: { name: string; age: number }[]
+```
+
+This requires `QueryBuilder` to carry a generic `R` (result type) that gets refined by `.select()`, `.where()`, and other builder methods — similar to how `FieldSet<R>` already carries its response type.
+
+### Key challenges
+
+- `.select()` with a callback already produces a typed `FieldSet<R>` — the gap is threading `R` up through `QueryBuilder<R>` and into the `PromiseLike<R>` return
+- String-based `.select('name', 'age')` calls would need mapped types to infer result shape from property names
+- Chained `.where()` / `.orderBy()` should preserve `R` without narrowing it
+
+## QueryContext null handling
+
+`getQueryContext()` in `QueryContext.ts` currently returns `null` when a context name isn't found. The TODO suggests returning a `NullQueryShape` or similar sentinel so that queries built against a missing context still produce valid (empty) results instead of runtime errors. This is a small related improvement — the null sentinel type would need to be recognized by the result type machinery above.
 
 ## Risks
 
