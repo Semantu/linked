@@ -3273,7 +3273,11 @@ Removed all commented-out dead code, debug `console.log(lim)`, stale "strange bu
 
 ---
 
-### Phase 15: QueryPrimitive Consolidation
+### Phase 15: QueryPrimitive Consolidation ✅
+
+**Status: Complete.**
+
+Removed 4 empty subclasses (QueryString, QueryNumber, QueryBoolean, QueryDate). Made QueryPrimitive concrete. Updated all 8 constructor calls, 1 instanceof check, SetSize inheritance, ToQueryPrimitive type, and all conditional type branches. No backward-compat aliases (not needed — classes were not exported publicly). 47 lines deleted, all 619 tests pass.
 
 **Effort: Medium | Impact: Less code, simpler type surface**
 
