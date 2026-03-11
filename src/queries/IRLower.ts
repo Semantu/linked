@@ -415,3 +415,45 @@ export const lowerSelectQuery = (
     resultMap: resultMapEntries,
   };
 };
+
+/**
+ * Standalone WHERE lowering — converts a CanonicalWhereExpression to IR expression + patterns.
+ * Used by mutation builders (DeleteBuilder, UpdateBuilder) that don't go through the select pipeline.
+ */
+export const lowerWhereToIR = (
+  where: CanonicalWhereExpression,
+  rootAlias: string = 'a0',
+): {where: IRExpression; wherePatterns: IRGraphPattern[]} => {
+  let counter = 1; // start at 1 since a0 is the root
+  const traversals: IRTraversePattern[] = [];
+  const localTraversalMap = new Map<string, string>();
+
+  const ctx = {
+    generateAlias(): string {
+      return `a${counter++}`;
+    },
+  };
+
+  const resolveTraversal = (fromAlias: string, propertyShapeId: string): string => {
+    const key = `${fromAlias}:${propertyShapeId}`;
+    const existing = localTraversalMap.get(key);
+    if (existing) return existing;
+    const toAlias = ctx.generateAlias();
+    traversals.push({
+      kind: 'traverse',
+      from: fromAlias,
+      to: toAlias,
+      property: propertyShapeId,
+    });
+    localTraversalMap.set(key, toAlias);
+    return toAlias;
+  };
+
+  const options: PathLoweringOptions = {
+    rootAlias,
+    resolveTraversal,
+  };
+
+  const expr = lowerWhere(where, ctx as any, options);
+  return {where: expr, wherePatterns: traversals};
+};

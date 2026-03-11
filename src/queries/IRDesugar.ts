@@ -359,7 +359,7 @@ const toWhereComparison = (path: WherePath): DesugaredWhereComparison => {
   };
 };
 
-const toWhere = (path: WherePath): DesugaredWhere => {
+export const toWhere = (path: WherePath): DesugaredWhere => {
   if ((path as WhereAndOr).firstPath) {
     const grouped = path as WhereAndOr;
     return {
