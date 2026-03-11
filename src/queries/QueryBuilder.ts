@@ -12,11 +12,12 @@ import {
   evaluateSortCallback,
 } from './SelectQuery.js';
 import type {SortByPath, WherePath} from './SelectQuery.js';
-import type {RawSelectInput} from './IRDesugar.js';
+import type {PropertyPathSegment, RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
 import type {NodeReferenceValue} from './QueryFactory.js';
 import {FieldSet, FieldSetJSON, FieldSetFieldJSON} from './FieldSet.js';
+import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 
 /** JSON representation of a QueryBuilder. */
 export type QueryBuilderJSON = {
@@ -188,10 +189,15 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   /**
    * Exclude results matching a MINUS pattern.
    *
-   * Accepts a shape constructor (exclude by type) or a WHERE callback (exclude by condition).
+   * Accepts:
+   * - A shape constructor to exclude by type: `.minus(Employee)`
+   * - A WHERE callback to exclude by condition: `.minus(p => p.hobby.equals('Chess'))`
+   * - A callback returning a property or array of properties for existence exclusion:
+   *   `.minus(p => p.hobby)` or `.minus(p => [p.hobby, p.bestFriend.name])`
+   *
    * Chainable: `.minus(A).minus(B)` produces two separate `MINUS { }` blocks.
    */
-  minus(shapeOrFn: ShapeConstructor<any> | WhereClause<S>): QueryBuilder<S, R, Result> {
+  minus(shapeOrFn: ShapeConstructor<any> | WhereClause<S> | ((s: any) => any)): QueryBuilder<S, R, Result> {
     const entry: MinusEntry<S> = {};
     if (typeof shapeOrFn === 'function' && 'shape' in shapeOrFn) {
       // ShapeConstructor — has a static .shape property
@@ -463,13 +469,34 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       input.subjects = this._subjects;
     }
 
-    // Process minus entries → convert callbacks to WherePaths
+    // Process minus entries → convert callbacks to WherePaths or property paths
     if (this._minusEntries && this._minusEntries.length > 0) {
       input.minusEntries = this._minusEntries.map((entry) => {
         if (entry.shapeId) {
           return {shapeId: entry.shapeId};
         }
         if (entry.whereFn) {
+          // Call the callback through the proxy and inspect the result type
+          const proxy = createProxiedPathBuilder(this._shape);
+          const result = (entry.whereFn as Function)(proxy);
+
+          // Array of QBOs → property existence paths
+          if (Array.isArray(result)) {
+            const propertyPaths = result.map((item: any) => {
+              const segments = FieldSet.collectPropertySegments(item);
+              return segments.map((seg): PropertyPathSegment => ({propertyShapeId: seg.id}));
+            });
+            return {propertyPaths};
+          }
+
+          // Single QBO (has .property field) → single property existence path
+          if (result && typeof result === 'object' && 'property' in result && 'subject' in result) {
+            const segments = FieldSet.collectPropertySegments(result);
+            const propertyPaths = [segments.map((seg): PropertyPathSegment => ({propertyShapeId: seg.id}))];
+            return {propertyPaths};
+          }
+
+          // Evaluation → existing WHERE-based path
           return {where: processWhereClause(entry.whereFn, this._shape)};
         }
         return {};

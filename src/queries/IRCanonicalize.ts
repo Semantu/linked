@@ -5,6 +5,7 @@ import {
   DesugaredWhereArg,
   DesugaredWhereBoolean,
   DesugaredWhereComparison,
+  PropertyPathSegment,
 } from './IRDesugar.js';
 import {WhereMethods} from './SelectQuery.js';
 
@@ -42,6 +43,7 @@ export type CanonicalWhereExpression =
 export type CanonicalMinusEntry = {
   shapeId?: string;
   where?: CanonicalWhereExpression;
+  propertyPaths?: PropertyPathSegment[][];
 };
 
 export type CanonicalDesugaredSelectQuery = Omit<DesugaredSelectQuery, 'where' | 'minusEntries'> & {
@@ -202,6 +204,7 @@ export const canonicalizeDesugaredSelectQuery = (
     minusEntries: query.minusEntries?.map((entry) => ({
       shapeId: entry.shapeId,
       where: entry.where ? canonicalizeWhere(entry.where) : undefined,
+      propertyPaths: entry.propertyPaths,
     })),
   };
 };

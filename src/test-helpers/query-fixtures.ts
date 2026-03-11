@@ -458,6 +458,22 @@ export const queryFactories = {
   minusChained: () =>
     Person.select((p) => p.name).minus(Employee).minus((p) => p.hobby.equals('Chess')),
 
+  // MINUS multi-property — exclude where ALL listed properties exist
+  minusMultiProperty: () =>
+    Person.select((p) => p.name).minus((p) => [p.hobby, p.nickNames]),
+
+  // MINUS nested path — exclude where nested property path exists
+  minusNestedPath: () =>
+    Person.select((p) => p.name).minus((p) => [p.bestFriend.name]),
+
+  // MINUS mixed — flat + nested in one call
+  minusMixed: () =>
+    Person.select((p) => p.name).minus((p) => [p.hobby, p.bestFriend.name]),
+
+  // MINUS single property existence (no array, returns raw QBO)
+  minusSingleProperty: () =>
+    Person.select((p) => p.name).minus((p) => p.hobby),
+
   // --- Bulk delete tests ---
 
   // Delete all instances of a shape

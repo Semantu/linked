@@ -367,6 +367,27 @@ export const lowerSelectQuery = (
           kind: 'minus',
           pattern: {kind: 'shape_scan', shape: entry.shapeId, alias: ctx.rootAlias},
         });
+      } else if (entry.propertyPaths && entry.propertyPaths.length > 0) {
+        // Property existence exclusion: MINUS { ?a0 <prop1> ?m0 . ?a0 <prop2> ?m1 . }
+        // Supports nested paths: ?a0 <bestFriend> ?m0 . ?m0 <name> ?m1 .
+        const traversals: IRTraversePattern[] = [];
+        for (const path of entry.propertyPaths) {
+          let currentAlias = ctx.rootAlias;
+          for (const segment of path) {
+            const toAlias = ctx.generateAlias();
+            traversals.push({
+              kind: 'traverse',
+              from: currentAlias,
+              to: toAlias,
+              property: segment.propertyShapeId,
+            });
+            currentAlias = toAlias;
+          }
+        }
+        const innerPattern: IRGraphPattern = traversals.length === 1
+          ? traversals[0]
+          : {kind: 'join', patterns: traversals};
+        minusPatterns.push({kind: 'minus', pattern: innerPattern});
       } else if (entry.where) {
         // Condition-based exclusion: MINUS { ?a0 <prop> ?val . FILTER(...) }
         const minusTraversals: IRTraversePattern[] = [];

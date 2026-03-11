@@ -18,10 +18,16 @@ import type {PropertyShape} from '../shapes/SHACL.js';
 /**
  * Pipeline input type — accepts FieldSet entries directly.
  */
+/** A single segment in a property path (used for MINUS property existence). */
+export type PropertyPathSegment = {
+  propertyShapeId: string;
+};
+
 /** A raw MINUS entry before desugaring. */
 export type RawMinusEntry = {
   shapeId?: string;
   where?: WherePath;
+  propertyPaths?: PropertyPathSegment[][];
 };
 
 export type RawSelectInput = {
@@ -129,6 +135,7 @@ export type DesugaredWhereArg =
 export type DesugaredMinusEntry = {
   shapeId?: string;
   where?: DesugaredWhere;
+  propertyPaths?: PropertyPathSegment[][];
 };
 
 export type DesugaredSelectQuery = {
@@ -428,6 +435,7 @@ export const desugarSelectQuery = (query: RawSelectInput): DesugaredSelectQuery 
     minusEntries: query.minusEntries?.map((entry) => ({
       shapeId: entry.shapeId,
       where: entry.where ? toWhere(entry.where) : undefined,
+      propertyPaths: entry.propertyPaths,
     })),
   };
 };
