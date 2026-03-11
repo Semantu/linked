@@ -7,7 +7,7 @@ Implements three core features plus cleanup for the linked data DSL:
 4. **MINUS Multi-Property** — `.minus(p => [p.hobby, p.name])` with nested path support
 5. **API Cleanup** — deprecate `sortBy`, require `update()` data, simplify delete API
 
-Named graphs: deferred (out of scope). See [ideation doc](../ideas/007-advanced-query-patterns.md).
+Named graphs: deferred (out of scope). Tracked as a future enhancement.
 
 ---
 
@@ -244,7 +244,7 @@ All golden tests use exact `toBe` matching on full SPARQL strings.
 
 ## Deferred Work
 
-- **Named graphs**: Route B from ideation doc. See `docs/ideas/007-advanced-query-patterns.md`.
+- **Named graphs**: Deferred to a separate scope.
 - **Preload/eager loading**: Discussed but deferred to a separate scope.
 - **MINUS with aggregation**: `.minus()` inside subqueries with GROUP BY — not currently supported.
 

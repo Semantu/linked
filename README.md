@@ -246,9 +246,7 @@ const allFriends = await Person.select((p) => p.knows.selectAll());
 
 **3) Apply a simple mutation**
 ```typescript
-const updated = await Person.update({
-  name: 'Alicia',
-}).for({id: 'https://my.app/node1'});
+const updated = await Person.update({name: 'Alicia'}).for({id: 'https://my.app/node1'});
 /* updated: {id: string} & UpdatePartial<Person> */
 ```
 
@@ -291,10 +289,11 @@ The query DSL is schema-parameterized: you define your own SHACL shapes, and Lin
 - Counting with `.size()`
 - Custom result formats (object mapping)
 - Type casting with `.as(Shape)`
+- MINUS exclusion (by shape, property, condition, multi-property, nested path)
 - Sorting, limiting, and `.one()`
 - Query context variables
 - Preloading (`preloadFor`) for component-like queries
-- Create / Update / Delete mutations
+- Create / Update / Delete mutations (including bulk and conditional)
 - Dynamic query building with `QueryBuilder`
 - Composable field sets with `FieldSet`
 - Mutation builders (`CreateBuilder`, `UpdateBuilder`, `DeleteBuilder`)
@@ -410,9 +409,27 @@ And you want to select properties of those pets that are dogs:
 const guards = await Person.select((p) => p.pets.as(Dog).guardDogLevel);
 ```
 
+#### MINUS (exclusion)
+```typescript
+// Exclude by shape — all Persons that are NOT also Employees
+const nonEmployees = await Person.select((p) => p.name).minus(Employee);
+
+// Exclude by property existence — Persons that do NOT have a hobby
+const noHobby = await Person.select((p) => p.name).minus((p) => p.hobby);
+
+// Exclude by multiple properties — Persons missing BOTH hobby AND nickNames
+const sparse = await Person.select((p) => p.name).minus((p) => [p.hobby, p.nickNames]);
+
+// Exclude by nested path — Persons whose bestFriend does NOT have a name
+const unnamed = await Person.select((p) => p.name).minus((p) => [p.bestFriend.name]);
+
+// Exclude by condition — Persons whose hobby is NOT 'Chess'
+const noChess = await Person.select((p) => p.name).minus((p) => p.hobby.equals('Chess'));
+```
+
 #### Sorting, limiting, one
 ```typescript
-const sorted = await Person.select((p) => p.name).sortBy((p) => p.name, 'ASC');
+const sorted = await Person.select((p) => p.name).orderBy((p) => p.name, 'ASC');
 const limited = await Person.select((p) => p.name).limit(1);
 const single = await Person.select((p) => p.name).one();
 ```
@@ -447,8 +464,10 @@ Where UpdatePartial<Shape> reflects the created properties.
 
 #### Update
 
-Update will patch any property that you send as payload and leave the rest untouched. Chain `.for(id)` to target the entity:
+Update will patch any property that you send as payload and leave the rest untouched. The data to update is required:
+
 ```typescript
+// Target a specific entity with .for(id)
 /* Result: {id: string} & UpdatePartial<Person> */
 const updated = await Person.update({name: 'Alicia'}).for({id: 'https://my.app/node1'});
 ```
@@ -458,6 +477,15 @@ Returns:
   id:"https://my.app/node1",
   name:"Alicia"
 }
+```
+
+**Conditional and bulk updates:**
+```typescript
+// Update all matching entities
+const archived = await Person.update({status: 'archived'}).where(p => p.status.equals('inactive'));
+
+// Update all instances of a shape
+await Person.update({verified: true}).forAll();
 ```
 
 **Updating multi-value properties**
@@ -503,27 +531,19 @@ This returns an object with the added and removed items
 
 
 #### Delete
-To delete a node entirely:
 
 ```typescript
-/* Result: {deleted: Array<{id: string}>, count: number} */
+// Delete a single node
 const deleted = await Person.delete({id: 'https://my.app/node1'});
-```
-Returns
-```json
-{
-  deleted:[
-    {id:"https://my.app/node1"}
-  ],
-  count:1
-}
-```
 
-To delete multiple nodes pass an array:
+// Delete multiple nodes
+const deleted = await Person.delete([{id: 'https://my.app/node1'}, {id: 'https://my.app/node2'}]);
 
-```typescript
-/* Result: {deleted: Array<{id: string}>, count: number} */
-const deleted = await Person.delete([{id: 'https://my.app/node1'},{id: 'https://my.app/node2'}]);
+// Delete all instances of a shape (with blank node cleanup)
+await Person.deleteAll();
+
+// Conditional delete
+await Person.deleteWhere(p => p.status.equals('inactive'));
 ```
 
 
@@ -716,8 +736,14 @@ const updated = await UpdateBuilder.from(Person)
   .for({id: 'https://my.app/alice'})
   .set({name: 'Alicia'});
 
-// Delete — equivalent to Person.delete({id: '...'})
-const deleted = await DeleteBuilder.from(Person).for({id: 'https://my.app/alice'});
+// Delete by ID — equivalent to Person.delete({id: '...'})
+const deleted = await DeleteBuilder.from(Person, {id: 'https://my.app/alice'});
+
+// Delete all — equivalent to Person.deleteAll()
+await DeleteBuilder.from(Person).all();
+
+// Conditional update — equivalent to Person.update({...}).where(fn)
+await UpdateBuilder.from(Person).set({verified: true}).forAll();
 
 // All builders are PromiseLike — await them or call .build() for the IR
 const ir = CreateBuilder.from(Person).set({name: 'Alice'}).build();
