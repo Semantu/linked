@@ -464,4 +464,12 @@ export const queryFactories = {
 
   // Delete with where condition
   deleteWhere: () => Person.deleteWhere((p) => p.hobby.equals('Chess')),
+
+  // --- Conditional update tests ---
+
+  // Update all instances
+  updateForAll: () => Person.update({hobby: 'Chess'}).forAll(),
+
+  // Update with where condition
+  updateWhere: () => Person.update({hobby: 'Archived'}).where((p) => p.hobby.equals('Chess')),
 };

@@ -13,6 +13,7 @@ import {
   selectToSparql,
   createToSparql,
   updateToSparql,
+  updateWhereToSparql,
   deleteToSparql,
   deleteAllToSparql,
   deleteWhereToSparql,
@@ -87,7 +88,9 @@ export abstract class SparqlStore implements IQuadStore {
 
   async updateQuery(query: UpdateQuery): Promise<UpdateResult> {
     if (query.kind === 'update_where') {
-      throw new Error('update_where is not yet implemented in SparqlStore');
+      const sparql = updateWhereToSparql(query, this.options);
+      await this.executeSparqlUpdate(sparql);
+      return {id: ''} as UpdateResult;
     }
     const sparql = updateToSparql(query, this.options);
     await this.executeSparqlUpdate(sparql);
