@@ -481,10 +481,20 @@ Returns:
 
 **Conditional and bulk updates:**
 ```typescript
-// Update all matching entities
-const archived = await Person.update({status: 'archived'}).where(p => p.status.equals('inactive'));
+// Update where a property equals a value
+await Person.update({status: 'archived'}).where(p => p.status.equals('inactive'));
 
-// Update all instances of a shape
+// Update with multiple conditions
+await Person.update({status: 'archived'}).where(p =>
+  p.status.equals('inactive').and(p.name.equals('Semmy')),
+);
+
+// Update with or conditions
+await Person.update({verified: false}).where(p =>
+  p.status.equals('banned').or(p.status.equals('suspended')),
+);
+
+// Update all instances of a shape (no condition)
 await Person.update({verified: true}).forAll();
 ```
 
@@ -533,17 +543,27 @@ This returns an object with the added and removed items
 #### Delete
 
 ```typescript
-// Delete a single node
+// Delete a single node by ID
 const deleted = await Person.delete({id: 'https://my.app/node1'});
 
-// Delete multiple nodes
+// Delete multiple nodes by ID
 const deleted = await Person.delete([{id: 'https://my.app/node1'}, {id: 'https://my.app/node2'}]);
 
 // Delete all instances of a shape (with blank node cleanup)
 await Person.deleteAll();
 
-// Conditional delete
+// Conditional delete — where a property equals a value
 await Person.deleteWhere(p => p.status.equals('inactive'));
+
+// Conditional delete — with multiple conditions
+await Person.deleteWhere(p =>
+  p.status.equals('inactive').and(p.name.equals('Semmy')),
+);
+
+// Conditional delete — with or conditions
+await Person.deleteWhere(p =>
+  p.status.equals('banned').or(p.status.equals('suspended')),
+);
 ```
 
 
