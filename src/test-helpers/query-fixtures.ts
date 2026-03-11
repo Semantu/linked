@@ -456,4 +456,12 @@ export const queryFactories = {
   // Chained MINUS — two separate MINUS blocks
   minusChained: () =>
     Person.select((p) => p.name).minus(Employee).minus((p) => p.hobby.equals('Chess')),
+
+  // --- Bulk delete tests ---
+
+  // Delete all instances of a shape
+  deleteAll: () => Person.deleteAll(),
+
+  // Delete with where condition
+  deleteWhere: () => Person.deleteWhere((p) => p.hobby.equals('Chess')),
 };

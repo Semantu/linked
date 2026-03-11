@@ -9,6 +9,7 @@ import {
   QueryResponseToResultType,
   QueryShape,
   SelectAllQueryResponse,
+  WhereClause,
 } from '../queries/SelectQuery.js';
 import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
 import {NodeId} from '../queries/MutationQuery.js';
@@ -179,6 +180,21 @@ export abstract class Shape {
     id: NodeId | NodeId[] | NodeReferenceValue[],
   ): DeleteBuilder<S> {
     return DeleteBuilder.from(this, id) as DeleteBuilder<S>;
+  }
+
+  /** Delete all instances of this shape type. */
+  static deleteAll<S extends Shape>(
+    this: ShapeConstructor<S>,
+  ): DeleteBuilder<S> {
+    return (DeleteBuilder.from(this) as DeleteBuilder<S>).all();
+  }
+
+  /** Delete instances matching a condition. Sugar for `.delete().where(fn)`. */
+  static deleteWhere<S extends Shape>(
+    this: ShapeConstructor<S>,
+    fn: WhereClause<S>,
+  ): DeleteBuilder<S> {
+    return (DeleteBuilder.from(this) as DeleteBuilder<S>).where(fn);
   }
 
   static mapPropertyShapes<S extends Shape, ResponseType = unknown>(

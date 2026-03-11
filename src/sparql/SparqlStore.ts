@@ -14,6 +14,8 @@ import {
   createToSparql,
   updateToSparql,
   deleteToSparql,
+  deleteAllToSparql,
+  deleteWhereToSparql,
 } from './irToAlgebra.js';
 import {
   mapSparqlSelectResult,
@@ -93,8 +95,15 @@ export abstract class SparqlStore implements IQuadStore {
   }
 
   async deleteQuery(query: DeleteQuery): Promise<DeleteResponse> {
-    if (query.kind === 'delete_all' || query.kind === 'delete_where') {
-      throw new Error(`${query.kind} is not yet implemented in SparqlStore`);
+    if (query.kind === 'delete_all') {
+      const sparql = deleteAllToSparql(query, this.options);
+      await this.executeSparqlUpdate(sparql);
+      return {deleted: [], count: 0};
+    }
+    if (query.kind === 'delete_where') {
+      const sparql = deleteWhereToSparql(query, this.options);
+      await this.executeSparqlUpdate(sparql);
+      return {deleted: [], count: 0};
     }
     const sparql = deleteToSparql(query, this.options);
     await this.executeSparqlUpdate(sparql);

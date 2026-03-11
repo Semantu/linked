@@ -15,11 +15,15 @@ import {
   createToSparql,
   updateToSparql,
   deleteToSparql,
+  deleteAllToSparql,
+  deleteWhereToSparql,
 } from '../sparql/irToAlgebra';
 import type {
   IRCreateMutation,
   IRUpdateMutation,
   IRDeleteMutation,
+  IRDeleteAllMutation,
+  IRDeleteWhereMutation,
 } from '../queries/IntermediateRepresentation';
 
 import '../ontologies/rdf';
@@ -385,5 +389,30 @@ WHERE {
     ?s_1 ?p2_1 <${ENT}to-delete-2> .
   }
 }`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bulk delete mutation tests
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — bulk delete mutations', () => {
+  test('deleteAll — deletes all instances of shape', async () => {
+    const ir = (await captureQuery(queryFactories.deleteAll)) as IRDeleteAllMutation;
+    expect(ir.kind).toBe('delete_all');
+    const sparql = deleteAllToSparql(ir);
+    expect(sparql).toContain('DELETE');
+    expect(sparql).toContain(`rdf:type <${P}>`);
+    expect(sparql).toContain('?a0 ?p ?o');
+  });
+
+  test('deleteWhere — deletes instances matching condition', async () => {
+    const ir = (await captureQuery(queryFactories.deleteWhere)) as IRDeleteWhereMutation;
+    expect(ir.kind).toBe('delete_where');
+    const sparql = deleteWhereToSparql(ir);
+    expect(sparql).toContain('DELETE');
+    expect(sparql).toContain(`rdf:type <${P}>`);
+    expect(sparql).toContain('?a0 ?p ?o');
+    expect(sparql).toContain('FILTER');
   });
 });
