@@ -535,9 +535,11 @@ Phases 2, 3, 4 can theoretically run in parallel after Phase 1, but all three to
 
 ---
 
-### Phase 2: MINUS on QueryBuilder
+### Phase 2: MINUS on QueryBuilder — COMPLETED
 
 **Goal:** Full `.minus()` support: builder method → IR → algebra → SPARQL string.
+
+**Status:** Done. 3 new golden tests pass. All 636 tests pass.
 
 **Files:**
 - `src/queries/QueryBuilder.ts` — add `.minus()` method

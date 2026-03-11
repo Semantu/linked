@@ -321,6 +321,24 @@ export function selectToAlgebra(
     }
   }
 
+  // 5b. MINUS patterns — wrap algebra in SparqlMinus for each minus pattern
+  for (const pattern of query.patterns) {
+    if (pattern.kind === 'minus') {
+      let minusAlgebra = convertExistsPattern(pattern.pattern, registry);
+      if (pattern.filter) {
+        const minusPropertyTriples: SparqlTriple[] = [];
+        processExpressionForProperties(pattern.filter, registry, minusPropertyTriples);
+        // Add property triples into the MINUS block
+        if (minusPropertyTriples.length > 0) {
+          minusAlgebra = joinNodes(minusAlgebra, {type: 'bgp', triples: minusPropertyTriples});
+        }
+        const filterExpr = convertExpression(pattern.filter, registry, minusPropertyTriples);
+        minusAlgebra = {type: 'filter', expression: filterExpr, inner: minusAlgebra};
+      }
+      algebra = {type: 'minus', left: algebra, right: minusAlgebra};
+    }
+  }
+
   // 6. SubjectId → Filter / SubjectIds → VALUES
   if (query.subjectIds && query.subjectIds.length > 0) {
     // Multiple subjects: use VALUES clause for efficient filtering
@@ -506,6 +524,11 @@ function processPattern(
 
     case 'exists': {
       processPattern(pattern.pattern, registry, traverseTriples, optionalPropertyTriples, filteredTraverseBlocks);
+      break;
+    }
+
+    case 'minus': {
+      // MINUS patterns are handled separately in selectToAlgebra — skip in processPattern.
       break;
     }
   }
@@ -783,6 +806,10 @@ function convertExistsPattern(
     }
 
     case 'exists': {
+      return convertExistsPattern(pattern.pattern, registry);
+    }
+
+    case 'minus': {
       return convertExistsPattern(pattern.pattern, registry);
     }
 

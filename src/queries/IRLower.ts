@@ -357,10 +357,53 @@ export const lowerSelectQuery = (
       }))
     : undefined;
 
+  // Lower MINUS entries → IRMinusPattern objects
+  const minusPatterns: IRGraphPattern[] = [];
+  if (canonical.minusEntries) {
+    for (const entry of canonical.minusEntries) {
+      if (entry.shapeId) {
+        // Shape exclusion: MINUS { ?a0 a <Shape> }
+        minusPatterns.push({
+          kind: 'minus',
+          pattern: {kind: 'shape_scan', shape: entry.shapeId, alias: ctx.rootAlias},
+        });
+      } else if (entry.where) {
+        // Condition-based exclusion: MINUS { ?a0 <prop> ?val . FILTER(...) }
+        const minusTraversals: IRTraversePattern[] = [];
+        const localTraversalMap = new Map<string, string>();
+        const minusResolveTraversal = (fromAlias: string, propertyShapeId: string): string => {
+          const key = `${fromAlias}:${propertyShapeId}`;
+          const existing = localTraversalMap.get(key);
+          if (existing) return existing;
+          const toAlias = ctx.generateAlias();
+          minusTraversals.push({
+            kind: 'traverse',
+            from: fromAlias,
+            to: toAlias,
+            property: propertyShapeId,
+          });
+          localTraversalMap.set(key, toAlias);
+          return toAlias;
+        };
+        const minusOptions: PathLoweringOptions = {
+          rootAlias: ctx.rootAlias,
+          resolveTraversal: minusResolveTraversal,
+        };
+        const filter = lowerWhere(entry.where, ctx, minusOptions);
+        const innerPattern: IRGraphPattern = minusTraversals.length === 1
+          ? minusTraversals[0]
+          : minusTraversals.length > 1
+            ? {kind: 'join', patterns: minusTraversals}
+            : {kind: 'shape_scan', shape: canonical.shapeId || '', alias: ctx.rootAlias};
+        minusPatterns.push({kind: 'minus', pattern: innerPattern, filter});
+      }
+    }
+  }
+
   return {
     kind: 'select',
     root,
-    patterns: ctx.getPatterns(),
+    patterns: [...ctx.getPatterns(), ...minusPatterns],
     projection,
     where,
     orderBy,

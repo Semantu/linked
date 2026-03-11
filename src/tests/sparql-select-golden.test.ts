@@ -1085,3 +1085,32 @@ WHERE {
     expect(sparql).toContain(`<${P}/name>`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MINUS patterns
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — MINUS patterns', () => {
+  test('minusShape — exclude by shape type', async () => {
+    const sparql = await goldenSelect(queryFactories.minusShape);
+    expect(sparql).toContain('MINUS {');
+    expect(sparql).toContain(`rdf:type <${E}>`);
+    expect(sparql).toContain(`<${P}/name>`);
+  });
+
+  test('minusCondition — exclude by property condition', async () => {
+    const sparql = await goldenSelect(queryFactories.minusCondition);
+    expect(sparql).toContain('MINUS {');
+    expect(sparql).toContain(`<${P}/hobby>`);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('"Chess"');
+  });
+
+  test('minusChained — two separate MINUS blocks', async () => {
+    const sparql = await goldenSelect(queryFactories.minusChained);
+    const minusCount = (sparql.match(/MINUS \{/g) || []).length;
+    expect(minusCount).toBe(2);
+    expect(sparql).toContain(`rdf:type <${E}>`);
+    expect(sparql).toContain('"Chess"');
+  });
+});

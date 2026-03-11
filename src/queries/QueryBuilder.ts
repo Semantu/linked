@@ -36,6 +36,12 @@ interface PreloadEntry {
   component: QueryComponentLike<any, any>;
 }
 
+/** A MINUS entry — either a shape type exclusion or a WHERE-clause condition. */
+interface MinusEntry<S extends Shape> {
+  shapeId?: string;
+  whereFn?: WhereClause<S>;
+}
+
 /** Internal state bag for QueryBuilder. */
 interface QueryBuilderInit<S extends Shape, R> {
   shape: ShapeConstructor<S>;
@@ -51,6 +57,7 @@ interface QueryBuilderInit<S extends Shape, R> {
   selectAllLabels?: string[];
   fieldSet?: FieldSet;
   preloads?: PreloadEntry[];
+  minusEntries?: MinusEntry<S>[];
 }
 
 /**
@@ -82,6 +89,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   private readonly _selectAllLabels?: string[];
   private readonly _fieldSet?: FieldSet;
   private readonly _preloads?: PreloadEntry[];
+  private readonly _minusEntries?: MinusEntry<S>[];
 
   private constructor(init: QueryBuilderInit<S, R>) {
     this._shape = init.shape;
@@ -97,6 +105,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     this._selectAllLabels = init.selectAllLabels;
     this._fieldSet = init.fieldSet;
     this._preloads = init.preloads;
+    this._minusEntries = init.minusEntries;
   }
 
   /** Create a shallow clone with overrides. */
@@ -115,6 +124,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       selectAllLabels: this._selectAllLabels,
       fieldSet: this._fieldSet,
       preloads: this._preloads,
+      minusEntries: this._minusEntries,
       ...overrides,
     });
   }
@@ -173,6 +183,25 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   /** Add a where clause. */
   where(fn: WhereClause<S>): QueryBuilder<S, R, Result> {
     return this.clone({whereFn: fn});
+  }
+
+  /**
+   * Exclude results matching a MINUS pattern.
+   *
+   * Accepts a shape constructor (exclude by type) or a WHERE callback (exclude by condition).
+   * Chainable: `.minus(A).minus(B)` produces two separate `MINUS { }` blocks.
+   */
+  minus(shapeOrFn: ShapeConstructor<any> | WhereClause<S>): QueryBuilder<S, R, Result> {
+    const entry: MinusEntry<S> = {};
+    if (typeof shapeOrFn === 'function' && 'shape' in shapeOrFn) {
+      // ShapeConstructor — has a static .shape property
+      entry.shapeId = (shapeOrFn as ShapeConstructor<any>).shape?.id;
+    } else {
+      // WhereClause callback
+      entry.whereFn = shapeOrFn as WhereClause<S>;
+    }
+    const existing = this._minusEntries || [];
+    return this.clone({minusEntries: [...existing, entry]});
   }
 
   /** Set sort order. */
@@ -432,6 +461,19 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     }
     if (this._subjects && this._subjects.length > 0) {
       input.subjects = this._subjects;
+    }
+
+    // Process minus entries → convert callbacks to WherePaths
+    if (this._minusEntries && this._minusEntries.length > 0) {
+      input.minusEntries = this._minusEntries.map((entry) => {
+        if (entry.shapeId) {
+          return {shapeId: entry.shapeId};
+        }
+        if (entry.whereFn) {
+          return {where: processWhereClause(entry.whereFn, this._shape)};
+        }
+        return {};
+      });
     }
 
     return input;

@@ -442,4 +442,18 @@ export const queryFactories = {
     Employee.select((e) =>
       e.bestFriend.select((bf) => ({name: bf.name, dept: bf.department})),
     ),
+
+  // --- MINUS pattern tests ---
+
+  // Exclude by shape type
+  minusShape: () =>
+    Person.select((p) => p.name).minus(Employee),
+
+  // Exclude by condition
+  minusCondition: () =>
+    Person.select((p) => p.name).minus((p) => p.hobby.equals('Chess')),
+
+  // Chained MINUS — two separate MINUS blocks
+  minusChained: () =>
+    Person.select((p) => p.name).minus(Employee).minus((p) => p.hobby.equals('Chess')),
 };
