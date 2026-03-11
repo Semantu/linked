@@ -1085,3 +1085,100 @@ WHERE {
     expect(sparql).toContain(`<${P}/name>`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MINUS patterns
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — MINUS patterns', () => {
+  test('minusShape — exclude by shape type', async () => {
+    const sparql = await goldenSelect(queryFactories.minusShape);
+    expect(sparql).toContain('MINUS {');
+    expect(sparql).toContain(`rdf:type <${E}>`);
+    expect(sparql).toContain(`<${P}/name>`);
+  });
+
+  test('minusCondition — exclude by property condition', async () => {
+    const sparql = await goldenSelect(queryFactories.minusCondition);
+    expect(sparql).toContain('MINUS {');
+    expect(sparql).toContain(`<${P}/hobby>`);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('"Chess"');
+  });
+
+  test('minusChained — two separate MINUS blocks', async () => {
+    const sparql = await goldenSelect(queryFactories.minusChained);
+    const minusCount = (sparql.match(/MINUS \{/g) || []).length;
+    expect(minusCount).toBe(2);
+    expect(sparql).toContain(`rdf:type <${E}>`);
+    expect(sparql).toContain('"Chess"');
+  });
+
+  test('minusMultiProperty — exclude where multiple properties exist', async () => {
+    const sparql = await goldenSelect(queryFactories.minusMultiProperty);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  MINUS {
+    ?a0 <${P}/hobby> ?a1 .
+    ?a0 <${P}/nickNames> ?a2 .
+  }
+}`);
+  });
+
+  test('minusNestedPath — exclude where nested property path exists', async () => {
+    const sparql = await goldenSelect(queryFactories.minusNestedPath);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  MINUS {
+    ?a0 <${P}/bestFriend> ?a1 .
+    ?a1 <${P}/name> ?a2 .
+  }
+}`);
+  });
+
+  test('minusMixed — flat and nested in one MINUS block', async () => {
+    const sparql = await goldenSelect(queryFactories.minusMixed);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  MINUS {
+    ?a0 <${P}/hobby> ?a1 .
+    ?a0 <${P}/bestFriend> ?a2 .
+    ?a2 <${P}/name> ?a3 .
+  }
+}`);
+  });
+
+  test('minusSingleProperty — single property existence (no array)', async () => {
+    const sparql = await goldenSelect(queryFactories.minusSingleProperty);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  MINUS {
+    ?a0 <${P}/hobby> ?a1 .
+  }
+}`);
+  });
+});

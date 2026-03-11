@@ -9,6 +9,7 @@ import {
   QueryResponseToResultType,
   QueryShape,
   SelectAllQueryResponse,
+  WhereClause,
 } from '../queries/SelectQuery.js';
 import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
 import {NodeId} from '../queries/MutationQuery.js';
@@ -154,13 +155,9 @@ export abstract class Shape {
    */
   static update<S extends Shape, U extends UpdatePartial<S>>(
     this: ShapeConstructor<S>,
-    data?: U,
+    data: U,
   ): UpdateBuilder<S, U> {
-    let builder = UpdateBuilder.from(this) as UpdateBuilder<S, any>;
-    if (data) {
-      builder = builder.set(data);
-    }
-    return builder as unknown as UpdateBuilder<S, U>;
+    return UpdateBuilder.from(this).set(data) as unknown as UpdateBuilder<S, U>;
   }
 
   static create<S extends Shape, U extends UpdatePartial<S>>(
@@ -179,6 +176,21 @@ export abstract class Shape {
     id: NodeId | NodeId[] | NodeReferenceValue[],
   ): DeleteBuilder<S> {
     return DeleteBuilder.from(this, id) as DeleteBuilder<S>;
+  }
+
+  /** Delete all instances of this shape type. Returns void. */
+  static deleteAll<S extends Shape>(
+    this: ShapeConstructor<S>,
+  ): DeleteBuilder<S, void> {
+    return (DeleteBuilder.from(this) as DeleteBuilder<S>).all();
+  }
+
+  /** Delete instances matching a condition. Sugar for `.delete().where(fn)`. Returns void. */
+  static deleteWhere<S extends Shape>(
+    this: ShapeConstructor<S>,
+    fn: WhereClause<S>,
+  ): DeleteBuilder<S, void> {
+    return (DeleteBuilder.from(this) as DeleteBuilder<S>).where(fn);
   }
 
   static mapPropertyShapes<S extends Shape, ResponseType = unknown>(

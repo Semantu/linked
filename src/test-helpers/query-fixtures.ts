@@ -5,6 +5,7 @@ import {xsd} from '../ontologies/xsd';
 import {ShapeSet} from '../collections/ShapeSet';
 import {getQueryContext} from '../queries/QueryContext';
 import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
+import {DeleteBuilder} from '../queries/DeleteBuilder';
 
 const tmpPropBase = 'linked://tmp/props/';
 const tmpTypeBase = 'linked://tmp/types/';
@@ -310,9 +311,9 @@ export const queryFactories = {
     Person.select((p) => p.name)
       .where((p) => p.name.equals('Semmy').or(p.name.equals('Moa')))
       .limit(1),
-  sortByAsc: () => Person.select((p) => p.name).sortBy((p) => p.name),
+  sortByAsc: () => Person.select((p) => p.name).orderBy((p) => p.name),
   sortByDesc: () =>
-    Person.select((p) => p.name).sortBy((p) => p.name, 'DESC'),
+    Person.select((p) => p.name).orderBy((p) => p.name, 'DESC'),
   updateSimple: () => Person.update(updateSimple).for(entity('p1')),
   createSimple: () => Person.create({name: 'Test Create', hobby: 'Chess'}),
   createWithFriends: () =>
@@ -442,4 +443,54 @@ export const queryFactories = {
     Employee.select((e) =>
       e.bestFriend.select((bf) => ({name: bf.name, dept: bf.department})),
     ),
+
+  // --- MINUS pattern tests ---
+
+  // Exclude by shape type
+  minusShape: () =>
+    Person.select((p) => p.name).minus(Employee),
+
+  // Exclude by condition
+  minusCondition: () =>
+    Person.select((p) => p.name).minus((p) => p.hobby.equals('Chess')),
+
+  // Chained MINUS — two separate MINUS blocks
+  minusChained: () =>
+    Person.select((p) => p.name).minus(Employee).minus((p) => p.hobby.equals('Chess')),
+
+  // MINUS multi-property — exclude where ALL listed properties exist
+  minusMultiProperty: () =>
+    Person.select((p) => p.name).minus((p) => [p.hobby, p.nickNames]),
+
+  // MINUS nested path — exclude where nested property path exists
+  minusNestedPath: () =>
+    Person.select((p) => p.name).minus((p) => [p.bestFriend.name]),
+
+  // MINUS mixed — flat + nested in one call
+  minusMixed: () =>
+    Person.select((p) => p.name).minus((p) => [p.hobby, p.bestFriend.name]),
+
+  // MINUS single property existence (no array, returns raw QBO)
+  minusSingleProperty: () =>
+    Person.select((p) => p.name).minus((p) => p.hobby),
+
+  // --- Bulk delete tests ---
+
+  // Delete all instances of a shape
+  deleteAll: () => Person.deleteAll(),
+
+  // Delete with where condition
+  deleteWhere: () => Person.deleteWhere((p) => p.hobby.equals('Chess')),
+
+  // Builder-chain equivalents for equivalence testing
+  deleteAllBuilder: () => DeleteBuilder.from(Person).all(),
+  deleteWhereBuilder: () => DeleteBuilder.from(Person).where((p) => p.hobby.equals('Chess')),
+
+  // --- Conditional update tests ---
+
+  // Update all instances
+  updateForAll: () => Person.update({hobby: 'Chess'}).forAll(),
+
+  // Update with where condition
+  updateWhere: () => Person.update({hobby: 'Archived'}).where((p) => p.hobby.equals('Chess')),
 };

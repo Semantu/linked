@@ -14,12 +14,18 @@ import {captureQuery} from '../test-helpers/query-capture-store';
 import {
   createToSparql,
   updateToSparql,
+  updateWhereToSparql,
   deleteToSparql,
+  deleteAllToSparql,
+  deleteWhereToSparql,
 } from '../sparql/irToAlgebra';
 import type {
   IRCreateMutation,
   IRUpdateMutation,
   IRDeleteMutation,
+  IRDeleteAllMutation,
+  IRDeleteWhereMutation,
+  IRUpdateWhereMutation,
 } from '../queries/IntermediateRepresentation';
 
 import '../ontologies/rdf';
@@ -385,5 +391,77 @@ WHERE {
     ?s_1 ?p2_1 <${ENT}to-delete-2> .
   }
 }`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bulk delete mutation tests
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — bulk delete mutations', () => {
+  test('deleteAll — deletes all instances of shape', async () => {
+    const ir = (await captureQuery(queryFactories.deleteAll)) as IRDeleteAllMutation;
+    expect(ir.kind).toBe('delete_all');
+    const sparql = deleteAllToSparql(ir);
+    expect(sparql).toContain('DELETE');
+    expect(sparql).toContain(`rdf:type <${P}>`);
+    expect(sparql).toContain('?a0 ?p ?o');
+  });
+
+  test('deleteWhere — deletes instances matching condition', async () => {
+    const ir = (await captureQuery(queryFactories.deleteWhere)) as IRDeleteWhereMutation;
+    expect(ir.kind).toBe('delete_where');
+    const sparql = deleteWhereToSparql(ir);
+    expect(sparql).toContain('DELETE');
+    expect(sparql).toContain(`rdf:type <${P}>`);
+    expect(sparql).toContain('?a0 ?p ?o');
+    expect(sparql).toContain('FILTER');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Conditional update mutation tests
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — conditional update mutations', () => {
+  test('updateForAll — updates all instances of shape', async () => {
+    const ir = (await captureQuery(queryFactories.updateForAll)) as IRUpdateWhereMutation;
+    expect(ir.kind).toBe('update_where');
+    const sparql = updateWhereToSparql(ir);
+    expect(sparql).toContain('DELETE');
+    expect(sparql).toContain('INSERT');
+    expect(sparql).toContain(`rdf:type <${P}>`);
+    expect(sparql).toContain('?a0');
+    // Should NOT have FILTER (no where condition)
+    expect(sparql).not.toContain('FILTER');
+  });
+
+  test('updateWhere — updates instances matching condition', async () => {
+    const ir = (await captureQuery(queryFactories.updateWhere)) as IRUpdateWhereMutation;
+    expect(ir.kind).toBe('update_where');
+    const sparql = updateWhereToSparql(ir);
+    expect(sparql).toContain('DELETE');
+    expect(sparql).toContain('INSERT');
+    expect(sparql).toContain(`rdf:type <${P}>`);
+    expect(sparql).toContain('?a0');
+    expect(sparql).toContain('FILTER');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Builder equivalence tests — sugar methods produce identical SPARQL
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — builder equivalence', () => {
+  test('Person.deleteAll() === DeleteBuilder.from(Person).all()', async () => {
+    const irSugar = (await captureQuery(queryFactories.deleteAll)) as IRDeleteAllMutation;
+    const irBuilder = (await captureQuery(queryFactories.deleteAllBuilder)) as IRDeleteAllMutation;
+    expect(deleteAllToSparql(irSugar)).toBe(deleteAllToSparql(irBuilder));
+  });
+
+  test('Person.deleteWhere(fn) === DeleteBuilder.from(Person).where(fn)', async () => {
+    const irSugar = (await captureQuery(queryFactories.deleteWhere)) as IRDeleteWhereMutation;
+    const irBuilder = (await captureQuery(queryFactories.deleteWhereBuilder)) as IRDeleteWhereMutation;
+    expect(deleteWhereToSparql(irSugar)).toBe(deleteWhereToSparql(irBuilder));
   });
 });

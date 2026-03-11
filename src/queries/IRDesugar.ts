@@ -18,6 +18,18 @@ import type {PropertyShape} from '../shapes/SHACL.js';
 /**
  * Pipeline input type — accepts FieldSet entries directly.
  */
+/** A single segment in a property path (used for MINUS property existence). */
+export type PropertyPathSegment = {
+  propertyShapeId: string;
+};
+
+/** A raw MINUS entry before desugaring. */
+export type RawMinusEntry = {
+  shapeId?: string;
+  where?: WherePath;
+  propertyPaths?: PropertyPathSegment[][];
+};
+
 export type RawSelectInput = {
   entries: readonly FieldSetEntry[];
   where?: WherePath;
@@ -28,6 +40,7 @@ export type RawSelectInput = {
   limit?: number;
   offset?: number;
   singleResult?: boolean;
+  minusEntries?: RawMinusEntry[];
 };
 
 export type DesugaredPropertyStep = {
@@ -118,6 +131,13 @@ export type DesugaredWhereArg =
     }
   | DesugaredWhere;
 
+/** A desugared MINUS entry. */
+export type DesugaredMinusEntry = {
+  shapeId?: string;
+  where?: DesugaredWhere;
+  propertyPaths?: PropertyPathSegment[][];
+};
+
 export type DesugaredSelectQuery = {
   kind: 'desugared_select';
   shapeId?: string;
@@ -129,6 +149,7 @@ export type DesugaredSelectQuery = {
   selections: DesugaredSelection[];
   sortBy?: DesugaredSortBy;
   where?: DesugaredWhere;
+  minusEntries?: DesugaredMinusEntry[];
 };
 
 const isShapeRef = (value: unknown): value is ShapeReferenceValue =>
@@ -345,7 +366,7 @@ const toWhereComparison = (path: WherePath): DesugaredWhereComparison => {
   };
 };
 
-const toWhere = (path: WherePath): DesugaredWhere => {
+export const toWhere = (path: WherePath): DesugaredWhere => {
   if ((path as WhereAndOr).firstPath) {
     const grouped = path as WhereAndOr;
     return {
@@ -411,5 +432,10 @@ export const desugarSelectQuery = (query: RawSelectInput): DesugaredSelectQuery 
     selections,
     sortBy: toSortBy(query),
     where: query.where ? toWhere(query.where) : undefined,
+    minusEntries: query.minusEntries?.map((entry) => ({
+      shapeId: entry.shapeId,
+      where: entry.where ? toWhere(entry.where) : undefined,
+      propertyPaths: entry.propertyPaths,
+    })),
   };
 };

@@ -139,10 +139,10 @@ describe.skip('QueryBuilder result type inference (compile only)', () => {
     expectType<string | null | undefined>(first.name);
   });
 
-  test('select with sortBy preserves result type', () => {
+  test('select with orderBy preserves result type', () => {
     const qb = QueryBuilder.from(Person)
       .select((p) => p.name)
-      .sortBy((p) => p.name);
+      .orderBy((p) => p.name);
     type Result = Awaited<typeof qb>;
     const first = (null as unknown as Result)[0];
     expectType<string | null | undefined>(first.name);

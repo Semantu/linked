@@ -13,7 +13,10 @@ import {
   selectToSparql,
   createToSparql,
   updateToSparql,
+  updateWhereToSparql,
   deleteToSparql,
+  deleteAllToSparql,
+  deleteWhereToSparql,
 } from './irToAlgebra.js';
 import {
   mapSparqlSelectResult,
@@ -84,12 +87,27 @@ export abstract class SparqlStore implements IQuadStore {
   }
 
   async updateQuery(query: UpdateQuery): Promise<UpdateResult> {
+    if (query.kind === 'update_where') {
+      const sparql = updateWhereToSparql(query, this.options);
+      await this.executeSparqlUpdate(sparql);
+      return {id: ''} as UpdateResult;
+    }
     const sparql = updateToSparql(query, this.options);
     await this.executeSparqlUpdate(sparql);
     return mapSparqlUpdateResult(query);
   }
 
   async deleteQuery(query: DeleteQuery): Promise<DeleteResponse> {
+    if (query.kind === 'delete_all') {
+      const sparql = deleteAllToSparql(query, this.options);
+      await this.executeSparqlUpdate(sparql);
+      return {deleted: [], count: 0};
+    }
+    if (query.kind === 'delete_where') {
+      const sparql = deleteWhereToSparql(query, this.options);
+      await this.executeSparqlUpdate(sparql);
+      return {deleted: [], count: 0};
+    }
     const sparql = deleteToSparql(query, this.options);
     await this.executeSparqlUpdate(sparql);
     return {
