@@ -405,6 +405,6 @@ Note: `.forAll()` keeps the OPTIONAL for old value bindings (entity may not have
 ### Feature 3: Conditional Update
 - **Chosen:** `.update().where()` + `.forAll()` — thin layer over existing SPARQL generation, field-level scoping
 
-### Cross-cutting (still open)
-1. **Named graphs:** How should `.where()` and `.all()`/`.forAll()` interact with named graphs? Scope to default graph only?
-2. **Priority order:** Suggested: bulk delete → minus → conditional update, by ascending complexity.
+### Cross-cutting (resolved)
+1. **Named graphs:** Deferred — not in scope for now.
+2. **Priority order:** To be determined during planning.
