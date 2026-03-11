@@ -182,18 +182,18 @@ export abstract class Shape {
     return DeleteBuilder.from(this, id) as DeleteBuilder<S>;
   }
 
-  /** Delete all instances of this shape type. */
+  /** Delete all instances of this shape type. Returns void. */
   static deleteAll<S extends Shape>(
     this: ShapeConstructor<S>,
-  ): DeleteBuilder<S> {
+  ): DeleteBuilder<S, void> {
     return (DeleteBuilder.from(this) as DeleteBuilder<S>).all();
   }
 
-  /** Delete instances matching a condition. Sugar for `.delete().where(fn)`. */
+  /** Delete instances matching a condition. Sugar for `.delete().where(fn)`. Returns void. */
   static deleteWhere<S extends Shape>(
     this: ShapeConstructor<S>,
     fn: WhereClause<S>,
-  ): DeleteBuilder<S> {
+  ): DeleteBuilder<S, void> {
     return (DeleteBuilder.from(this) as DeleteBuilder<S>).where(fn);
   }
 

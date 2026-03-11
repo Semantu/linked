@@ -447,3 +447,21 @@ describe('SPARQL golden — conditional update mutations', () => {
     expect(sparql).toContain('FILTER');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Builder equivalence tests — sugar methods produce identical SPARQL
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — builder equivalence', () => {
+  test('Person.deleteAll() === DeleteBuilder.from(Person).all()', async () => {
+    const irSugar = (await captureQuery(queryFactories.deleteAll)) as IRDeleteAllMutation;
+    const irBuilder = (await captureQuery(queryFactories.deleteAllBuilder)) as IRDeleteAllMutation;
+    expect(deleteAllToSparql(irSugar)).toBe(deleteAllToSparql(irBuilder));
+  });
+
+  test('Person.deleteWhere(fn) === DeleteBuilder.from(Person).where(fn)', async () => {
+    const irSugar = (await captureQuery(queryFactories.deleteWhere)) as IRDeleteWhereMutation;
+    const irBuilder = (await captureQuery(queryFactories.deleteWhereBuilder)) as IRDeleteWhereMutation;
+    expect(deleteWhereToSparql(irSugar)).toBe(deleteWhereToSparql(irBuilder));
+  });
+});

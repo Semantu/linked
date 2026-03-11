@@ -30,12 +30,13 @@ interface DeleteBuilderInit<S extends Shape> {
  * Implements PromiseLike so mutations execute on `await`:
  * ```ts
  * const result = await DeleteBuilder.from(Person).for({id: '...'});
+ * await DeleteBuilder.from(Person).all();  // returns void
  * ```
  *
- * Internally delegates to DeleteQueryFactory for IR generation.
+ * R is the resolved type: DeleteResponse for ID-based, void for bulk operations.
  */
-export class DeleteBuilder<S extends Shape = Shape>
-  implements PromiseLike<DeleteResponse>, Promise<DeleteResponse>
+export class DeleteBuilder<S extends Shape = Shape, R = DeleteResponse>
+  implements PromiseLike<R>, Promise<R>
 {
   private readonly _shape: ShapeConstructor<S>;
   private readonly _ids?: NodeId[];
@@ -49,7 +50,7 @@ export class DeleteBuilder<S extends Shape = Shape>
     this._whereFn = init.whereFn;
   }
 
-  private clone(overrides: Partial<DeleteBuilderInit<S>> = {}): DeleteBuilder<S> {
+  private clone(overrides: Partial<DeleteBuilderInit<S>> = {}): DeleteBuilder<S, any> {
     return new DeleteBuilder<S>({
       shape: this._shape,
       ids: this._ids,
@@ -66,7 +67,7 @@ export class DeleteBuilder<S extends Shape = Shape>
   static from<S extends Shape>(
     shape: ShapeConstructor<S> | string,
     ids?: NodeId | NodeId[],
-  ): DeleteBuilder<S> {
+  ): DeleteBuilder<S, DeleteResponse> {
     const resolved = resolveShape<S>(shape);
     if (ids !== undefined) {
       const idsArray = Array.isArray(ids) ? ids : [ids];
@@ -80,19 +81,19 @@ export class DeleteBuilder<S extends Shape = Shape>
   // ---------------------------------------------------------------------------
 
   /** Specify the target IDs to delete. */
-  for(ids: NodeId | NodeId[]): DeleteBuilder<S> {
+  for(ids: NodeId | NodeId[]): DeleteBuilder<S, DeleteResponse> {
     const idsArray = Array.isArray(ids) ? ids : [ids];
-    return this.clone({ids: idsArray, mode: 'ids'});
+    return this.clone({ids: idsArray, mode: 'ids'}) as DeleteBuilder<S, DeleteResponse>;
   }
 
-  /** Delete all instances of this shape type. */
-  all(): DeleteBuilder<S> {
-    return this.clone({mode: 'all', ids: undefined, whereFn: undefined});
+  /** Delete all instances of this shape type. Returns void. */
+  all(): DeleteBuilder<S, void> {
+    return this.clone({mode: 'all', ids: undefined, whereFn: undefined}) as DeleteBuilder<S, void>;
   }
 
-  /** Delete instances matching a condition. */
-  where(fn: WhereClause<S>): DeleteBuilder<S> {
-    return this.clone({mode: 'where', whereFn: fn, ids: undefined});
+  /** Delete instances matching a condition. Returns void. */
+  where(fn: WhereClause<S>): DeleteBuilder<S, void> {
+    return this.clone({mode: 'where', whereFn: fn, ids: undefined}) as DeleteBuilder<S, void>;
   }
 
   // ---------------------------------------------------------------------------
@@ -140,16 +141,20 @@ export class DeleteBuilder<S extends Shape = Shape>
   }
 
   /** Execute the mutation. */
-  exec(): Promise<DeleteResponse> {
-    return getQueryDispatch().deleteQuery(this.build());
+  exec(): Promise<R> {
+    const mode = this._mode || (this._ids ? 'ids' : undefined);
+    if (mode === 'all' || mode === 'where') {
+      return getQueryDispatch().deleteQuery(this.build()).then(() => undefined) as Promise<R>;
+    }
+    return getQueryDispatch().deleteQuery(this.build()) as Promise<R>;
   }
 
   // ---------------------------------------------------------------------------
   // Promise interface
   // ---------------------------------------------------------------------------
 
-  then<TResult1 = DeleteResponse, TResult2 = never>(
-    onfulfilled?: ((value: DeleteResponse) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = R, TResult2 = never>(
+    onfulfilled?: ((value: R) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     return this.exec().then(onfulfilled, onrejected);
@@ -157,11 +162,11 @@ export class DeleteBuilder<S extends Shape = Shape>
 
   catch<TResult = never>(
     onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
-  ): Promise<DeleteResponse | TResult> {
+  ): Promise<R | TResult> {
     return this.then().catch(onrejected);
   }
 
-  finally(onfinally?: (() => void) | null): Promise<DeleteResponse> {
+  finally(onfinally?: (() => void) | null): Promise<R> {
     return this.then().finally(onfinally);
   }
 

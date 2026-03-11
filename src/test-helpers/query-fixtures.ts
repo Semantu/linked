@@ -5,6 +5,7 @@ import {xsd} from '../ontologies/xsd';
 import {ShapeSet} from '../collections/ShapeSet';
 import {getQueryContext} from '../queries/QueryContext';
 import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory';
+import {DeleteBuilder} from '../queries/DeleteBuilder';
 
 const tmpPropBase = 'linked://tmp/props/';
 const tmpTypeBase = 'linked://tmp/types/';
@@ -464,6 +465,10 @@ export const queryFactories = {
 
   // Delete with where condition
   deleteWhere: () => Person.deleteWhere((p) => p.hobby.equals('Chess')),
+
+  // Builder-chain equivalents for equivalence testing
+  deleteAllBuilder: () => DeleteBuilder.from(Person).all(),
+  deleteWhereBuilder: () => DeleteBuilder.from(Person).where((p) => p.hobby.equals('Chess')),
 
   // --- Conditional update tests ---
 

@@ -988,19 +988,28 @@ export function createToAlgebra(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Shared update field processing
+// ---------------------------------------------------------------------------
+
 /**
- * Converts an IRUpdateMutation to a SparqlDeleteInsertPlan.
+ * Processes IRNodeData fields into DELETE/INSERT/WHERE triples.
+ * Shared between updateToAlgebra (IRI subject) and updateWhereToAlgebra (variable subject).
  */
-export function updateToAlgebra(
-  query: IRUpdateMutation,
+function processUpdateFields(
+  data: IRNodeData,
+  subjectTerm: SparqlTerm,
   options?: SparqlOptions,
-): SparqlDeleteInsertPlan {
-  const subjectTerm = iriTerm(query.id);
+): {
+  deletePatterns: SparqlTriple[];
+  insertPatterns: SparqlTriple[];
+  oldValueTriples: SparqlTriple[];
+} {
   const deletePatterns: SparqlTriple[] = [];
   const insertPatterns: SparqlTriple[] = [];
-  const whereTriples: SparqlTriple[] = [];
+  const oldValueTriples: SparqlTriple[] = [];
 
-  for (const field of query.data.fields) {
+  for (const field of data.fields) {
     const propertyTerm = iriTerm(field.property);
     const suffix = propertySuffix(field.property);
 
@@ -1016,20 +1025,17 @@ export function updateToAlgebra(
     ) {
       const setMod = field.value as IRSetModificationValue;
 
-      // Remove specific values
       if (setMod.remove) {
         for (const removeItem of setMod.remove) {
           const removeTerm = iriTerm((removeItem as NodeReferenceValue).id);
           deletePatterns.push(tripleOf(subjectTerm, propertyTerm, removeTerm));
-          whereTriples.push(tripleOf(subjectTerm, propertyTerm, removeTerm));
+          oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, removeTerm));
         }
       }
 
-      // Add new values
       if (setMod.add) {
         for (const addItem of setMod.add) {
           if (addItem && typeof addItem === 'object' && 'shape' in addItem && 'fields' in addItem) {
-            // Nested create in add
             const nested = generateNodeDataTriples(addItem as IRNodeData, options);
             insertPatterns.push(tripleOf(subjectTerm, propertyTerm, iriTerm(nested.uri)));
             insertPatterns.push(...nested.triples);
@@ -1049,7 +1055,7 @@ export function updateToAlgebra(
     if (field.value === undefined || field.value === null) {
       const oldVar = varTerm(`old_${suffix}`);
       deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      whereTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
       continue;
     }
 
@@ -1057,7 +1063,7 @@ export function updateToAlgebra(
     if (Array.isArray(field.value)) {
       const oldVar = varTerm(`old_${suffix}`);
       deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      whereTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
 
       for (const item of field.value) {
         if (item && typeof item === 'object' && 'shape' in item && 'fields' in item) {
@@ -1078,7 +1084,7 @@ export function updateToAlgebra(
     if (typeof field.value === 'object' && 'shape' in field.value && 'fields' in field.value) {
       const oldVar = varTerm(`old_${suffix}`);
       deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      whereTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
 
       const nested = generateNodeDataTriples(field.value as IRNodeData, options);
       insertPatterns.push(tripleOf(subjectTerm, propertyTerm, iriTerm(nested.uri)));
@@ -1089,7 +1095,7 @@ export function updateToAlgebra(
     // Simple value update — delete old + insert new
     const oldVar = varTerm(`old_${suffix}`);
     deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-    whereTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+    oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
 
     const terms = fieldValueToTerms(field.value, options);
     for (const term of terms) {
@@ -1097,28 +1103,45 @@ export function updateToAlgebra(
     }
   }
 
-  // Wrap WHERE triples in OPTIONAL so UPDATE succeeds even when the old
-  // value doesn't exist (e.g. setting bestFriend when none was set before).
-  let whereAlgebra: SparqlAlgebraNode;
-  if (whereTriples.length === 0) {
-    whereAlgebra = {type: 'bgp', triples: []};
-  } else if (whereTriples.length === 1) {
-    whereAlgebra = {
-      type: 'left_join',
-      left: {type: 'bgp', triples: []},
-      right: {type: 'bgp', triples: whereTriples},
-    };
-  } else {
-    // Wrap each triple in its own OPTIONAL for independent matching
-    whereAlgebra = {type: 'bgp', triples: []};
-    for (const triple of whereTriples) {
-      whereAlgebra = {
-        type: 'left_join',
-        left: whereAlgebra,
-        right: {type: 'bgp', triples: [triple]},
-      };
-    }
+  return {deletePatterns, insertPatterns, oldValueTriples};
+}
+
+/**
+ * Wraps old-value triples in OPTIONAL (LEFT JOIN) so UPDATE succeeds
+ * even when the old value doesn't exist.
+ */
+function wrapOldValueOptionals(
+  base: SparqlAlgebraNode,
+  oldValueTriples: SparqlTriple[],
+): SparqlAlgebraNode {
+  let algebra = base;
+  if (oldValueTriples.length === 0) {
+    return algebra;
   }
+  for (const triple of oldValueTriples) {
+    algebra = {
+      type: 'left_join',
+      left: algebra,
+      right: {type: 'bgp', triples: [triple]},
+    };
+  }
+  return algebra;
+}
+
+/**
+ * Converts an IRUpdateMutation to a SparqlDeleteInsertPlan.
+ */
+export function updateToAlgebra(
+  query: IRUpdateMutation,
+  options?: SparqlOptions,
+): SparqlDeleteInsertPlan {
+  const subjectTerm = iriTerm(query.id);
+  const {deletePatterns, insertPatterns, oldValueTriples} = processUpdateFields(query.data, subjectTerm, options);
+
+  const whereAlgebra = wrapOldValueOptionals(
+    {type: 'bgp', triples: []},
+    oldValueTriples,
+  );
 
   return {
     type: 'delete_insert',
@@ -1378,104 +1401,7 @@ export function updateWhereToAlgebra(
   options?: SparqlOptions,
 ): SparqlDeleteInsertPlan {
   const subjectTerm = varTerm('a0');
-  const deletePatterns: SparqlTriple[] = [];
-  const insertPatterns: SparqlTriple[] = [];
-  const oldValueTriples: SparqlTriple[] = [];
-
-  // Process fields — same logic as updateToAlgebra but with variable subject
-  for (const field of query.data.fields) {
-    const propertyTerm = iriTerm(field.property);
-    const suffix = propertySuffix(field.property);
-
-    // Check for set modification ({add, remove})
-    if (
-      field.value &&
-      typeof field.value === 'object' &&
-      !Array.isArray(field.value) &&
-      !(field.value instanceof Date) &&
-      !('id' in field.value) &&
-      !('shape' in field.value) &&
-      ('add' in field.value || 'remove' in field.value)
-    ) {
-      const setMod = field.value as IRSetModificationValue;
-
-      if (setMod.remove) {
-        for (const removeItem of setMod.remove) {
-          const removeTerm = iriTerm((removeItem as NodeReferenceValue).id);
-          deletePatterns.push(tripleOf(subjectTerm, propertyTerm, removeTerm));
-          oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, removeTerm));
-        }
-      }
-
-      if (setMod.add) {
-        for (const addItem of setMod.add) {
-          if (addItem && typeof addItem === 'object' && 'shape' in addItem && 'fields' in addItem) {
-            const nested = generateNodeDataTriples(addItem as IRNodeData, options);
-            insertPatterns.push(tripleOf(subjectTerm, propertyTerm, iriTerm(nested.uri)));
-            insertPatterns.push(...nested.triples);
-          } else {
-            const terms = fieldValueToTerms(addItem, options);
-            for (const term of terms) {
-              insertPatterns.push(tripleOf(subjectTerm, propertyTerm, term));
-            }
-          }
-        }
-      }
-
-      continue;
-    }
-
-    // Unset (undefined/null)
-    if (field.value === undefined || field.value === null) {
-      const oldVar = varTerm(`old_${suffix}`);
-      deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      continue;
-    }
-
-    // Array overwrite
-    if (Array.isArray(field.value)) {
-      const oldVar = varTerm(`old_${suffix}`);
-      deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-
-      for (const item of field.value) {
-        if (item && typeof item === 'object' && 'shape' in item && 'fields' in item) {
-          const nested = generateNodeDataTriples(item as IRNodeData, options);
-          insertPatterns.push(tripleOf(subjectTerm, propertyTerm, iriTerm(nested.uri)));
-          insertPatterns.push(...nested.triples);
-        } else {
-          const terms = fieldValueToTerms(item, options);
-          for (const term of terms) {
-            insertPatterns.push(tripleOf(subjectTerm, propertyTerm, term));
-          }
-        }
-      }
-      continue;
-    }
-
-    // Nested create
-    if (typeof field.value === 'object' && 'shape' in field.value && 'fields' in field.value) {
-      const oldVar = varTerm(`old_${suffix}`);
-      deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-
-      const nested = generateNodeDataTriples(field.value as IRNodeData, options);
-      insertPatterns.push(tripleOf(subjectTerm, propertyTerm, iriTerm(nested.uri)));
-      insertPatterns.push(...nested.triples);
-      continue;
-    }
-
-    // Simple value update
-    const oldVar = varTerm(`old_${suffix}`);
-    deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-    oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-
-    const terms = fieldValueToTerms(field.value, options);
-    for (const term of terms) {
-      insertPatterns.push(tripleOf(subjectTerm, propertyTerm, term));
-    }
-  }
+  const {deletePatterns, insertPatterns, oldValueTriples} = processUpdateFields(query.data, subjectTerm, options);
 
   // WHERE: type triple is always required
   const typeTriple = tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(query.data.shape));
@@ -1505,14 +1431,7 @@ export function updateWhereToAlgebra(
     whereAlgebra = {type: 'filter', expression: filterExpr, inner: whereAlgebra};
   }
 
-  // Wrap old value triples in OPTIONAL — entity may not have the field yet
-  for (const triple of oldValueTriples) {
-    whereAlgebra = {
-      type: 'left_join',
-      left: whereAlgebra,
-      right: {type: 'bgp', triples: [triple]},
-    };
-  }
+  whereAlgebra = wrapOldValueOptionals(whereAlgebra, oldValueTriples);
 
   return {
     type: 'delete_insert',
