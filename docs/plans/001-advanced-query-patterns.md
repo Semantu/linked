@@ -658,3 +658,97 @@ Phases 2, 3, 4 can theoretically run in parallel after Phase 1, but all three to
 - `npm run compile` exits 0
 - `npm test` exits 0 with 0 failures
 - No TypeScript errors in any configuration
+
+---
+
+### Phase 6: MINUS Multi-Property Existence
+
+**Goal:** Support `.minus(p => [p.hobby, p.name])` — exclude entities where ALL listed properties exist.
+
+**Semantics:**
+```ts
+// Exclude any Person that has BOTH a hobby AND a name
+Person.select(p => p.name).minus(p => [p.hobby, p.name])
+```
+Generates:
+```sparql
+SELECT ?a0 ?a0_name WHERE {
+  ?a0 a <Person> . ?a0 <name> ?a0_name .
+  MINUS { ?a0 <hobby> ?m0 . ?a0 <name> ?m1 . }
+}
+```
+
+**Architecture:**
+
+The `.minus()` callback currently only accepts `WhereClause<S>` (returns `Evaluation`). We need a third callback return type: an **array of `QueryBuilderObject`** instances representing property existence.
+
+The key insight: we do NOT need to change the WhereClause type or processWhereClause. Instead, we add a **new callback type** to `.minus()` specifically, and process it at the `QueryBuilder.toRawInput()` level — converting property paths into `RawMinusEntry` objects with a new `propertyPaths` field that carries the raw property URIs. This new field then flows through desugar → canonicalize → lower → algebra as a simple BGP of `?a0 <prop> ?varN` triples.
+
+**Data flow:**
+
+```
+QueryBuilder.minus(p => [p.hobby, p.name])
+  ↓ toRawInput(): detect array, extract property paths from QueryBuilderObjects
+RawMinusEntry { propertyPaths: ['linked://tmp/props/hobby', 'linked://tmp/props/name'] }
+  ↓ desugarSelectQuery(): pass through (no desugaring needed for plain property URIs)
+DesugaredMinusEntry { propertyPaths: [...] }
+  ↓ canonicalizeDesugaredSelectQuery(): pass through
+CanonicalMinusEntry { propertyPaths: [...] }
+  ↓ lowerSelectQuery(): convert to IRMinusPattern with traverse patterns
+IRMinusPattern { kind: 'minus', pattern: { kind: 'join', patterns: [traverse, traverse] } }
+  ↓ irToAlgebra step 5b: existing code handles it — no filter, just inner pattern
+SparqlMinus { left: ..., right: { bgp: [?a0 <hobby> ?m0, ?a0 <name> ?m1] } }
+```
+
+**Files:**
+
+| File | Change |
+|------|--------|
+| `src/queries/QueryBuilder.ts` | Widen `.minus()` to accept array-returning callbacks; detect array in `toRawInput()` and extract property URIs |
+| `src/queries/IRDesugar.ts` | Add `propertyPaths?: string[]` to `RawMinusEntry` and `DesugaredMinusEntry`; thread through |
+| `src/queries/IRCanonicalize.ts` | Add `propertyPaths?: string[]` to `CanonicalMinusEntry`; thread through |
+| `src/queries/IRLower.ts` | Handle `propertyPaths` case: generate `IRTraversePattern[]` with fresh aliases, wrap in join |
+| `src/test-helpers/query-fixtures.ts` | Add `minusPropertyExists` fixture |
+| `src/tests/sparql-select-golden.test.ts` | Add golden test |
+
+**Tasks:**
+
+1. **QueryBuilder.ts** — Widen the `.minus()` callback type:
+   - Change signature to `minus(shapeOrFn: ShapeConstructor<any> | WhereClause<S> | MinusPropertyCallback<S>)`
+   - Where `MinusPropertyCallback<S> = (s: ToQueryBuilderObject<S>) => QueryBuilderObject[]`
+   - In `toRawInput()`, after calling the callback, check `Array.isArray(result)`:
+     - If array: extract property URI from each `QueryBuilderObject` via `.property.path[0].id`
+     - Store as `propertyPaths: string[]` on the `RawMinusEntry`
+   - Single property `.minus(p => p.hobby)` should also work — detect `result instanceof QueryBuilderObject` and wrap in array
+
+2. **IRDesugar.ts** — Add `propertyPaths` to entry types:
+   - `RawMinusEntry`: add `propertyPaths?: string[]`
+   - `DesugaredMinusEntry`: add `propertyPaths?: string[]`
+   - In `desugarSelectQuery()`: thread `propertyPaths` through (no transformation needed)
+
+3. **IRCanonicalize.ts** — Add `propertyPaths` to canonical entry:
+   - `CanonicalMinusEntry`: add `propertyPaths?: string[]`
+   - In `canonicalizeDesugaredSelectQuery()`: thread through
+
+4. **IRLower.ts** — Handle `propertyPaths` in minus lowering:
+   - In the `canonical.minusEntries` loop, add a new branch: `if (entry.propertyPaths)`
+   - For each property URI, create an `IRTraversePattern` from `rootAlias` to a fresh `m0`, `m1`, etc. alias
+   - Wrap in `IRJoinPattern` if multiple, push as `IRMinusPattern` with no filter
+
+5. **Fixtures + golden tests**:
+   - `minusPropertyExists: () => Person.select(p => p.name).minus(p => [p.hobby, p.name])`
+   - `minusSingleProperty: () => Person.select(p => p.name).minus(p => p.hobby)` (single, no array)
+   - Assert SPARQL output contains `MINUS { ?a0 <hobby> ?m0 . ?a0 <name> ?m1 . }`
+
+**Potential issues:**
+
+1. **Type widening**: The `.minus()` callback type must accept `(p) => QueryBuilderObject | QueryBuilderObject[] | Evaluation`. TypeScript overloads or a union return type handle this. The processing in `toRawInput()` does runtime detection (`instanceof Evaluation` vs `Array.isArray` vs `instanceof QueryBuilderObject`).
+
+2. **Nested property paths**: `.minus(p => [p.bestFriend.name])` — what should this mean? The ideation only shows flat properties. For now, we support only direct properties of the root shape. If `p.bestFriend.name` is passed, the `property.path[0].id` gives the property on the last segment. We should instead walk `getPropertyPath()` and only support single-segment paths, throwing for multi-segment.
+
+3. **Variable naming in MINUS block**: Fresh variables are needed that don't collide with the outer query. Using `m0`, `m1`, ... prefix avoids collision with the `a0` root alias.
+
+**Validation:**
+- `npx tsc --noEmit` exits 0
+- `npm test` — all existing tests pass + new minus property golden tests pass
+- Verify SPARQL output manually: `MINUS { ?a0 <prop1> ?m0 . ?a0 <prop2> ?m1 . }`
