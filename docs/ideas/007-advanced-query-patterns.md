@@ -341,57 +341,70 @@ Person.update({ name: 'Bob' }).for('id-1')  // existing (unchanged)
 - `irToAlgebra.ts`: generate new algebra plan for pattern-matched updates
 - Need careful handling: for each field in `data`, generate DELETE for old value + INSERT for new value, within a WHERE that includes the filter condition
 
-### Route B: Separate `Shape.updateWhere()` static method
+### Decision: `.update().where()` + `.forAll()` — thin layer over existing SPARQL generation
+
+**Chosen:** Route A — add `.where()` and `.forAll()` to `UpdateBuilder`. No `.updateWhere()` sugar.
+
+- `Person.update(data).where(cb)` — conditional update
+- `Person.update(data).forAll()` — bulk update all instances of type
+- `Person.update(data).for(id)` — existing by-ID (unchanged)
+
+**Key insight:** The existing `updateToAlgebra()` already generates the full `DELETE { old } INSERT { new } WHERE { OPTIONAL { old bindings } }` pattern. Conditional update is a thin addition — swap the hardcoded `<entity-id>` subject for a `?a0` variable, add `?a0 a <Type>` to WHERE, and append the filter conditions from the `.where()` callback.
+
+**Field-level scoping:** Only touches fields in the update data — surgical. Does NOT delete/reinsert unrelated triples.
+
+**Example — `.where()`:**
 
 ```ts
-Person.updateWhere(p => p.status.equals('inactive'), { status: 'archived' })
+Person.update({ status: 'archived' }).where(p => p.status.equals('inactive'))
 ```
 
-**Pros:**
-- Clear separation from ID-based updates
-- Harder to accidentally trigger
+```sparql
+DELETE { ?a0 <status> ?old_status . }
+INSERT { ?a0 <status> "archived" . }
+WHERE  {
+  ?a0 a <Person> .
+  ?a0 <status> ?old_status .
+  FILTER(?old_status = "inactive")
+}
+```
 
-**Cons:**
-- Doesn't follow the builder pattern
-- Less composable
-
-### Route C: Require two-step (select then update)
-
-Don't add `.where()` to `UpdateBuilder`. Instead, users fetch IDs first:
+**Example — `.forAll()`:**
 
 ```ts
-const inactive = await Person.select(p => p.id).where(p => p.status.equals('inactive'))
-await Promise.all(inactive.map(p => Person.update({ status: 'archived' }).for(p.id)))
+Person.update({ verified: true }).forAll()
 ```
 
-**Pros:**
-- Zero new mutation code
-- Explicit, no surprises
+```sparql
+DELETE { ?a0 <verified> ?old_verified . }
+INSERT { ?a0 <verified> true . }
+WHERE  {
+  ?a0 a <Person> .
+  OPTIONAL { ?a0 <verified> ?old_verified . }
+}
+```
 
-**Cons:**
-- N+1 problem — one update per entity
-- Not atomic — race conditions between select and update
-- Verbose for a common pattern
+Note: `.forAll()` keeps the OPTIONAL for old value bindings (entity may not have the field yet). `.where()` drops the OPTIONAL since the filter condition implies the field exists.
+
+**Implementation:**
+- Add `.where(fn)` and `.forAll()` to `UpdateBuilder`
+- Make `.for(id)` optional (require one of `.for()`, `.forAll()`, or `.where()` before `.build()`)
+- New IR variant: `IRUpdateWhereMutation` (kind: `'update_where'`, shape, data, whereFn?)
+- `updateToAlgebra`: parameterize subject — `iriTerm(id)` for `.for()`, variable for `.where()`/`.forAll()`, add type triple + filter conditions to WHERE
 
 ---
 
-## Open questions for discussion
+## Open questions (resolved)
 
 ### Feature 1: MINUS / NOT EXISTS
-1. **Which route?** Given that NOT EXISTS already works via `.every()`, is `.minus()` worth adding? Or is it redundant API surface?
-2. **If we add `.minus()`**, should it emit MINUS or NOT EXISTS? Does engine compatibility matter for your use cases?
-3. **Should `.minus()` accept multiple patterns?** e.g. `.minus(Employee).minus(Contractor)` via chaining (which already works with immutable builders)?
+- **Chosen:** Route A with extended callback support — `.minus()` emitting SPARQL `MINUS`
 
 ### Feature 2: Bulk Delete
-4. **Route A vs B vs C?** Extending `DeleteBuilder` with `.all()` + `.where()` (Route A) fits the 2.0 builder pattern best, but needs the signature change. Thoughts?
-5. **Safety:** Should `.delete().all()` require an explicit opt-in (e.g. `.delete().all({ confirm: true })`) to prevent accidental mass deletes?
-6. **Return type:** Should bulk delete return `{ deletedCount: number }` or just `void`? (SPARQL endpoints vary in what they report back.)
+- **Chosen:** `.deleteAll()` + `.delete().where()` — schema-aware blank node cleanup, returns `void`
 
 ### Feature 3: Conditional Update
-7. **Is this needed for 2.0?** It's the most complex of the three features. Should it be deferred?
-8. **Route A vs C?** Route A (`.where()` on UpdateBuilder) is powerful but complex. Route C (select-then-update) works today with no code changes. Is the ergonomic gain worth the complexity?
-9. **Field-level scoping:** For `Person.update({ status: 'archived' }).where(…)`, should the generated SPARQL delete *only* the `status` triples and insert new ones? Or should it touch all triples of matching entities? (The former is more surgical and safer.)
+- **Chosen:** `.update().where()` + `.forAll()` — thin layer over existing SPARQL generation, field-level scoping
 
-### Cross-cutting
-10. **Named graphs:** How should `.where()` and `.all()` interact with named graphs? Scope to default graph only?
-11. **Priority order:** If we do all three, what's the implementation order? (Suggested: bulk delete → minus → conditional update, by ascending complexity.)
+### Cross-cutting (still open)
+1. **Named graphs:** How should `.where()` and `.all()`/`.forAll()` interact with named graphs? Scope to default graph only?
+2. **Priority order:** Suggested: bulk delete → minus → conditional update, by ascending complexity.
