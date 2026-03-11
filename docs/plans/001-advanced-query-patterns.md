@@ -570,7 +570,7 @@ Phases 2, 3, 4 can theoretically run in parallel after Phase 1, but all three to
 
 ---
 
-### Phase 3: Bulk Delete
+### Phase 3: Bulk Delete — COMPLETED
 
 **Goal:** `.deleteAll()`, `.delete().all()`, `.delete().where()`, `.deleteWhere()` — full pipeline.
 
@@ -610,7 +610,7 @@ Phases 2, 3, 4 can theoretically run in parallel after Phase 1, but all three to
 
 ---
 
-### Phase 4: Conditional Update
+### Phase 4: Conditional Update — COMPLETED
 
 **Goal:** `.update().where()` and `.update().forAll()` — full pipeline.
 
@@ -645,7 +645,7 @@ Phases 2, 3, 4 can theoretically run in parallel after Phase 1, but all three to
 
 ---
 
-### Phase 5: Integration Verification
+### Phase 5: Integration Verification — COMPLETED
 
 **Goal:** Full compile, full test suite, verify all features work together.
 
