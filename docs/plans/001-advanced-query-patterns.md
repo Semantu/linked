@@ -825,3 +825,28 @@ type PropertyPathSegment = {
 - `npm test` — all existing tests pass (especially existing `minusProperty` test unchanged)
 - New golden tests pass with correct SPARQL output
 - Verify nested path SPARQL manually: `MINUS { ?a0 <bestFriend> ?m0 . ?m0 <name> ?m1 . }`
+
+---
+
+## REVIEW
+
+### Wrapup Outcomes
+
+All 6 phases completed successfully. 18 commits on branch `claude/setup-and-summarize-GQoTY`.
+
+**Implemented scope:**
+1. **Phase 1**: IR types & contracts for MINUS, bulk delete, conditional update
+2. **Phase 2**: `.minus()` on QueryBuilder (shape, property, condition, chained)
+3. **Phase 3**: Bulk delete (`.deleteAll()`, `.delete().all()`, `.delete().where()`, `.deleteWhere()`)
+4. **Phase 4**: Conditional update (`.update().where()`, `.update().forAll()`)
+5. **Phase 5**: Integration verification (full compile + test suite)
+6. **Phase 6**: MINUS multi-property with nested path support (`.minus(p => [p.hobby, p.name])`, `.minus(p => [p.bestFriend.name])`)
+
+**Cleanup tasks (commit `669df80`):**
+- Deprecated `sortBy` in favor of `orderBy`
+- Made `data` required in `Shape.update()`
+- Simplified delete API: removed `.for()` from DeleteBuilder, `Person.delete(id)` / `Person.deleteAll()` / `Person.deleteWhere(fn)`
+
+**Test results:** 644 tests pass, 0 failures. TypeScript clean.
+
+**PR-readiness:** Ready for review. Report doc created at `docs/reports/009-advanced-query-patterns.md`.
