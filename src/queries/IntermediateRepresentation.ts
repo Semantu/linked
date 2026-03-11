@@ -5,7 +5,14 @@ export type IRAlias = string;
 
 export type IRValue = string | number | boolean | null;
 
-export type IRQuery = IRSelectQuery | IRCreateMutation | IRUpdateMutation | IRDeleteMutation;
+export type IRQuery =
+  | IRSelectQuery
+  | IRCreateMutation
+  | IRUpdateMutation
+  | IRDeleteMutation
+  | IRDeleteAllMutation
+  | IRDeleteWhereMutation
+  | IRUpdateWhereMutation;
 
 export type IRSelectQuery = {
   kind: 'select';
@@ -43,7 +50,8 @@ export type IRGraphPattern =
   | IRJoinPattern
   | IROptionalPattern
   | IRUnionPattern
-  | IRExistsPattern;
+  | IRExistsPattern
+  | IRMinusPattern;
 
 export type IRShapeScanPattern = {
   kind: 'shape_scan';
@@ -77,6 +85,12 @@ export type IRUnionPattern = {
 export type IRExistsPattern = {
   kind: 'exists';
   pattern: IRGraphPattern;
+};
+
+export type IRMinusPattern = {
+  kind: 'minus';
+  pattern: IRGraphPattern;
+  filter?: IRExpression;
 };
 
 export type IRExpression =
@@ -182,6 +196,26 @@ export type IRDeleteMutation = {
   kind: 'delete';
   shape: string;
   ids: NodeReferenceValue[];
+};
+
+export type IRDeleteAllMutation = {
+  kind: 'delete_all';
+  shape: string;
+};
+
+export type IRDeleteWhereMutation = {
+  kind: 'delete_where';
+  shape: string;
+  where: IRExpression;
+  wherePatterns: IRGraphPattern[];
+};
+
+export type IRUpdateWhereMutation = {
+  kind: 'update_where';
+  shape: string;
+  data: IRNodeData;
+  where?: IRExpression;
+  wherePatterns?: IRGraphPattern[];
 };
 
 export type IRNodeData = {

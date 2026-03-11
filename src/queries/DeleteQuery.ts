@@ -1,14 +1,18 @@
 import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {NodeReferenceValue, UpdatePartial} from './QueryFactory.js';
 import {MutationQueryFactory, NodeId} from './MutationQuery.js';
-import {IRDeleteMutation} from './IntermediateRepresentation.js';
+import {
+  IRDeleteMutation,
+  IRDeleteAllMutation,
+  IRDeleteWhereMutation,
+} from './IntermediateRepresentation.js';
 import {buildCanonicalDeleteMutationIR} from './IRMutation.js';
 
 /**
  * The canonical DeleteQuery type — an IR AST node representing a delete mutation.
  * This is the type received by IQuadStore.deleteQuery().
  */
-export type DeleteQuery = IRDeleteMutation;
+export type DeleteQuery = IRDeleteMutation | IRDeleteAllMutation | IRDeleteWhereMutation;
 
 export type DeleteResponse = {
   /**

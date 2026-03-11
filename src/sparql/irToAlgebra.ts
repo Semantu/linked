@@ -3,6 +3,9 @@ import {
   IRCreateMutation,
   IRUpdateMutation,
   IRDeleteMutation,
+  IRDeleteAllMutation,
+  IRDeleteWhereMutation,
+  IRUpdateWhereMutation,
   IRGraphPattern,
   IRExpression,
   IRFieldValue,
@@ -14,6 +17,7 @@ import {
   SparqlSelectPlan,
   SparqlInsertDataPlan,
   SparqlDeleteInsertPlan,
+  SparqlDeleteWherePlan,
   SparqlAlgebraNode,
   SparqlBGP,
   SparqlTriple,
@@ -30,7 +34,27 @@ import {
   selectPlanToSparql,
   insertDataPlanToSparql,
   deleteInsertPlanToSparql,
+  deleteWherePlanToSparql,
 } from './algebraToString.js';
+// Lazy-loaded to avoid circular dependency:
+// irToAlgebra → ShapeClass → Shape → CreateBuilder → … → SHACL → Shape (circular)
+let _getShapeClass: typeof import('../utils/ShapeClass.js').getShapeClass | undefined;
+function lazyGetShapeClass(id: string) {
+  if (!_getShapeClass) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    _getShapeClass = require('../utils/ShapeClass.js').getShapeClass;
+  }
+  return _getShapeClass!(id);
+}
+
+let _shacl: typeof import('../ontologies/shacl.js').shacl | undefined;
+function lazyShacl() {
+  if (!_shacl) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    _shacl = require('../ontologies/shacl.js').shacl;
+  }
+  return _shacl!;
+}
 import {rdf} from '../ontologies/rdf.js';
 import {xsd} from '../ontologies/xsd.js';
 
@@ -321,6 +345,24 @@ export function selectToAlgebra(
     }
   }
 
+  // 5b. MINUS patterns — wrap algebra in SparqlMinus for each minus pattern
+  for (const pattern of query.patterns) {
+    if (pattern.kind === 'minus') {
+      let minusAlgebra = convertExistsPattern(pattern.pattern, registry);
+      if (pattern.filter) {
+        const minusPropertyTriples: SparqlTriple[] = [];
+        processExpressionForProperties(pattern.filter, registry, minusPropertyTriples);
+        // Add property triples into the MINUS block
+        if (minusPropertyTriples.length > 0) {
+          minusAlgebra = joinNodes(minusAlgebra, {type: 'bgp', triples: minusPropertyTriples});
+        }
+        const filterExpr = convertExpression(pattern.filter, registry, minusPropertyTriples);
+        minusAlgebra = {type: 'filter', expression: filterExpr, inner: minusAlgebra};
+      }
+      algebra = {type: 'minus', left: algebra, right: minusAlgebra};
+    }
+  }
+
   // 6. SubjectId → Filter / SubjectIds → VALUES
   if (query.subjectIds && query.subjectIds.length > 0) {
     // Multiple subjects: use VALUES clause for efficient filtering
@@ -506,6 +548,11 @@ function processPattern(
 
     case 'exists': {
       processPattern(pattern.pattern, registry, traverseTriples, optionalPropertyTriples, filteredTraverseBlocks);
+      break;
+    }
+
+    case 'minus': {
+      // MINUS patterns are handled separately in selectToAlgebra — skip in processPattern.
       break;
     }
   }
@@ -786,6 +833,10 @@ function convertExistsPattern(
       return convertExistsPattern(pattern.pattern, registry);
     }
 
+    case 'minus': {
+      return convertExistsPattern(pattern.pattern, registry);
+    }
+
     default:
       throw new Error(`Unsupported pattern kind in EXISTS: ${(pattern as never as {kind: string}).kind}`);
   }
@@ -937,19 +988,28 @@ export function createToAlgebra(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Shared update field processing
+// ---------------------------------------------------------------------------
+
 /**
- * Converts an IRUpdateMutation to a SparqlDeleteInsertPlan.
+ * Processes IRNodeData fields into DELETE/INSERT/WHERE triples.
+ * Shared between updateToAlgebra (IRI subject) and updateWhereToAlgebra (variable subject).
  */
-export function updateToAlgebra(
-  query: IRUpdateMutation,
+function processUpdateFields(
+  data: IRNodeData,
+  subjectTerm: SparqlTerm,
   options?: SparqlOptions,
-): SparqlDeleteInsertPlan {
-  const subjectTerm = iriTerm(query.id);
+): {
+  deletePatterns: SparqlTriple[];
+  insertPatterns: SparqlTriple[];
+  oldValueTriples: SparqlTriple[];
+} {
   const deletePatterns: SparqlTriple[] = [];
   const insertPatterns: SparqlTriple[] = [];
-  const whereTriples: SparqlTriple[] = [];
+  const oldValueTriples: SparqlTriple[] = [];
 
-  for (const field of query.data.fields) {
+  for (const field of data.fields) {
     const propertyTerm = iriTerm(field.property);
     const suffix = propertySuffix(field.property);
 
@@ -965,20 +1025,17 @@ export function updateToAlgebra(
     ) {
       const setMod = field.value as IRSetModificationValue;
 
-      // Remove specific values
       if (setMod.remove) {
         for (const removeItem of setMod.remove) {
           const removeTerm = iriTerm((removeItem as NodeReferenceValue).id);
           deletePatterns.push(tripleOf(subjectTerm, propertyTerm, removeTerm));
-          whereTriples.push(tripleOf(subjectTerm, propertyTerm, removeTerm));
+          oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, removeTerm));
         }
       }
 
-      // Add new values
       if (setMod.add) {
         for (const addItem of setMod.add) {
           if (addItem && typeof addItem === 'object' && 'shape' in addItem && 'fields' in addItem) {
-            // Nested create in add
             const nested = generateNodeDataTriples(addItem as IRNodeData, options);
             insertPatterns.push(tripleOf(subjectTerm, propertyTerm, iriTerm(nested.uri)));
             insertPatterns.push(...nested.triples);
@@ -998,7 +1055,7 @@ export function updateToAlgebra(
     if (field.value === undefined || field.value === null) {
       const oldVar = varTerm(`old_${suffix}`);
       deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      whereTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
       continue;
     }
 
@@ -1006,7 +1063,7 @@ export function updateToAlgebra(
     if (Array.isArray(field.value)) {
       const oldVar = varTerm(`old_${suffix}`);
       deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      whereTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
 
       for (const item of field.value) {
         if (item && typeof item === 'object' && 'shape' in item && 'fields' in item) {
@@ -1027,7 +1084,7 @@ export function updateToAlgebra(
     if (typeof field.value === 'object' && 'shape' in field.value && 'fields' in field.value) {
       const oldVar = varTerm(`old_${suffix}`);
       deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-      whereTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
 
       const nested = generateNodeDataTriples(field.value as IRNodeData, options);
       insertPatterns.push(tripleOf(subjectTerm, propertyTerm, iriTerm(nested.uri)));
@@ -1038,7 +1095,7 @@ export function updateToAlgebra(
     // Simple value update — delete old + insert new
     const oldVar = varTerm(`old_${suffix}`);
     deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
-    whereTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+    oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
 
     const terms = fieldValueToTerms(field.value, options);
     for (const term of terms) {
@@ -1046,28 +1103,45 @@ export function updateToAlgebra(
     }
   }
 
-  // Wrap WHERE triples in OPTIONAL so UPDATE succeeds even when the old
-  // value doesn't exist (e.g. setting bestFriend when none was set before).
-  let whereAlgebra: SparqlAlgebraNode;
-  if (whereTriples.length === 0) {
-    whereAlgebra = {type: 'bgp', triples: []};
-  } else if (whereTriples.length === 1) {
-    whereAlgebra = {
-      type: 'left_join',
-      left: {type: 'bgp', triples: []},
-      right: {type: 'bgp', triples: whereTriples},
-    };
-  } else {
-    // Wrap each triple in its own OPTIONAL for independent matching
-    whereAlgebra = {type: 'bgp', triples: []};
-    for (const triple of whereTriples) {
-      whereAlgebra = {
-        type: 'left_join',
-        left: whereAlgebra,
-        right: {type: 'bgp', triples: [triple]},
-      };
-    }
+  return {deletePatterns, insertPatterns, oldValueTriples};
+}
+
+/**
+ * Wraps old-value triples in OPTIONAL (LEFT JOIN) so UPDATE succeeds
+ * even when the old value doesn't exist.
+ */
+function wrapOldValueOptionals(
+  base: SparqlAlgebraNode,
+  oldValueTriples: SparqlTriple[],
+): SparqlAlgebraNode {
+  let algebra = base;
+  if (oldValueTriples.length === 0) {
+    return algebra;
   }
+  for (const triple of oldValueTriples) {
+    algebra = {
+      type: 'left_join',
+      left: algebra,
+      right: {type: 'bgp', triples: [triple]},
+    };
+  }
+  return algebra;
+}
+
+/**
+ * Converts an IRUpdateMutation to a SparqlDeleteInsertPlan.
+ */
+export function updateToAlgebra(
+  query: IRUpdateMutation,
+  options?: SparqlOptions,
+): SparqlDeleteInsertPlan {
+  const subjectTerm = iriTerm(query.id);
+  const {deletePatterns, insertPatterns, oldValueTriples} = processUpdateFields(query.data, subjectTerm, options);
+
+  const whereAlgebra = wrapOldValueOptionals(
+    {type: 'bgp', triples: []},
+    oldValueTriples,
+  );
 
   return {
     type: 'delete_insert',
@@ -1124,12 +1198,255 @@ export function deleteToAlgebra(
 }
 
 // ---------------------------------------------------------------------------
+// Blank node tree walking for schema-aware delete cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks whether a PropertyShape points to blank nodes (sh:BlankNode or
+ * sh:BlankNodeOrIRI). Returns true when the property's range *may* include
+ * blank node values that should be cleaned up on delete.
+ */
+function isBlankNodeProperty(prop: {nodeKind?: {id?: string}}): boolean {
+  const nk = prop.nodeKind?.id;
+  if (!nk) return false;
+  const s = lazyShacl();
+  return nk === s.BlankNode.id || nk === s.BlankNodeOrIRI.id;
+}
+
+/**
+ * Recursively builds DELETE + WHERE patterns for blank-node-typed properties.
+ *
+ * For each blank-node property on the shape:
+ * - DELETE: `?bnVar ?pN ?oN .`  (wildcard all triples on the blank node)
+ * - WHERE: `OPTIONAL { ?parent <property> ?bnVar . FILTER(isBlank(?bnVar)) . ?bnVar ?pN ?oN . }`
+ *
+ * Recurses into the property's valueShape to handle nested blank nodes
+ * (e.g. Person → Address (blank) → GeoPoint (blank)).
+ */
+function walkBlankNodeTree(
+  shapeId: string,
+  parentVar: string,
+  depth: number,
+  deletePatterns: SparqlTriple[],
+): SparqlAlgebraNode | null {
+  const shapeClass = lazyGetShapeClass(shapeId);
+  if (!shapeClass?.shape) return null;
+
+  let optionals: SparqlAlgebraNode | null = null;
+
+  const props = shapeClass.shape.getPropertyShapes(true);
+  for (const prop of props) {
+    if (!isBlankNodeProperty(prop)) continue;
+
+    const bnVar = `bn${depth}`;
+    const pVar = `p${depth}`;
+    const oVar = `o${depth}`;
+
+    // DELETE pattern: wildcard all triples on the blank node
+    deletePatterns.push(tripleOf(varTerm(bnVar), varTerm(pVar), varTerm(oVar)));
+
+    // WHERE: parent --<property>--> ?bnVar
+    const traverseTriple = tripleOf(
+      varTerm(parentVar),
+      iriTerm(prop.path[0].id),
+      varTerm(bnVar),
+    );
+    // FILTER(isBlank(?bnVar))
+    const isBlankFilter: SparqlExpression = {
+      kind: 'function_expr',
+      name: 'isBlank',
+      args: [{kind: 'variable_expr', name: bnVar}],
+    };
+    // ?bnVar ?pN ?oN
+    const wildcardTriple = tripleOf(varTerm(bnVar), varTerm(pVar), varTerm(oVar));
+
+    // Build inner pattern: traverse + filter + wildcard
+    let innerPattern: SparqlAlgebraNode = {
+      type: 'bgp',
+      triples: [traverseTriple, wildcardTriple],
+    };
+    innerPattern = {type: 'filter', expression: isBlankFilter, inner: innerPattern};
+
+    // Recurse into valueShape for nested blank nodes
+    if (prop.valueShape?.id) {
+      const nestedOptional = walkBlankNodeTree(
+        prop.valueShape.id,
+        bnVar,
+        depth + 1,
+        deletePatterns,
+      );
+      if (nestedOptional) {
+        innerPattern = {type: 'left_join', left: innerPattern, right: nestedOptional};
+      }
+    }
+
+    // Wrap in OPTIONAL (left_join)
+    if (optionals) {
+      optionals = {type: 'left_join', left: optionals, right: innerPattern};
+    } else {
+      optionals = innerPattern;
+    }
+
+    depth++;
+  }
+
+  return optionals;
+}
+
+/**
+ * Converts an IRDeleteAllMutation to a SparqlDeleteInsertPlan.
+ *
+ * Generates DELETE { ?a0 ?p ?o . [blank node wildcards] }
+ *          WHERE  { ?a0 a <Shape> . ?a0 ?p ?o . OPTIONAL { [blank node traversals] } }
+ */
+export function deleteAllToAlgebra(
+  query: IRDeleteAllMutation,
+  _options?: SparqlOptions,
+): SparqlDeleteInsertPlan {
+  const subjectVar = 'a0';
+
+  // DELETE patterns: root wildcard
+  const deletePatterns: SparqlTriple[] = [
+    tripleOf(varTerm(subjectVar), varTerm('p'), varTerm('o')),
+  ];
+
+  // WHERE: type triple + root wildcard
+  const typeTriple = tripleOf(varTerm(subjectVar), iriTerm(RDF_TYPE), iriTerm(query.shape));
+  const rootWildcard = tripleOf(varTerm(subjectVar), varTerm('p'), varTerm('o'));
+  let whereAlgebra: SparqlAlgebraNode = {type: 'bgp', triples: [typeTriple, rootWildcard]};
+
+  // Walk blank node tree for cleanup
+  const blankNodeOptional = walkBlankNodeTree(query.shape, subjectVar, 1, deletePatterns);
+  if (blankNodeOptional) {
+    whereAlgebra = {type: 'left_join', left: whereAlgebra, right: blankNodeOptional};
+  }
+
+  return {
+    type: 'delete_insert',
+    deletePatterns,
+    insertPatterns: [],
+    whereAlgebra,
+  };
+}
+
+/**
+ * Converts an IRDeleteWhereMutation to a SparqlDeleteInsertPlan.
+ *
+ * Like deleteAllToAlgebra but adds filter conditions from the where clause.
+ */
+export function deleteWhereToAlgebra(
+  query: IRDeleteWhereMutation,
+  _options?: SparqlOptions,
+): SparqlDeleteInsertPlan {
+  const subjectVar = 'a0';
+  const registry = new VariableRegistry();
+
+  // DELETE patterns: root wildcard
+  const deletePatterns: SparqlTriple[] = [
+    tripleOf(varTerm(subjectVar), varTerm('p'), varTerm('o')),
+  ];
+
+  // WHERE: type triple + root wildcard
+  const typeTriple = tripleOf(varTerm(subjectVar), iriTerm(RDF_TYPE), iriTerm(query.shape));
+  const rootWildcard = tripleOf(varTerm(subjectVar), varTerm('p'), varTerm('o'));
+  let whereAlgebra: SparqlAlgebraNode = {type: 'bgp', triples: [typeTriple, rootWildcard]};
+
+  // Process where patterns (traversals from the where clause)
+  const traverseTriples: SparqlTriple[] = [];
+  const optionalPropertyTriples: SparqlTriple[] = [];
+  for (const pattern of query.wherePatterns) {
+    processPattern(pattern, registry, traverseTriples, optionalPropertyTriples);
+  }
+
+  // Add traverse triples to required BGP
+  if (traverseTriples.length > 0) {
+    whereAlgebra = joinNodes(whereAlgebra, {type: 'bgp', triples: traverseTriples});
+  }
+
+  // Process expression to discover property triples
+  processExpressionForProperties(query.where, registry, optionalPropertyTriples);
+
+  // Add optional property triples
+  for (const triple of optionalPropertyTriples) {
+    whereAlgebra = joinNodes(whereAlgebra, {type: 'bgp', triples: [triple]});
+  }
+
+  // Convert and add filter expression
+  const filterExpr = convertExpression(query.where, registry, []);
+  whereAlgebra = {type: 'filter', expression: filterExpr, inner: whereAlgebra};
+
+  // Walk blank node tree for cleanup
+  const blankNodeOptional = walkBlankNodeTree(query.shape, subjectVar, 1, deletePatterns);
+  if (blankNodeOptional) {
+    whereAlgebra = {type: 'left_join', left: whereAlgebra, right: blankNodeOptional};
+  }
+
+  return {
+    type: 'delete_insert',
+    deletePatterns,
+    insertPatterns: [],
+    whereAlgebra,
+  };
+}
+
+/**
+ * Converts an IRUpdateWhereMutation to a SparqlDeleteInsertPlan.
+ *
+ * Like updateToAlgebra but uses a variable subject (?a0) instead of a
+ * hardcoded entity IRI, adds a type triple, and optionally includes
+ * filter conditions from the where clause.
+ */
+export function updateWhereToAlgebra(
+  query: IRUpdateWhereMutation,
+  options?: SparqlOptions,
+): SparqlDeleteInsertPlan {
+  const subjectTerm = varTerm('a0');
+  const {deletePatterns, insertPatterns, oldValueTriples} = processUpdateFields(query.data, subjectTerm, options);
+
+  // WHERE: type triple is always required
+  const typeTriple = tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(query.data.shape));
+  let whereAlgebra: SparqlAlgebraNode = {type: 'bgp', triples: [typeTriple]};
+
+  // Process where filter conditions (if any)
+  if (query.where && query.wherePatterns) {
+    const registry = new VariableRegistry();
+    const traverseTriples: SparqlTriple[] = [];
+    const optionalPropertyTriples: SparqlTriple[] = [];
+
+    for (const pattern of query.wherePatterns) {
+      processPattern(pattern, registry, traverseTriples, optionalPropertyTriples);
+    }
+
+    if (traverseTriples.length > 0) {
+      whereAlgebra = joinNodes(whereAlgebra, {type: 'bgp', triples: traverseTriples});
+    }
+
+    processExpressionForProperties(query.where, registry, optionalPropertyTriples);
+
+    for (const triple of optionalPropertyTriples) {
+      whereAlgebra = joinNodes(whereAlgebra, {type: 'bgp', triples: [triple]});
+    }
+
+    const filterExpr = convertExpression(query.where, registry, []);
+    whereAlgebra = {type: 'filter', expression: filterExpr, inner: whereAlgebra};
+  }
+
+  whereAlgebra = wrapOldValueOptionals(whereAlgebra, oldValueTriples);
+
+  return {
+    type: 'delete_insert',
+    deletePatterns,
+    insertPatterns,
+    whereAlgebra,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Convenience wrappers: IR → algebra → SPARQL string in one call
 // ---------------------------------------------------------------------------
 
 /**
  * Converts an IRSelectQuery to a SPARQL string.
- * Stub: will be implemented when algebraToString is available.
  */
 export function selectToSparql(
   query: IRSelectQuery,
@@ -1165,12 +1482,44 @@ export function updateToSparql(
 
 /**
  * Converts an IRDeleteMutation to a SPARQL string.
- * Stub: will be implemented when algebraToString is available.
  */
 export function deleteToSparql(
   query: IRDeleteMutation,
   options?: SparqlOptions,
 ): string {
   const plan = deleteToAlgebra(query, options);
+  return deleteInsertPlanToSparql(plan, options);
+}
+
+/**
+ * Converts an IRDeleteAllMutation to a SPARQL string.
+ */
+export function deleteAllToSparql(
+  query: IRDeleteAllMutation,
+  options?: SparqlOptions,
+): string {
+  const plan = deleteAllToAlgebra(query, options);
+  return deleteInsertPlanToSparql(plan, options);
+}
+
+/**
+ * Converts an IRDeleteWhereMutation to a SPARQL string.
+ */
+export function deleteWhereToSparql(
+  query: IRDeleteWhereMutation,
+  options?: SparqlOptions,
+): string {
+  const plan = deleteWhereToAlgebra(query, options);
+  return deleteInsertPlanToSparql(plan, options);
+}
+
+/**
+ * Converts an IRUpdateWhereMutation to a SPARQL string.
+ */
+export function updateWhereToSparql(
+  query: IRUpdateWhereMutation,
+  options?: SparqlOptions,
+): string {
+  const plan = updateWhereToAlgebra(query, options);
   return deleteInsertPlanToSparql(plan, options);
 }

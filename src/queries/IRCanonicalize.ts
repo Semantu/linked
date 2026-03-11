@@ -5,6 +5,7 @@ import {
   DesugaredWhereArg,
   DesugaredWhereBoolean,
   DesugaredWhereComparison,
+  PropertyPathSegment,
 } from './IRDesugar.js';
 import {WhereMethods} from './SelectQuery.js';
 
@@ -38,8 +39,16 @@ export type CanonicalWhereExpression =
   | CanonicalWhereExists
   | CanonicalWhereNot;
 
-export type CanonicalDesugaredSelectQuery = Omit<DesugaredSelectQuery, 'where'> & {
+/** A canonicalized MINUS entry. */
+export type CanonicalMinusEntry = {
+  shapeId?: string;
   where?: CanonicalWhereExpression;
+  propertyPaths?: PropertyPathSegment[][];
+};
+
+export type CanonicalDesugaredSelectQuery = Omit<DesugaredSelectQuery, 'where' | 'minusEntries'> & {
+  where?: CanonicalWhereExpression;
+  minusEntries?: CanonicalMinusEntry[];
 };
 
 const toComparison = (
@@ -192,5 +201,10 @@ export const canonicalizeDesugaredSelectQuery = (
   return {
     ...query,
     where: query.where ? canonicalizeWhere(query.where) : undefined,
+    minusEntries: query.minusEntries?.map((entry) => ({
+      shapeId: entry.shapeId,
+      where: entry.where ? canonicalizeWhere(entry.where) : undefined,
+      propertyPaths: entry.propertyPaths,
+    })),
   };
 };

@@ -12,11 +12,12 @@ import {
   evaluateSortCallback,
 } from './SelectQuery.js';
 import type {SortByPath, WherePath} from './SelectQuery.js';
-import type {RawSelectInput} from './IRDesugar.js';
+import type {PropertyPathSegment, RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
 import type {NodeReferenceValue} from './QueryFactory.js';
 import {FieldSet, FieldSetJSON, FieldSetFieldJSON} from './FieldSet.js';
+import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 
 /** JSON representation of a QueryBuilder. */
 export type QueryBuilderJSON = {
@@ -36,6 +37,12 @@ interface PreloadEntry {
   component: QueryComponentLike<any, any>;
 }
 
+/** A MINUS entry — either a shape type exclusion or a WHERE-clause condition. */
+interface MinusEntry<S extends Shape> {
+  shapeId?: string;
+  whereFn?: WhereClause<S>;
+}
+
 /** Internal state bag for QueryBuilder. */
 interface QueryBuilderInit<S extends Shape, R> {
   shape: ShapeConstructor<S>;
@@ -51,6 +58,7 @@ interface QueryBuilderInit<S extends Shape, R> {
   selectAllLabels?: string[];
   fieldSet?: FieldSet;
   preloads?: PreloadEntry[];
+  minusEntries?: MinusEntry<S>[];
 }
 
 /**
@@ -82,6 +90,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   private readonly _selectAllLabels?: string[];
   private readonly _fieldSet?: FieldSet;
   private readonly _preloads?: PreloadEntry[];
+  private readonly _minusEntries?: MinusEntry<S>[];
 
   private constructor(init: QueryBuilderInit<S, R>) {
     this._shape = init.shape;
@@ -97,6 +106,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     this._selectAllLabels = init.selectAllLabels;
     this._fieldSet = init.fieldSet;
     this._preloads = init.preloads;
+    this._minusEntries = init.minusEntries;
   }
 
   /** Create a shallow clone with overrides. */
@@ -115,6 +125,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       selectAllLabels: this._selectAllLabels,
       fieldSet: this._fieldSet,
       preloads: this._preloads,
+      minusEntries: this._minusEntries,
       ...overrides,
     });
   }
@@ -175,13 +186,37 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     return this.clone({whereFn: fn});
   }
 
+  /**
+   * Exclude results matching a MINUS pattern.
+   *
+   * Accepts:
+   * - A shape constructor to exclude by type: `.minus(Employee)`
+   * - A WHERE callback to exclude by condition: `.minus(p => p.hobby.equals('Chess'))`
+   * - A callback returning a property or array of properties for existence exclusion:
+   *   `.minus(p => p.hobby)` or `.minus(p => [p.hobby, p.bestFriend.name])`
+   *
+   * Chainable: `.minus(A).minus(B)` produces two separate `MINUS { }` blocks.
+   */
+  minus(shapeOrFn: ShapeConstructor<any> | WhereClause<S> | ((s: any) => any)): QueryBuilder<S, R, Result> {
+    const entry: MinusEntry<S> = {};
+    if (typeof shapeOrFn === 'function' && 'shape' in shapeOrFn) {
+      // ShapeConstructor — has a static .shape property
+      entry.shapeId = (shapeOrFn as ShapeConstructor<any>).shape?.id;
+    } else {
+      // WhereClause callback
+      entry.whereFn = shapeOrFn as WhereClause<S>;
+    }
+    const existing = this._minusEntries || [];
+    return this.clone({minusEntries: [...existing, entry]});
+  }
+
   /** Set sort order. */
   orderBy<OR>(fn: QueryBuildFn<S, OR>, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder<S, R, Result> {
     return this.clone({sortByFn: fn as any, sortDirection: direction});
   }
 
   /**
-   * Alias for orderBy — matches the existing DSL's `sortBy` method name.
+   * @deprecated Use `orderBy()` instead.
    */
   sortBy<OR>(fn: QueryBuildFn<S, OR>, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder<S, R, Result> {
     return this.orderBy(fn, direction);
@@ -432,6 +467,40 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     }
     if (this._subjects && this._subjects.length > 0) {
       input.subjects = this._subjects;
+    }
+
+    // Process minus entries → convert callbacks to WherePaths or property paths
+    if (this._minusEntries && this._minusEntries.length > 0) {
+      input.minusEntries = this._minusEntries.map((entry) => {
+        if (entry.shapeId) {
+          return {shapeId: entry.shapeId};
+        }
+        if (entry.whereFn) {
+          // Call the callback through the proxy and inspect the result type
+          const proxy = createProxiedPathBuilder(this._shape);
+          const result = (entry.whereFn as Function)(proxy);
+
+          // Array of QBOs → property existence paths
+          if (Array.isArray(result)) {
+            const propertyPaths = result.map((item: any) => {
+              const segments = FieldSet.collectPropertySegments(item);
+              return segments.map((seg): PropertyPathSegment => ({propertyShapeId: seg.id}));
+            });
+            return {propertyPaths};
+          }
+
+          // Single QBO (has .property field) → single property existence path
+          if (result && typeof result === 'object' && 'property' in result && 'subject' in result) {
+            const segments = FieldSet.collectPropertySegments(result);
+            const propertyPaths = [segments.map((seg): PropertyPathSegment => ({propertyShapeId: seg.id}))];
+            return {propertyPaths};
+          }
+
+          // Evaluation → existing WHERE-based path
+          return {where: processWhereClause(entry.whereFn, this._shape)};
+        }
+        return {};
+      });
     }
 
     return input;

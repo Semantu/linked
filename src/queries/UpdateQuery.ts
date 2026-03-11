@@ -7,14 +7,14 @@ import {
   toNodeReference,
 } from './QueryFactory.js';
 import {MutationQueryFactory} from './MutationQuery.js';
-import {IRUpdateMutation} from './IntermediateRepresentation.js';
+import {IRUpdateMutation, IRUpdateWhereMutation} from './IntermediateRepresentation.js';
 import {buildCanonicalUpdateMutationIR} from './IRMutation.js';
 
 /**
  * The canonical UpdateQuery type — an IR AST node representing an update mutation.
  * This is the type received by IQuadStore.updateQuery().
  */
-export type UpdateQuery = IRUpdateMutation;
+export type UpdateQuery = IRUpdateMutation | IRUpdateWhereMutation;
 
 export class UpdateQueryFactory<
   ShapeType extends Shape,

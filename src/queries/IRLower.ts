@@ -357,10 +357,74 @@ export const lowerSelectQuery = (
       }))
     : undefined;
 
+  // Lower MINUS entries → IRMinusPattern objects
+  const minusPatterns: IRGraphPattern[] = [];
+  if (canonical.minusEntries) {
+    for (const entry of canonical.minusEntries) {
+      if (entry.shapeId) {
+        // Shape exclusion: MINUS { ?a0 a <Shape> }
+        minusPatterns.push({
+          kind: 'minus',
+          pattern: {kind: 'shape_scan', shape: entry.shapeId, alias: ctx.rootAlias},
+        });
+      } else if (entry.propertyPaths && entry.propertyPaths.length > 0) {
+        // Property existence exclusion: MINUS { ?a0 <prop1> ?m0 . ?a0 <prop2> ?m1 . }
+        // Supports nested paths: ?a0 <bestFriend> ?m0 . ?m0 <name> ?m1 .
+        const traversals: IRTraversePattern[] = [];
+        for (const path of entry.propertyPaths) {
+          let currentAlias = ctx.rootAlias;
+          for (const segment of path) {
+            const toAlias = ctx.generateAlias();
+            traversals.push({
+              kind: 'traverse',
+              from: currentAlias,
+              to: toAlias,
+              property: segment.propertyShapeId,
+            });
+            currentAlias = toAlias;
+          }
+        }
+        const innerPattern: IRGraphPattern = traversals.length === 1
+          ? traversals[0]
+          : {kind: 'join', patterns: traversals};
+        minusPatterns.push({kind: 'minus', pattern: innerPattern});
+      } else if (entry.where) {
+        // Condition-based exclusion: MINUS { ?a0 <prop> ?val . FILTER(...) }
+        const minusTraversals: IRTraversePattern[] = [];
+        const localTraversalMap = new Map<string, string>();
+        const minusResolveTraversal = (fromAlias: string, propertyShapeId: string): string => {
+          const key = `${fromAlias}:${propertyShapeId}`;
+          const existing = localTraversalMap.get(key);
+          if (existing) return existing;
+          const toAlias = ctx.generateAlias();
+          minusTraversals.push({
+            kind: 'traverse',
+            from: fromAlias,
+            to: toAlias,
+            property: propertyShapeId,
+          });
+          localTraversalMap.set(key, toAlias);
+          return toAlias;
+        };
+        const minusOptions: PathLoweringOptions = {
+          rootAlias: ctx.rootAlias,
+          resolveTraversal: minusResolveTraversal,
+        };
+        const filter = lowerWhere(entry.where, ctx, minusOptions);
+        const innerPattern: IRGraphPattern = minusTraversals.length === 1
+          ? minusTraversals[0]
+          : minusTraversals.length > 1
+            ? {kind: 'join', patterns: minusTraversals}
+            : {kind: 'shape_scan', shape: canonical.shapeId || '', alias: ctx.rootAlias};
+        minusPatterns.push({kind: 'minus', pattern: innerPattern, filter});
+      }
+    }
+  }
+
   return {
     kind: 'select',
     root,
-    patterns: ctx.getPatterns(),
+    patterns: [...ctx.getPatterns(), ...minusPatterns],
     projection,
     where,
     orderBy,
@@ -371,4 +435,46 @@ export const lowerSelectQuery = (
     singleResult: canonical.singleResult,
     resultMap: resultMapEntries,
   };
+};
+
+/**
+ * Standalone WHERE lowering — converts a CanonicalWhereExpression to IR expression + patterns.
+ * Used by mutation builders (DeleteBuilder, UpdateBuilder) that don't go through the select pipeline.
+ */
+export const lowerWhereToIR = (
+  where: CanonicalWhereExpression,
+  rootAlias: string = 'a0',
+): {where: IRExpression; wherePatterns: IRGraphPattern[]} => {
+  let counter = 1; // start at 1 since a0 is the root
+  const traversals: IRTraversePattern[] = [];
+  const localTraversalMap = new Map<string, string>();
+
+  const ctx = {
+    generateAlias(): string {
+      return `a${counter++}`;
+    },
+  };
+
+  const resolveTraversal = (fromAlias: string, propertyShapeId: string): string => {
+    const key = `${fromAlias}:${propertyShapeId}`;
+    const existing = localTraversalMap.get(key);
+    if (existing) return existing;
+    const toAlias = ctx.generateAlias();
+    traversals.push({
+      kind: 'traverse',
+      from: fromAlias,
+      to: toAlias,
+      property: propertyShapeId,
+    });
+    localTraversalMap.set(key, toAlias);
+    return toAlias;
+  };
+
+  const options: PathLoweringOptions = {
+    rootAlias,
+    resolveTraversal,
+  };
+
+  const expr = lowerWhere(where, ctx as any, options);
+  return {where: expr, wherePatterns: traversals};
 };
