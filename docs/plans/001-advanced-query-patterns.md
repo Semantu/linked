@@ -495,6 +495,164 @@ function walkBlankNodeTree(
 
 ---
 
-## Remaining Decisions
+## Implementation Phases
 
-None — all feature decisions are recorded in the ideation doc. Implementation order will be determined in tasks mode.
+### Dependency graph
+
+```
+Phase 1 (IR types)
+    ├── Phase 2 (MINUS)         ─┐
+    ├── Phase 3 (Bulk Delete)    ├── Phase 5 (Integration)
+    └── Phase 4 (Cond. Update)  ─┘
+```
+
+Phases 2, 3, 4 can theoretically run in parallel after Phase 1, but all three touch `irToAlgebra.ts` (different sections). To avoid merge conflicts on shared files, execute sequentially: 1 → 2 → 3 → 4 → 5.
+
+---
+
+### Phase 1: IR Types & Contracts — COMPLETED
+
+**Goal:** Add all new IR types, mutation type unions, and canonical IR builder stubs. No logic — types only. Unblocks all subsequent phases.
+
+**Status:** Done. `tsc --noEmit` passes. All 633 tests pass.
+
+**Files:**
+- `src/queries/IntermediateRepresentation.ts` — add `IRMinusPattern` to `IRGraphPattern` union
+- `src/queries/IRMutation.ts` — add `IRDeleteAllMutation`, `IRDeleteWhereMutation`, `IRUpdateWhereMutation` types + stub `buildCanonical*` functions
+- `src/queries/DeleteQuery.ts` — widen `DeleteQuery` type union
+- `src/queries/UpdateQuery.ts` — widen `UpdateQuery` type union
+
+**Tasks:**
+1. Add `IRMinusPattern` type and extend `IRGraphPattern` union.
+2. Add `IRDeleteAllMutation`, `IRDeleteWhereMutation`, `IRUpdateWhereMutation` types.
+3. Add stub `buildCanonicalDeleteAllMutationIR()`, `buildCanonicalDeleteWhereMutationIR()`, `buildCanonicalUpdateWhereMutationIR()` — return correct typed objects from input params.
+4. Widen `DeleteQuery` to `IRDeleteMutation | IRDeleteAllMutation | IRDeleteWhereMutation`.
+5. Widen `UpdateQuery` to `IRUpdateMutation | IRUpdateWhereMutation`.
+
+**Validation:**
+- `npx tsc -p tsconfig-esm.json --noEmit` exits 0
+- `npm test` — all existing tests still pass (no regressions)
+
+---
+
+### Phase 2: MINUS on QueryBuilder
+
+**Goal:** Full `.minus()` support: builder method → IR → algebra → SPARQL string.
+
+**Files:**
+- `src/queries/QueryBuilder.ts` — add `.minus()` method
+- `src/sparql/irToAlgebra.ts` — handle `IRMinusPattern` in `selectToAlgebra`
+- `src/test-helpers/query-fixtures.ts` — add minus fixture factories
+- `src/tests/sparql-select-golden.test.ts` — add golden tests
+
+**Tasks:**
+1. Add `.minus()` method to `QueryBuilder` accepting `ShapeConstructor | WhereClause<S>`. Store as `_minusPatterns` array on builder init. Clone appends.
+2. In `build()` / `buildSelectQuery()`, convert minus patterns to `IRMinusPattern` entries in `IRSelectQuery.patterns[]`.
+3. In `selectToAlgebra`, add case for `'minus'` pattern kind: wrap current algebra in `SparqlMinus { left, right }`.
+4. Add query fixture factories: `minusShape`, `minusProperty`, `minusCondition`, `minusChained`.
+5. Add golden tests asserting exact SPARQL output.
+
+**Fixtures & golden tests:**
+
+| Fixture | DSL | Expected SPARQL contains |
+|---------|-----|--------------------------|
+| `minusShape` | `Person.select(p => p.name).minus(Employee)` | `MINUS { ?a0 a <Employee> . }` |
+| `minusProperty` | `Person.select(p => p.name).minus(p => p.hobby)` | `MINUS { ?a0 <hobby> ?a0_hobby . }` |
+| `minusCondition` | `Person.select(p => p.name).minus(p => p.hobby.equals('Chess'))` | `MINUS { ?a0 <hobby> ?a0_hobby . FILTER(?a0_hobby = "Chess") }` |
+| `minusChained` | `Person.select(p => p.name).minus(Employee).minus(p => p.hobby)` | Two separate `MINUS { }` blocks |
+
+**Validation:**
+- `npx tsc -p tsconfig-esm.json --noEmit` exits 0
+- `npm test` — all existing tests pass + 4 new minus golden tests pass
+- Assert each golden test uses exact `toBe` matching on full SPARQL string
+
+---
+
+### Phase 3: Bulk Delete
+
+**Goal:** `.deleteAll()`, `.delete().all()`, `.delete().where()`, `.deleteWhere()` — full pipeline.
+
+**Files:**
+- `src/queries/DeleteBuilder.ts` — add `mode`, `whereFn`, `.all()`, `.where()` methods, dispatch in `build()`
+- `src/shapes/Shape.ts` — add `deleteAll()`, `deleteWhere()` static methods
+- `src/queries/IRMutation.ts` — implement `buildCanonicalDeleteAllMutationIR()`, `buildCanonicalDeleteWhereMutationIR()` (replace stubs)
+- `src/sparql/irToAlgebra.ts` — add `deleteAllToAlgebra()`, `deleteWhereToAlgebra()`, `walkBlankNodeTree()` helper, export `deleteAllToSparql()`, `deleteWhereToSparql()` convenience wrappers
+- `src/test-helpers/query-fixtures.ts` — add delete fixture factories
+- `src/tests/sparql-mutation-golden.test.ts` — add golden tests
+
+**Tasks:**
+1. Add `mode` and `whereFn` to `DeleteBuilderInit`. Add `.all()` and `.where(fn)` methods.
+2. Update `build()` to dispatch by mode: `'ids'` → existing factory, `'all'` → `buildCanonicalDeleteAllMutationIR`, `'where'` → `buildCanonicalDeleteWhereMutationIR`. Validate mutual exclusivity.
+3. Add `Shape.deleteAll()` and `Shape.deleteWhere(fn)` static methods.
+4. Implement `buildCanonicalDeleteAllMutationIR()` — returns `{ kind: 'delete_all', shape: shape.id }`.
+5. Implement `buildCanonicalDeleteWhereMutationIR()` — processes WHERE callback via `processWhereClause`, converts to IR expressions/patterns.
+6. Implement `deleteAllToAlgebra()` with `walkBlankNodeTree()` for schema-aware blank node cleanup.
+7. Implement `deleteWhereToAlgebra()` — same base as deleteAll + filter conditions from WHERE.
+8. Add convenience wrappers `deleteAllToSparql()`, `deleteWhereToSparql()`.
+9. Add fixtures and golden tests.
+
+**Fixtures & golden tests:**
+
+| Fixture | DSL | Key assertions |
+|---------|-----|----------------|
+| `deleteAll` | `Person.deleteAll()` | `DELETE { ?a0 ?p ?o . }` + `WHERE { ?a0 a <Person> . ?a0 ?p ?o . }` |
+| `deleteAllBuilder` | `Person.delete().all()` | Same SPARQL as `deleteAll` (builder equivalence) |
+| `deleteWhere` | `Person.delete().where(p => p.hobby.equals('Chess'))` | `FILTER` with hobby equals in WHERE |
+| `deleteWhereSugar` | `Person.deleteWhere(p => p.hobby.equals('Chess'))` | Same SPARQL as `deleteWhere` |
+
+**Validation:**
+- `npx tsc -p tsconfig-esm.json --noEmit` exits 0
+- `npm test` — all existing tests pass + new delete golden tests pass
+- Assert `deleteAll` and `deleteAllBuilder` produce identical SPARQL
+- Assert `deleteWhere` and `deleteWhereSugar` produce identical SPARQL
+
+---
+
+### Phase 4: Conditional Update
+
+**Goal:** `.update().where()` and `.update().forAll()` — full pipeline.
+
+**Files:**
+- `src/queries/UpdateBuilder.ts` — add `mode`, `whereFn`, `.forAll()`, `.where()` methods, dispatch in `build()`
+- `src/queries/IRMutation.ts` — implement `buildCanonicalUpdateWhereMutationIR()` (replace stub)
+- `src/sparql/irToAlgebra.ts` — add `updateWhereToAlgebra()`, extract shared field processing helper from `updateToAlgebra()`, export `updateWhereToSparql()` convenience wrapper
+- `src/test-helpers/query-fixtures.ts` — add update fixture factories
+- `src/tests/sparql-mutation-golden.test.ts` — add golden tests
+
+**Tasks:**
+1. Add `mode` and `whereFn` to `UpdateBuilderInit`. Add `.forAll()` and `.where(fn)` methods.
+2. Update `build()` to dispatch by mode: `'id'` → existing factory, `'all'`/`'where'` → `buildCanonicalUpdateWhereMutationIR`. Validate: require data via `.set()` before `.forAll()`/`.where()`.
+3. Implement `buildCanonicalUpdateWhereMutationIR()` — processes WHERE callback, builds IR.
+4. Extract shared field processing from `updateToAlgebra()` into a helper that takes a subject term (IRI or variable). Ensure existing `updateToAlgebra()` calls the helper (refactor, not rewrite). Run existing tests after this step.
+5. Implement `updateWhereToAlgebra()` using the shared helper with `?a0` variable subject + type triple + filter.
+6. Add convenience wrapper `updateWhereToSparql()`.
+7. Add fixtures and golden tests.
+
+**Fixtures & golden tests:**
+
+| Fixture | DSL | Key assertions |
+|---------|-----|----------------|
+| `updateWhere` | `Person.update({hobby: 'Chess'}).where(p => p.hobby.equals('Jogging'))` | `DELETE { ?a0 <hobby> ?old_hobby . }` + `INSERT { ?a0 <hobby> "Chess" . }` + `FILTER` in WHERE |
+| `updateForAll` | `Person.update({hobby: 'Chess'}).forAll()` | Same DELETE/INSERT + `OPTIONAL` for old binding in WHERE, no FILTER |
+| `updateWhereMultiField` | `Person.update({hobby: 'Chess', name: 'Bob'}).where(p => p.hobby.equals('Jogging'))` | Two DELETE + two INSERT + FILTER |
+
+**Validation:**
+- `npx tsc -p tsconfig-esm.json --noEmit` exits 0
+- `npm test` — ALL existing tests pass (critical: refactored `updateToAlgebra` must not regress) + new update golden tests pass
+- After step 4 (refactor), run `npm test` before proceeding — this is the safety gate
+
+---
+
+### Phase 5: Integration Verification
+
+**Goal:** Full compile, full test suite, verify all features work together.
+
+**Tasks:**
+1. Run `npm run compile` — both CJS and ESM must succeed.
+2. Run `npm test` — full test suite, 0 failures.
+3. Verify barrel exports: new types and functions are importable from the package entry point if applicable.
+
+**Validation:**
+- `npm run compile` exits 0
+- `npm test` exits 0 with 0 failures
+- No TypeScript errors in any configuration

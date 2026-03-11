@@ -84,12 +84,18 @@ export abstract class SparqlStore implements IQuadStore {
   }
 
   async updateQuery(query: UpdateQuery): Promise<UpdateResult> {
+    if (query.kind === 'update_where') {
+      throw new Error('update_where is not yet implemented in SparqlStore');
+    }
     const sparql = updateToSparql(query, this.options);
     await this.executeSparqlUpdate(sparql);
     return mapSparqlUpdateResult(query);
   }
 
   async deleteQuery(query: DeleteQuery): Promise<DeleteResponse> {
+    if (query.kind === 'delete_all' || query.kind === 'delete_where') {
+      throw new Error(`${query.kind} is not yet implemented in SparqlStore`);
+    }
     const sparql = deleteToSparql(query, this.options);
     await this.executeSparqlUpdate(sparql);
     return {

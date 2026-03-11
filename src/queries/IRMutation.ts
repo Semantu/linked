@@ -10,11 +10,16 @@ import {
 import {
   IRCreateMutation,
   IRDeleteMutation,
+  IRDeleteAllMutation,
+  IRDeleteWhereMutation,
+  IRUpdateWhereMutation,
   IRFieldValue,
   IRNodeData,
   IRFieldUpdate,
   IRSetModificationValue,
   IRUpdateMutation,
+  IRExpression,
+  IRGraphPattern,
 } from './IntermediateRepresentation.js';
 
 type CreateMutationInput = {
@@ -125,5 +130,57 @@ export const buildCanonicalDeleteMutationIR = (
     kind: 'delete',
     shape: query.shape.id,
     ids: query.ids.map((id) => ({id: id.id})),
+  };
+};
+
+type DeleteAllMutationInput = {
+  shape: NodeShape;
+};
+
+/** Builds an IRDeleteAllMutation — delete all instances of a shape type. */
+export const buildCanonicalDeleteAllMutationIR = (
+  query: DeleteAllMutationInput,
+): IRDeleteAllMutation => {
+  return {
+    kind: 'delete_all',
+    shape: query.shape.id,
+  };
+};
+
+type DeleteWhereMutationInput = {
+  shape: NodeShape;
+  where: IRExpression;
+  wherePatterns: IRGraphPattern[];
+};
+
+/** Builds an IRDeleteWhereMutation — delete instances matching a condition. */
+export const buildCanonicalDeleteWhereMutationIR = (
+  query: DeleteWhereMutationInput,
+): IRDeleteWhereMutation => {
+  return {
+    kind: 'delete_where',
+    shape: query.shape.id,
+    where: query.where,
+    wherePatterns: query.wherePatterns,
+  };
+};
+
+type UpdateWhereMutationInput = {
+  shape: NodeShape;
+  updates: NodeDescriptionValue;
+  where?: IRExpression;
+  wherePatterns?: IRGraphPattern[];
+};
+
+/** Builds an IRUpdateWhereMutation — update instances matching a condition or all. */
+export const buildCanonicalUpdateWhereMutationIR = (
+  query: UpdateWhereMutationInput,
+): IRUpdateWhereMutation => {
+  return {
+    kind: 'update_where',
+    shape: query.shape.id,
+    data: toNodeData(query.updates),
+    where: query.where,
+    wherePatterns: query.wherePatterns,
   };
 };
