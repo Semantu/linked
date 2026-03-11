@@ -92,7 +92,7 @@ export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
     return this.clone({mode: 'where', whereFn: fn, targetId: undefined}) as unknown as UpdateBuilder<S, U, void>;
   }
 
-  /** Set the update data. */
+  /** Replace the update data. */
   set<NewU extends UpdatePartial<S>>(data: NewU): UpdateBuilder<S, NewU, R> {
     return this.clone({data}) as unknown as UpdateBuilder<S, NewU, R>;
   }

@@ -29,7 +29,7 @@ interface DeleteBuilderInit<S extends Shape> {
  *
  * Implements PromiseLike so mutations execute on `await`:
  * ```ts
- * const result = await DeleteBuilder.from(Person).for({id: '...'});
+ * const result = await DeleteBuilder.from(Person, {id: '...'});
  * await DeleteBuilder.from(Person).all();  // returns void
  * ```
  *
@@ -80,12 +80,6 @@ export class DeleteBuilder<S extends Shape = Shape, R = DeleteResponse>
   // Fluent API
   // ---------------------------------------------------------------------------
 
-  /** Specify the target IDs to delete. */
-  for(ids: NodeId | NodeId[]): DeleteBuilder<S, DeleteResponse> {
-    const idsArray = Array.isArray(ids) ? ids : [ids];
-    return this.clone({ids: idsArray, mode: 'ids'}) as DeleteBuilder<S, DeleteResponse>;
-  }
-
   /** Delete all instances of this shape type. Returns void. */
   all(): DeleteBuilder<S, void> {
     return this.clone({mode: 'all', ids: undefined, whereFn: undefined}) as DeleteBuilder<S, void>;
@@ -130,7 +124,7 @@ export class DeleteBuilder<S extends Shape = Shape, R = DeleteResponse>
     // Default: ID-based delete
     if (!this._ids || this._ids.length === 0) {
       throw new Error(
-        'DeleteBuilder requires at least one ID to delete. Specify targets with .for(ids), .all(), or .where().',
+        'DeleteBuilder requires at least one ID to delete. Use DeleteBuilder.from(shape, ids), .all(), or .where().',
       );
     }
     const factory = new DeleteQueryFactory<S, {}>(

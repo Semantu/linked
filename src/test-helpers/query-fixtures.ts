@@ -311,9 +311,9 @@ export const queryFactories = {
     Person.select((p) => p.name)
       .where((p) => p.name.equals('Semmy').or(p.name.equals('Moa')))
       .limit(1),
-  sortByAsc: () => Person.select((p) => p.name).sortBy((p) => p.name),
+  sortByAsc: () => Person.select((p) => p.name).orderBy((p) => p.name),
   sortByDesc: () =>
-    Person.select((p) => p.name).sortBy((p) => p.name, 'DESC'),
+    Person.select((p) => p.name).orderBy((p) => p.name, 'DESC'),
   updateSimple: () => Person.update(updateSimple).for(entity('p1')),
   createSimple: () => Person.create({name: 'Test Create', hobby: 'Chess'}),
   createWithFriends: () =>

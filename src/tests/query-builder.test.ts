@@ -164,7 +164,7 @@ describe('QueryBuilder — IR equivalence with DSL', () => {
 
   test('sortByAsc', async () => {
     const dslIR = await captureDslIR(() =>
-      Person.select((p) => p.name).sortBy((p) => p.name),
+      Person.select((p) => p.name).orderBy((p) => p.name),
     );
     const builderIR = QueryBuilder.from(Person)
       .select((p) => p.name)
@@ -570,9 +570,9 @@ describe('Person.update(data).for(id) chaining', () => {
     expect(ir).toBeDefined();
   });
 
-  test('Person.update().for(id).set(data) produces same IR as update(data).for(id)', () => {
+  test('UpdateBuilder.from().for(id).set(data) produces same IR as update(data).for(id)', () => {
     const ir1 = Person.update({hobby: 'Chess'}).for(entity('p1')).build();
-    const ir2 = Person.update().for(entity('p1')).set({hobby: 'Chess'}).build();
+    const ir2 = UpdateBuilder.from(Person).for(entity('p1')).set({hobby: 'Chess'}).build();
     expect(sanitize(ir1)).toEqual(sanitize(ir2));
   });
 

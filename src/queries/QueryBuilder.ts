@@ -216,7 +216,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   }
 
   /**
-   * Alias for orderBy — matches the existing DSL's `sortBy` method name.
+   * @deprecated Use `orderBy()` instead.
    */
   sortBy<OR>(fn: QueryBuildFn<S, OR>, direction: 'ASC' | 'DESC' = 'ASC'): QueryBuilder<S, R, Result> {
     return this.orderBy(fn, direction);

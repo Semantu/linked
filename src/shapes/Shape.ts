@@ -155,13 +155,9 @@ export abstract class Shape {
    */
   static update<S extends Shape, U extends UpdatePartial<S>>(
     this: ShapeConstructor<S>,
-    data?: U,
+    data: U,
   ): UpdateBuilder<S, U> {
-    let builder = UpdateBuilder.from(this) as UpdateBuilder<S, any>;
-    if (data) {
-      builder = builder.set(data);
-    }
-    return builder as unknown as UpdateBuilder<S, U>;
+    return UpdateBuilder.from(this).set(data) as unknown as UpdateBuilder<S, U>;
   }
 
   static create<S extends Shape, U extends UpdatePartial<S>>(
