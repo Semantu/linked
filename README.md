@@ -288,12 +288,16 @@ The query DSL is schema-parameterized: you define your own SHACL shapes, and Lin
 - Outer `where(...)` chaining
 - Counting with `.size()`
 - Custom result formats (object mapping)
+- Computed expressions (arithmetic, string, date, logical, comparison)
+- Expression-based WHERE filters (`p.name.strlen().gt(5)`)
+- `Expr` module for non-property-first expressions (`Expr.now()`, `Expr.ifThen()`)
 - Type casting with `.as(Shape)`
 - MINUS exclusion (by shape, property, condition, multi-property, nested path)
 - Sorting, limiting, and `.one()`
 - Query context variables
 - Preloading (`preloadFor`) for component-like queries
 - Create / Update / Delete mutations (including bulk and conditional)
+- Expression-based updates (`p => ({age: p.age.plus(1)})`)
 - Dynamic query building with `QueryBuilder`
 - Composable field sets with `FieldSet`
 - Mutation builders (`CreateBuilder`, `UpdateBuilder`, `DeleteBuilder`)
@@ -402,6 +406,96 @@ const custom = await Person.select((p) => ({
 }));
 ```
 
+#### Computed expressions
+
+Fluent expression methods on property proxies produce computed fields. Expressions chain left-to-right and compile to SPARQL BIND/FILTER.
+
+```typescript
+// String length as a computed field
+const withLen = await Person.select((p) => ({
+  name: p.name,
+  nameLen: p.name.strlen(),
+}));
+
+// Arithmetic chaining (left-to-right, no hidden precedence)
+const withAge = await Person.select((p) => ({
+  name: p.name,
+  ageInMonths: p.age.times(12),
+  agePlusTen: p.age.plus(10).times(2),  // (age + 10) * 2
+}));
+
+// String manipulation
+const upper = await Person.select((p) => ({
+  shout: p.name.ucase(),
+  greeting: p.name.concat(' says hello'),
+}));
+
+// Date extraction
+const birthYear = await Person.select((p) => ({
+  year: p.birthDate.year(),
+}));
+```
+
+Available expression methods by type:
+- **Numeric**: `plus`, `minus`, `times`, `divide`, `abs`, `round`, `ceil`, `floor`, `power`
+- **String**: `concat`, `contains`, `startsWith`, `endsWith`, `substr`, `before`, `after`, `replace`, `ucase`, `lcase`, `strlen`, `encodeForUri`, `matches`
+- **Date**: `year`, `month`, `day`, `hours`, `minutes`, `seconds`, `timezone`, `tz`
+- **Boolean**: `and`, `or`, `not`
+- **Comparison** (all types): `eq`/`equals`, `neq`/`notEquals`, `gt`/`greaterThan`, `gte`/`greaterThanOrEqual`, `lt`/`lessThan`, `lte`/`lessThanOrEqual`
+- **Null-handling**: `isDefined`, `isNotDefined`, `defaultTo`
+- **Type**: `str`, `iri`, `isIri`, `isLiteral`, `isBlank`, `isNumeric`, `lang`, `datatype`
+- **Hash**: `md5`, `sha256`, `sha512`
+
+#### Expression-based WHERE filters
+
+Expressions can be used in `where()` clauses for computed filtering:
+
+```typescript
+// Filter by string length
+const longNames = await Person.select((p) => p.name)
+  .where((p) => p.name.strlen().gt(5));
+
+// Filter by arithmetic
+const young = await Person.select((p) => p.name)
+  .where((p) => p.age.plus(10).lt(100));
+
+// Chain expressions with and/or
+const filtered = await Person.select((p) => p.name)
+  .where((p) => p.name.strlen().gt(3).and(p.age.gt(18)));
+
+// Mix with standard evaluation-based filters
+const mixed = await Person.select((p) => p.name)
+  .where((p) => p.name.equals('Bob').and((p) => p.name.strlen().gt(3)));
+
+// Expression WHERE on nested paths
+const deep = await Person.select((p) => p.name)
+  .where((p) => p.bestFriend.name.strlen().gt(3));
+
+// Expression WHERE on mutations
+await Person.update({status: 'senior'}).where((p) => p.age.plus(10).gt(65));
+```
+
+#### `Expr` module
+
+For expressions that don't start from a property (like `NOW()`) or need a functional style, use the `Expr` module:
+
+```typescript
+import {Expr} from '@_linked/core';
+
+// Current timestamp
+const withTimestamp = await Person.update({lastSeen: Expr.now()}).for(entity);
+
+// Conditional expressions
+const labeled = await Person.select((p) => ({
+  label: Expr.ifThen(p.age.gt(18), 'adult', 'minor'),
+}));
+
+// First non-null value
+const display = await Person.select((p) => ({
+  display: Expr.firstDefined(p.name, p.nickNames, Expr.str('Unknown')),
+}));
+```
+
 #### Query As (type casting to a sub shape)
 If person.pets returns an array of Pets. And Dog extends Pet.
 And you want to select properties of those pets that are dogs:
@@ -477,6 +571,27 @@ Returns:
   id:"https://my.app/node1",
   name:"Alicia"
 }
+```
+
+**Expression-based updates:**
+
+Use a callback to derive new values from existing properties. The callback receives a type-safe proxy with expression methods matching each property's type (`.plus()` on numbers, `.ucase()` on strings, etc.):
+
+```typescript
+// Increment age by 1
+await Person.update((p) => ({age: p.age.plus(1)})).for({id: 'https://my.app/node1'});
+
+// Uppercase a name
+await Person.update((p) => ({name: p.name.ucase()})).for({id: 'https://my.app/node1'});
+
+// Reference related entity properties
+await Person.update((p) => ({hobby: p.bestFriend.name.ucase()})).for({id: 'https://my.app/node1'});
+
+// Mix literals and expressions
+await Person.update((p) => ({name: 'Bob', age: p.age.plus(1)})).for({id: 'https://my.app/node1'});
+
+// Use Expr module values directly in plain objects
+await Person.update({lastSeen: Expr.now()}).for({id: 'https://my.app/node1'});
 ```
 
 **Conditional and bulk updates:**

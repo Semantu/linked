@@ -13,6 +13,8 @@ import {
 import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {Shape} from '../shapes/Shape.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
+import {isExpressionNode, ExpressionNode} from '../expressions/ExpressionNode.js';
+import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 
 export type NodeId = {id: string} | string;
 
@@ -30,8 +32,16 @@ export class MutationQueryFactory extends QueryFactory {
       }
       return this.convertNodeDescription(obj, shape);
     } else if (typeof obj === 'function') {
-      //TODO
-      throw new Error('Update functions are not implemented yet');
+      const shapeClass = shape.id ? getShapeClass(shape.id) : undefined;
+      if (!shapeClass) {
+        throw new Error(`Shape class not found for ${shape.id || 'unknown'}`);
+      }
+      const proxy = createProxiedPathBuilder(shapeClass);
+      const result = obj(proxy);
+      if (typeof result !== 'object' || result === null) {
+        throw new Error('Update function must return an object');
+      }
+      return this.convertNodeDescription(result, shape);
     } else {
       throw new Error('Invalid update object');
     }
@@ -154,6 +164,11 @@ export class MutationQueryFactory extends QueryFactory {
     propShape?: PropertyShape,
     allowArrays: boolean = true,
   ): PropUpdateValue {
+    // ExpressionNode → pass through as-is (will be converted to IRExpression by IRMutation)
+    if (isExpressionNode(value)) {
+      return value as unknown as PropUpdateValue;
+    }
+
     //single value which will
     if (
       typeof value === 'string' ||

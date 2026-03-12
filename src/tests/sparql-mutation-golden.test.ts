@@ -465,3 +465,98 @@ describe('SPARQL golden — builder equivalence', () => {
     expect(deleteWhereToSparql(irSugar)).toBe(deleteWhereToSparql(irBuilder));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Expression-based mutation tests
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — expression mutations', () => {
+  test('updateExprCallback: functional callback with arithmetic expression', async () => {
+    const ir = (await captureQuery(queryFactories.updateExprCallback)) as IRUpdateMutation;
+    const sparql = updateToSparql(ir);
+    // Should contain BIND for computed value
+    expect(sparql).toContain('BIND');
+    // Should reference old value and computed value
+    expect(sparql).toContain('old_guardDogLevel');
+    expect(sparql).toContain('computed_guardDogLevel');
+    // Should contain the arithmetic expression
+    expect(sparql).toContain('+');
+    // Should have DELETE and INSERT
+    expect(sparql).toContain('DELETE');
+    expect(sparql).toContain('INSERT');
+  });
+
+  test('updateExprNow: expression value (Expr.now()) in update', async () => {
+    const ir = (await captureQuery(queryFactories.updateExprNow)) as IRUpdateMutation;
+    const sparql = updateToSparql(ir);
+    // Should contain BIND with NOW()
+    expect(sparql).toContain('BIND');
+    expect(sparql).toContain('NOW()');
+  });
+
+  test('updateExprTraversal: multi-segment ref produces traversal OPTIONAL', async () => {
+    const ir = (await captureQuery(queryFactories.updateExprTraversal)) as IRUpdateMutation;
+    const sparql = updateToSparql(ir);
+
+    // Should have traversal pattern in IR
+    expect(ir.traversalPatterns).toBeDefined();
+    expect(ir.traversalPatterns!.length).toBe(1);
+    expect(ir.traversalPatterns![0].from).toBe('__mutation_subject__');
+    expect(ir.traversalPatterns![0].to).toBe('__trav_0__');
+
+    // SPARQL should contain OPTIONAL for the traversal
+    expect(sparql).toContain('OPTIONAL');
+    expect(sparql).toContain(`<${P}/bestFriend>`);
+    // Should have BIND for computed value
+    expect(sparql).toContain('BIND');
+    expect(sparql).toContain('UCASE');
+    // The BIND expression should reference the traversal variable's property
+    expect(sparql).toContain('__trav_0__');
+  });
+
+  test('updateExprSharedTraversal: shared traversal produces only one OPTIONAL', async () => {
+    const ir = (await captureQuery(queryFactories.updateExprSharedTraversal)) as IRUpdateMutation;
+    const sparql = updateToSparql(ir);
+
+    // Should have exactly one traversal pattern (deduped)
+    expect(ir.traversalPatterns).toBeDefined();
+    expect(ir.traversalPatterns!.length).toBe(1);
+    expect(ir.traversalPatterns![0].from).toBe('__mutation_subject__');
+    expect(ir.traversalPatterns![0].to).toBe('__trav_0__');
+
+    // SPARQL should contain OPTIONAL for traversal + BIND for both fields
+    expect(sparql).toContain('OPTIONAL');
+    expect(sparql).toContain(`<${P}/bestFriend>`);
+    expect(sparql).toContain('UCASE');
+    expect(sparql).toContain('LCASE');
+    // Both BINDs should reference the same traversal variable
+    expect(sparql).toContain('__trav_0__');
+    // Only one OPTIONAL for bestFriend traversal
+    const optionalMatches = sparql.match(/OPTIONAL/g);
+    // Count traversal OPTIONAL (for bestFriend) + old value OPTIONALs (for name, hobby, and their expression-referenced properties)
+    expect(optionalMatches).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Expression-based WHERE on mutations (Phase 8)
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — expression WHERE mutations', () => {
+  test('whereExprUpdateBuilder — expression WHERE on update', async () => {
+    const ir = (await captureQuery(queryFactories.whereExprUpdateBuilder)) as IRUpdateWhereMutation;
+    const sparql = updateWhereToSparql(ir);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain('DELETE');
+    expect(sparql).toContain('INSERT');
+  });
+
+  test('whereExprDeleteBuilder — expression WHERE on delete', async () => {
+    const ir = (await captureQuery(queryFactories.whereExprDeleteBuilder)) as IRDeleteWhereMutation;
+    const sparql = deleteWhereToSparql(ir);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain('DELETE');
+  });
+});

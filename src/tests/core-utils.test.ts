@@ -237,7 +237,7 @@ describe('QueryContext edge cases', () => {
     if (!where) {
       throw new Error('Expected where clause');
     }
-    const evaluation = isWhereEvaluationPath(where) ? where : where.firstPath;
+    const evaluation = isWhereEvaluationPath(where) ? where : (where as any).firstPath;
     if (!isWhereEvaluationPath(evaluation)) {
       throw new Error('Expected evaluation where clause');
     }

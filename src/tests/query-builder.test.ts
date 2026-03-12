@@ -564,6 +564,67 @@ describe('Shape.select().for() / .forAll() chaining', () => {
   });
 });
 
+// =============================================================================
+// Phase 9: Expression equivalence tests — QueryBuilder vs DSL
+// =============================================================================
+
+describe('QueryBuilder — expression equivalence with DSL', () => {
+  test('SELECT expression projection equivalence', async () => {
+    const dslIR = await captureDslIR(() =>
+      Person.select((p) => ({nameLen: (p.name as any).strlen()})),
+    );
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => ({nameLen: (p.name as any).strlen()}))
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+
+  test('WHERE expression filter equivalence', async () => {
+    const dslIR = await captureDslIR(() =>
+      Person.select((p) => ({name: p.name})).where(((p: any) => p.name.strlen().gt(5)) as any),
+    );
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => ({name: p.name}))
+      .where(((p: any) => p.name.strlen().gt(5)) as any)
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+
+  test('mixed expression + evaluation WHERE equivalence', async () => {
+    const dslIR = await captureDslIR(() =>
+      Person.select((p) => ({name: p.name})).where((p) =>
+        p.name.equals('Bob').and((p.name as any).strlen().gt(3)),
+      ),
+    );
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => ({name: p.name}))
+      .where((p) => p.name.equals('Bob').and((p.name as any).strlen().gt(3)))
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+
+  test('expression projection + expression WHERE combined equivalence', async () => {
+    const dslIR = await captureDslIR(() =>
+      Person.select((p) => ({
+        name: p.name,
+        nameLen: (p.name as any).strlen(),
+      })).where(((p: any) => p.name.strlen().gt(2)) as any),
+    );
+    const builderIR = QueryBuilder.from(Person)
+      .select((p) => ({
+        name: p.name,
+        nameLen: (p.name as any).strlen(),
+      }))
+      .where(((p: any) => p.name.strlen().gt(2)) as any)
+      .build();
+    expect(sanitize(builderIR)).toEqual(sanitize(dslIR));
+  });
+});
+
+// =============================================================================
+// .for() and .forAll() chaining tests
+// =============================================================================
+
 describe('Person.update(data).for(id) chaining', () => {
   test('Person.update(data).for(id) produces correct IR', () => {
     const ir = Person.update({hobby: 'Chess'}).for(entity('p1')).build();

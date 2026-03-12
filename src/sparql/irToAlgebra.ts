@@ -111,6 +111,18 @@ function sanitizeVarName(name: string): string {
   return name.replace(/[^A-Za-z0-9_]/g, '_');
 }
 
+const IR_EXPRESSION_KINDS = new Set([
+  'literal_expr', 'property_expr', 'binary_expr', 'logical_expr',
+  'not_expr', 'function_expr', 'aggregate_expr', 'reference_expr',
+  'alias_expr', 'context_property_expr', 'exists_expr',
+]);
+
+function isIRExpression(value: unknown): value is IRExpression {
+  return !!value && typeof value === 'object' && 'kind' in value &&
+    typeof (value as {kind: unknown}).kind === 'string' &&
+    IR_EXPRESSION_KINDS.has((value as {kind: string}).kind);
+}
+
 /**
  * Wrap a single node in a LeftJoin, making `right` optional relative to `left`.
  */
@@ -1004,10 +1016,12 @@ function processUpdateFields(
   deletePatterns: SparqlTriple[];
   insertPatterns: SparqlTriple[];
   oldValueTriples: SparqlTriple[];
+  extends: Array<{variable: string; expression: SparqlExpression}>;
 } {
   const deletePatterns: SparqlTriple[] = [];
   const insertPatterns: SparqlTriple[] = [];
   const oldValueTriples: SparqlTriple[] = [];
+  const extends_: Array<{variable: string; expression: SparqlExpression}> = [];
 
   for (const field of data.fields) {
     const propertyTerm = iriTerm(field.property);
@@ -1092,6 +1106,49 @@ function processUpdateFields(
       continue;
     }
 
+    // IRExpression — computed value update (e.g. p.age.plus(1))
+    if (isIRExpression(field.value)) {
+      const expr = field.value as IRExpression;
+      const oldVar = varTerm(`old_${suffix}`);
+      const computedVarName = `computed_${suffix}`;
+      const computedVar = varTerm(computedVarName);
+
+      // DELETE old value
+      deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+
+      // WHERE: OPTIONAL for old value
+      oldValueTriples.push(tripleOf(subjectTerm, propertyTerm, oldVar));
+
+      // Discover additional property references in the expression and add OPTIONAL triples
+      const registry = new VariableRegistry();
+      const mutationSubjectAlias = '__mutation_subject__';
+      // Pre-register the subject variable mapping for the field being updated
+      registry.set(mutationSubjectAlias, field.property, `old_${suffix}`);
+
+      const additionalOptionals: SparqlTriple[] = [];
+      processExpressionForProperties(expr, registry, additionalOptionals);
+
+      // Add any additional property OPTIONAL triples (for refs to other properties)
+      for (const triple of additionalOptionals) {
+        // Rewrite the subject from the placeholder variable to the actual subject term
+        if (triple.subject.kind === 'variable' && triple.subject.name === mutationSubjectAlias) {
+          oldValueTriples.push(tripleOf(subjectTerm, triple.predicate, triple.object));
+        } else {
+          oldValueTriples.push(triple);
+        }
+      }
+
+      // Convert IRExpression to SparqlExpression
+      const sparqlExpr = convertExpression(expr, registry, additionalOptionals);
+
+      // BIND computed expression
+      extends_.push({variable: computedVarName, expression: sparqlExpr});
+
+      // INSERT computed value
+      insertPatterns.push(tripleOf(subjectTerm, propertyTerm, computedVar));
+      continue;
+    }
+
     // Simple value update — delete old + insert new
     const oldVar = varTerm(`old_${suffix}`);
     deletePatterns.push(tripleOf(subjectTerm, propertyTerm, oldVar));
@@ -1103,7 +1160,7 @@ function processUpdateFields(
     }
   }
 
-  return {deletePatterns, insertPatterns, oldValueTriples};
+  return {deletePatterns, insertPatterns, oldValueTriples, extends: extends_};
 }
 
 /**
@@ -1136,17 +1193,46 @@ export function updateToAlgebra(
   options?: SparqlOptions,
 ): SparqlDeleteInsertPlan {
   const subjectTerm = iriTerm(query.id);
-  const {deletePatterns, insertPatterns, oldValueTriples} = processUpdateFields(query.data, subjectTerm, options);
+  const result = processUpdateFields(query.data, subjectTerm, options);
 
-  const whereAlgebra = wrapOldValueOptionals(
+  let whereAlgebra = wrapOldValueOptionals(
     {type: 'bgp', triples: []},
-    oldValueTriples,
+    result.oldValueTriples,
   );
+
+  // Add traversal OPTIONAL patterns (for multi-segment expression refs)
+  // These must come BEFORE expression BINDs since the BINDs reference traversal variables.
+  if (query.traversalPatterns) {
+    for (const trav of query.traversalPatterns) {
+      const fromTerm =
+        trav.from === '__mutation_subject__' ? subjectTerm : varTerm(trav.from);
+      const traversalTriple = tripleOf(
+        fromTerm,
+        iriTerm(trav.property),
+        varTerm(trav.to),
+      );
+      whereAlgebra = {
+        type: 'left_join',
+        left: whereAlgebra,
+        right: {type: 'bgp', triples: [traversalTriple]},
+      };
+    }
+  }
+
+  // Add BIND expressions for computed fields
+  for (const ext of result.extends) {
+    whereAlgebra = {
+      type: 'extend',
+      inner: whereAlgebra,
+      variable: ext.variable,
+      expression: ext.expression,
+    };
+  }
 
   return {
     type: 'delete_insert',
-    deletePatterns,
-    insertPatterns,
+    deletePatterns: result.deletePatterns,
+    insertPatterns: result.insertPatterns,
     whereAlgebra,
   };
 }
@@ -1401,7 +1487,7 @@ export function updateWhereToAlgebra(
   options?: SparqlOptions,
 ): SparqlDeleteInsertPlan {
   const subjectTerm = varTerm('a0');
-  const {deletePatterns, insertPatterns, oldValueTriples} = processUpdateFields(query.data, subjectTerm, options);
+  const result = processUpdateFields(query.data, subjectTerm, options);
 
   // WHERE: type triple is always required
   const typeTriple = tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(query.data.shape));
@@ -1431,12 +1517,41 @@ export function updateWhereToAlgebra(
     whereAlgebra = {type: 'filter', expression: filterExpr, inner: whereAlgebra};
   }
 
-  whereAlgebra = wrapOldValueOptionals(whereAlgebra, oldValueTriples);
+  whereAlgebra = wrapOldValueOptionals(whereAlgebra, result.oldValueTriples);
+
+  // Add traversal OPTIONAL patterns (for multi-segment expression refs)
+  // These must come BEFORE expression BINDs since the BINDs reference traversal variables.
+  if (query.traversalPatterns) {
+    for (const trav of query.traversalPatterns) {
+      const fromTerm =
+        trav.from === '__mutation_subject__' ? varTerm('a0') : varTerm(trav.from);
+      const traversalTriple = tripleOf(
+        fromTerm,
+        iriTerm(trav.property),
+        varTerm(trav.to),
+      );
+      whereAlgebra = {
+        type: 'left_join',
+        left: whereAlgebra,
+        right: {type: 'bgp', triples: [traversalTriple]},
+      };
+    }
+  }
+
+  // Add BIND expressions for computed fields
+  for (const ext of result.extends) {
+    whereAlgebra = {
+      type: 'extend',
+      inner: whereAlgebra,
+      variable: ext.variable,
+      expression: ext.expression,
+    };
+  }
 
   return {
     type: 'delete_insert',
-    deletePatterns,
-    insertPatterns,
+    deletePatterns: result.deletePatterns,
+    insertPatterns: result.insertPatterns,
     whereAlgebra,
   };
 }

@@ -7,12 +7,15 @@ import {
   CanonicalWhereNot,
 } from './IRCanonicalize.js';
 import {
+  DesugaredExpressionSelect,
+  DesugaredExpressionWhere,
   DesugaredSelection,
   DesugaredSelectionPath,
   DesugaredStep,
   DesugaredWhere,
   DesugaredWhereArg,
 } from './IRDesugar.js';
+import {resolveExpressionRefs} from '../expressions/ExpressionNode.js';
 import {
   IRExpression,
   IRGraphPattern,
@@ -27,6 +30,30 @@ import {canonicalizeWhere} from './IRCanonicalize.js';
 import {lowerSelectionPathExpression, projectionKeyFromPath} from './IRProjection.js';
 import {IRAliasScope} from './IRAliasScope.js';
 import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
+
+/**
+ * Creates a memoized traversal resolver that deduplicates (fromAlias, propertyShapeId)
+ * pairs, generates unique aliases, and accumulates the resulting patterns.
+ * Used by both select-query lowering and mutation expression resolution.
+ */
+export function createTraversalResolver<P>(
+  generateAlias: () => string,
+  createPattern: (from: string, to: string, property: string) => P,
+): {resolve: (fromAlias: string, propertyShapeId: string) => string; patterns: P[]} {
+  const patterns: P[] = [];
+  const seen = new Map<string, string>();
+
+  const resolve = (fromAlias: string, propertyShapeId: string): string => {
+    const key = `${fromAlias}:${propertyShapeId}`;
+    if (seen.has(key)) return seen.get(key)!;
+    const toAlias = generateAlias();
+    seen.set(key, toAlias);
+    patterns.push(createPattern(fromAlias, toAlias, propertyShapeId));
+    return toAlias;
+  };
+
+  return {resolve, patterns};
+}
 
 class LoweringContext {
   private counter = 0;
@@ -81,6 +108,11 @@ class LoweringContext {
   }
 }
 
+/** Minimal interface for alias generation used by lowerWhere and traversal resolvers. */
+type AliasGenerator = {
+  generateAlias(): string;
+};
+
 type PathLoweringOptions = {
   rootAlias: string;
   resolveTraversal: (fromAlias: string, propertyShapeId: string) => string;
@@ -99,7 +131,7 @@ const lowerPath = (
 
 const lowerWhereArg = (
   arg: DesugaredWhereArg,
-  ctx: LoweringContext,
+  ctx: AliasGenerator,
   options: PathLoweringOptions,
 ): IRExpression => {
   if (typeof arg === 'string' || typeof arg === 'number' || typeof arg === 'boolean') {
@@ -136,7 +168,7 @@ const lowerWhereArg = (
 
 const lowerWhere = (
   where: CanonicalWhereExpression,
-  ctx: LoweringContext,
+  ctx: AliasGenerator,
   options: PathLoweringOptions,
 ): IRExpression => {
   switch (where.kind) {
@@ -161,24 +193,10 @@ const lowerWhere = (
     }
     case 'where_exists': {
       const exists = where as CanonicalWhereExists;
-      const traversals: IRTraversePattern[] = [];
-      const localTraversalMap = new Map<string, string>();
-
-      const existsResolveTraversal = (fromAlias: string, propertyShapeId: string): string => {
-        const key = `${fromAlias}:${propertyShapeId}`;
-        const existing = localTraversalMap.get(key);
-        if (existing) return existing;
-
-        const toAlias = ctx.generateAlias();
-        traversals.push({
-          kind: 'traverse',
-          from: fromAlias,
-          to: toAlias,
-          property: propertyShapeId,
-        });
-        localTraversalMap.set(key, toAlias);
-        return toAlias;
-      };
+      const {resolve: existsResolveTraversal, patterns: traversals} = createTraversalResolver(
+        () => ctx.generateAlias(),
+        (from, to, property): IRTraversePattern => ({kind: 'traverse', from, to, property}),
+      );
 
       let existsRootAlias = options.rootAlias;
       for (const step of exists.path.steps) {
@@ -207,8 +225,19 @@ const lowerWhere = (
         expression: lowerWhere(not.expression, ctx, options),
       };
     }
+    case 'where_expression': {
+      // ExpressionNode-based WHERE — resolve refs and return IRExpression directly
+      const exprWhere = where as DesugaredExpressionWhere;
+      return resolveExpressionRefs(
+        exprWhere.expressionNode.ir,
+        exprWhere.expressionNode._refs,
+        options.rootAlias,
+        options.resolveTraversal,
+      );
+    }
     default:
-      throw new Error(`Unknown canonical where kind: ${(where as any).kind}`);
+      const _exhaustive: never = where;
+      throw new Error(`Unknown canonical where kind: ${(_exhaustive as {kind: string}).kind}`);
   }
 };
 
@@ -308,6 +337,21 @@ export const lowerSelectQuery = (
       }];
     }
 
+    if (selection.kind === 'expression_select') {
+      const exprSelect = selection as DesugaredExpressionSelect;
+      const resolved = resolveExpressionRefs(
+        exprSelect.expressionNode.ir,
+        exprSelect.expressionNode._refs,
+        aliasAfterPath(parentPath),
+        pathOptions.resolveTraversal,
+      );
+      return [{
+        kind: 'expression',
+        key: key || 'expr',
+        expression: resolved,
+      }];
+    }
+
     return [];
   };
 
@@ -390,22 +434,10 @@ export const lowerSelectQuery = (
         minusPatterns.push({kind: 'minus', pattern: innerPattern});
       } else if (entry.where) {
         // Condition-based exclusion: MINUS { ?a0 <prop> ?val . FILTER(...) }
-        const minusTraversals: IRTraversePattern[] = [];
-        const localTraversalMap = new Map<string, string>();
-        const minusResolveTraversal = (fromAlias: string, propertyShapeId: string): string => {
-          const key = `${fromAlias}:${propertyShapeId}`;
-          const existing = localTraversalMap.get(key);
-          if (existing) return existing;
-          const toAlias = ctx.generateAlias();
-          minusTraversals.push({
-            kind: 'traverse',
-            from: fromAlias,
-            to: toAlias,
-            property: propertyShapeId,
-          });
-          localTraversalMap.set(key, toAlias);
-          return toAlias;
-        };
+        const {resolve: minusResolveTraversal, patterns: minusTraversals} = createTraversalResolver(
+          () => ctx.generateAlias(),
+          (from, to, property): IRTraversePattern => ({kind: 'traverse', from, to, property}),
+        );
         const minusOptions: PathLoweringOptions = {
           rootAlias: ctx.rootAlias,
           resolveTraversal: minusResolveTraversal,
@@ -446,35 +478,15 @@ export const lowerWhereToIR = (
   rootAlias: string = 'a0',
 ): {where: IRExpression; wherePatterns: IRGraphPattern[]} => {
   let counter = 1; // start at 1 since a0 is the root
-  const traversals: IRTraversePattern[] = [];
-  const localTraversalMap = new Map<string, string>();
-
-  const ctx = {
-    generateAlias(): string {
-      return `a${counter++}`;
-    },
+  const ctx: AliasGenerator = {
+    generateAlias: () => `a${counter++}`,
   };
 
-  const resolveTraversal = (fromAlias: string, propertyShapeId: string): string => {
-    const key = `${fromAlias}:${propertyShapeId}`;
-    const existing = localTraversalMap.get(key);
-    if (existing) return existing;
-    const toAlias = ctx.generateAlias();
-    traversals.push({
-      kind: 'traverse',
-      from: fromAlias,
-      to: toAlias,
-      property: propertyShapeId,
-    });
-    localTraversalMap.set(key, toAlias);
-    return toAlias;
-  };
+  const {resolve, patterns: traversals} = createTraversalResolver(
+    () => ctx.generateAlias(),
+    (from, to, property): IRTraversePattern => ({kind: 'traverse', from, to, property}),
+  );
 
-  const options: PathLoweringOptions = {
-    rootAlias,
-    resolveTraversal,
-  };
-
-  const expr = lowerWhere(where, ctx as any, options);
+  const expr = lowerWhere(where, ctx, {rootAlias, resolveTraversal: resolve});
   return {where: expr, wherePatterns: traversals};
 };

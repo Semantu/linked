@@ -139,7 +139,11 @@ export type IRBinaryOperator =
   | '>'
   | '>='
   | '<'
-  | '<=';
+  | '<='
+  | '+'
+  | '-'
+  | '*'
+  | '/';
 
 export type IRBinaryExpression = {
   kind: 'binary_expr';
@@ -185,11 +189,18 @@ export type IRCreateMutation = {
   data: IRNodeData;
 };
 
+export type IRTraversalPattern = {
+  from: string;       // source alias
+  property: string;   // property IRI
+  to: string;         // target alias
+};
+
 export type IRUpdateMutation = {
   kind: 'update';
   shape: string;
   id: string;
   data: IRNodeData;
+  traversalPatterns?: IRTraversalPattern[];
 };
 
 export type IRDeleteMutation = {
@@ -216,6 +227,7 @@ export type IRUpdateWhereMutation = {
   data: IRNodeData;
   where?: IRExpression;
   wherePatterns?: IRGraphPattern[];
+  traversalPatterns?: IRTraversalPattern[];
 };
 
 export type IRNodeData = {
@@ -241,6 +253,7 @@ export type IRFieldValue =
   | IRNodeData
   | IRSetModificationValue
   | IRFieldValue[]
+  | IRExpression
   | undefined;
 
 // ---------------------------------------------------------------------------
