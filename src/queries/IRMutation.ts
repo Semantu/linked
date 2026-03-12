@@ -7,6 +7,7 @@ import {
   SinglePropertyUpdateValue,
   isSetModificationValue,
 } from './QueryFactory.js';
+import {isExpressionNode, resolveExpressionRefs} from '../expressions/ExpressionNode.js';
 import {
   IRCreateMutation,
   IRDeleteMutation,
@@ -20,7 +21,9 @@ import {
   IRUpdateMutation,
   IRExpression,
   IRGraphPattern,
+  IRTraversalPattern,
 } from './IntermediateRepresentation.js';
+import {createTraversalResolver} from './IRLower.js';
 
 type CreateMutationInput = {
   shape: NodeShape;
@@ -51,9 +54,51 @@ const toSetModification = (value: SetModificationValue): IRSetModificationValue 
   };
 };
 
-const toSingleFieldValue = (value: SinglePropertyUpdateValue): IRFieldValue => {
+/** Alias used as the mutation subject for expression ref resolution. */
+const MUTATION_SUBJECT_ALIAS = '__mutation_subject__';
+
+export type TraversalCollector = {
+  resolve: (fromAlias: string, propertyShapeId: string) => string;
+  patterns: IRTraversalPattern[];
+};
+
+/**
+ * Create a traversal collector for mutation expressions. Uses `__trav_N__` alias
+ * prefixes to avoid collision with query aliases (a0, a1...) and the mutation
+ * subject placeholder. Delegates to the shared createTraversalResolver factory.
+ */
+export function createTraversalCollector(): TraversalCollector {
+  let counter = 0;
+  return createTraversalResolver(
+    () => `__trav_${counter++}__`,
+    (from, to, property): IRTraversalPattern => ({from, property, to}),
+  );
+}
+
+const toSingleFieldValue = (
+  value: SinglePropertyUpdateValue,
+  collector?: TraversalCollector,
+): IRFieldValue => {
   if (value === undefined) {
     return undefined;
+  }
+
+  // ExpressionNode → resolve refs and extract IRExpression
+  if (isExpressionNode(value)) {
+    return resolveExpressionRefs(
+      value.ir,
+      value._refs,
+      MUTATION_SUBJECT_ALIAS,
+      // In mutation context, all property segments are on the subject entity.
+      // For single-segment refs (e.g. p.age), the property_expr already has the property as its .property.
+      // For multi-segment refs (e.g. p.bestFriend.name), this creates intermediate traversals.
+      collector
+        ? collector.resolve
+        : (_fromAlias, _propertyShapeId) => {
+            // No collector provided — multi-segment traversals cannot be resolved.
+            return MUTATION_SUBJECT_ALIAS;
+          },
+    );
   }
 
   if (
@@ -72,29 +117,38 @@ const toSingleFieldValue = (value: SinglePropertyUpdateValue): IRFieldValue => {
   return toNodeData(value as NodeDescriptionValue);
 };
 
-const toFieldValue = (value: PropUpdateValue): IRFieldValue => {
+const toFieldValue = (
+  value: PropUpdateValue,
+  collector?: TraversalCollector,
+): IRFieldValue => {
   if (Array.isArray(value)) {
-    return value.map((item) => toSingleFieldValue(item));
+    return value.map((item) => toSingleFieldValue(item, collector));
   }
 
   if (isSetModificationValue(value)) {
     return toSetModification(value);
   }
 
-  return toSingleFieldValue(value);
+  return toSingleFieldValue(value, collector);
 };
 
-const toFieldUpdate = (field: NodeDescriptionValue['fields'][number]): IRFieldUpdate => {
+const toFieldUpdate = (
+  field: NodeDescriptionValue['fields'][number],
+  collector?: TraversalCollector,
+): IRFieldUpdate => {
   return {
     property: field.prop.id,
-    value: toFieldValue(field.val),
+    value: toFieldValue(field.val, collector),
   };
 };
 
-const toNodeData = (description: NodeDescriptionValue): IRNodeData => {
+const toNodeData = (
+  description: NodeDescriptionValue,
+  collector?: TraversalCollector,
+): IRNodeData => {
   return {
     shape: description.shape.id,
-    fields: description.fields.map(toFieldUpdate),
+    fields: description.fields.map((f) => toFieldUpdate(f, collector)),
     ...(description.__id ? {id: description.__id} : {}),
   };
 };
@@ -114,11 +168,16 @@ export const buildCanonicalCreateMutationIR = (
 export const buildCanonicalUpdateMutationIR = (
   query: UpdateMutationInput,
 ): IRUpdateMutation => {
+  const collector = createTraversalCollector();
+  const data = toNodeData(query.updates, collector);
   return {
     kind: 'update',
     shape: query.shape.id,
     id: query.id,
-    data: toNodeData(query.updates),
+    data,
+    ...(collector.patterns.length > 0
+      ? {traversalPatterns: collector.patterns}
+      : {}),
   };
 };
 
@@ -176,11 +235,16 @@ type UpdateWhereMutationInput = {
 export const buildCanonicalUpdateWhereMutationIR = (
   query: UpdateWhereMutationInput,
 ): IRUpdateWhereMutation => {
+  const collector = createTraversalCollector();
+  const data = toNodeData(query.updates, collector);
   return {
     kind: 'update_where',
     shape: query.shape.id,
-    data: toNodeData(query.updates),
+    data,
     where: query.where,
     wherePatterns: query.wherePatterns,
+    ...(collector.patterns.length > 0
+      ? {traversalPatterns: collector.patterns}
+      : {}),
   };
 };

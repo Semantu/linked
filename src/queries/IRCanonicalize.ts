@@ -1,4 +1,5 @@
 import {
+  DesugaredExpressionWhere,
   DesugaredSelectionPath,
   DesugaredSelectQuery,
   DesugaredWhere,
@@ -37,7 +38,8 @@ export type CanonicalWhereExpression =
   | CanonicalWhereComparison
   | CanonicalWhereLogical
   | CanonicalWhereExists
-  | CanonicalWhereNot;
+  | CanonicalWhereNot
+  | DesugaredExpressionWhere;
 
 /** A canonicalized MINUS entry. */
 export type CanonicalMinusEntry = {
@@ -152,6 +154,10 @@ const flattenLogical = (
 export const canonicalizeWhere = (
   where: DesugaredWhere,
 ): CanonicalWhereExpression => {
+  // ExpressionNode-based WHERE — passthrough (already canonical)
+  if (where.kind === 'where_expression') {
+    return where;
+  }
   if (where.kind === 'where_comparison') {
     if (where.operator === WhereMethods.EQUALS) {
       const nestedQuantifier = where.right.find(

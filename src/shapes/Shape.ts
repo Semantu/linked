@@ -17,6 +17,7 @@ import {QueryBuilder} from '../queries/QueryBuilder.js';
 import {CreateBuilder} from '../queries/CreateBuilder.js';
 import {UpdateBuilder} from '../queries/UpdateBuilder.js';
 import {DeleteBuilder} from '../queries/DeleteBuilder.js';
+import type {ExpressionUpdateProxy, ExpressionUpdateResult} from '../expressions/ExpressionMethods.js';
 import {getPropertyShapeByLabel} from '../utils/ShapeClass.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
 
@@ -153,11 +154,19 @@ export abstract class Shape {
    * await Person.update({name: 'Alice'}).for({id: '...'});
    * ```
    */
+  static update<S extends Shape>(
+    this: ShapeConstructor<S>,
+    data: (p: ExpressionUpdateProxy<S>) => ExpressionUpdateResult<S>,
+  ): UpdateBuilder<S, any>;
   static update<S extends Shape, U extends UpdatePartial<S>>(
     this: ShapeConstructor<S>,
     data: U,
-  ): UpdateBuilder<S, U> {
-    return UpdateBuilder.from(this).set(data) as unknown as UpdateBuilder<S, U>;
+  ): UpdateBuilder<S, U>;
+  static update<S extends Shape>(
+    this: ShapeConstructor<S>,
+    data: any,
+  ): UpdateBuilder<S, any> {
+    return UpdateBuilder.from(this).set(data) as unknown as UpdateBuilder<S, any>;
   }
 
   static create<S extends Shape, U extends UpdatePartial<S>>(

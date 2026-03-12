@@ -690,4 +690,52 @@ describe("IR pipeline behavior", () => {
       projectedProperties.filter((prop) => prop.endsWith("/name")).length
     ).toBeGreaterThanOrEqual(2);
   });
+
+  // --- Computed expression tests ---
+
+  test("exprStrlen: expression select produces function_expr projection", async () => {
+    const ir = await captureIR(() => queryFactories.exprStrlen());
+    expect(ir.kind).toBe("select");
+    expect(ir.projection.length).toBe(1);
+    expect(ir.projection[0].expression.kind).toBe("function_expr");
+    expect((ir.projection[0].expression as any).name).toBe("STRLEN");
+    // The argument should be a property_expr for name
+    const args = (ir.projection[0].expression as any).args;
+    expect(args.length).toBe(1);
+    expect(args[0].kind).toBe("property_expr");
+    expect(args[0].property).toContain("name");
+  });
+
+  test("exprCustomKey: expression with custom result key", async () => {
+    const ir = await captureIR(() => queryFactories.exprCustomKey());
+    expect(ir.kind).toBe("select");
+    expect(ir.projection.length).toBe(1);
+    expect(ir.projection[0].expression.kind).toBe("function_expr");
+    expect(ir.resultMap?.length).toBe(1);
+    expect(ir.resultMap?.[0].key).toBe("nameLen");
+  });
+
+  test("exprNestedPath: expression on nested property creates traversal", async () => {
+    const ir = await captureIR(() => queryFactories.exprNestedPath());
+    expect(ir.kind).toBe("select");
+    expect(ir.projection.length).toBe(1);
+    expect(ir.projection[0].expression.kind).toBe("function_expr");
+    expect((ir.projection[0].expression as any).name).toBe("UCASE");
+    // Should have a traverse pattern for bestFriend
+    expect(
+      ir.patterns.some(
+        (p) => p.kind === "traverse" && p.property.endsWith("/bestFriend")
+      )
+    ).toBe(true);
+  });
+
+  test("exprMultiple: mix of plain path and expression select", async () => {
+    const ir = await captureIR(() => queryFactories.exprMultiple());
+    expect(ir.kind).toBe("select");
+    expect(ir.projection.length).toBe(2);
+    // First is a plain property_expr
+    expect(ir.projection[0].expression.kind).toBe("property_expr");
+    // Second is a function_expr (strlen)
+    expect(ir.projection[1].expression.kind).toBe("function_expr");
+  });
 });

@@ -13,6 +13,7 @@ import {
 } from './SelectQuery.js';
 import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
 import type {FieldSetEntry} from './FieldSet.js';
+import {ExpressionNode} from '../expressions/ExpressionNode.js';
 import type {PropertyShape} from '../shapes/SHACL.js';
 
 /**
@@ -88,6 +89,11 @@ export type DesugaredEvaluationSelect = {
   where: DesugaredWhere;
 };
 
+export type DesugaredExpressionSelect = {
+  kind: 'expression_select';
+  expressionNode: import('../expressions/ExpressionNode.js').ExpressionNode;
+};
+
 export type DesugaredMultiSelection = {
   kind: 'multi_selection';
   selections: DesugaredSelection[];
@@ -98,6 +104,7 @@ export type DesugaredSelection =
   | DesugaredSubSelect
   | DesugaredCustomObjectSelect
   | DesugaredEvaluationSelect
+  | DesugaredExpressionSelect
   | DesugaredMultiSelection;
 
 export type DesugaredWhereComparison = {
@@ -113,7 +120,12 @@ export type DesugaredWhereBoolean = {
   andOr: Array<{and?: DesugaredWhere; or?: DesugaredWhere}>;
 };
 
-export type DesugaredWhere = DesugaredWhereComparison | DesugaredWhereBoolean;
+export type DesugaredExpressionWhere = {
+  kind: 'where_expression';
+  expressionNode: ExpressionNode;
+};
+
+export type DesugaredWhere = DesugaredWhereComparison | DesugaredWhereBoolean | DesugaredExpressionWhere;
 
 export type DesugaredSortBy = {
   direction: 'ASC' | 'DESC';
@@ -172,6 +184,14 @@ const segmentsToSteps = (segments: PropertyShape[]): DesugaredPropertyStep[] =>
  */
 const desugarEntry = (entry: FieldSetEntry): DesugaredSelection => {
   const segments = entry.path.segments;
+
+  // ExpressionNode → expression-as-selection (e.g. p.age.times(12))
+  if (entry.expressionNode) {
+    return {
+      kind: 'expression_select',
+      expressionNode: entry.expressionNode,
+    };
+  }
 
   // Evaluation → where-as-selection (e.g. p.bestFriend.equals(...) used as select)
   if (entry.evaluation) {
@@ -367,6 +387,13 @@ const toWhereComparison = (path: WherePath): DesugaredWhereComparison => {
 };
 
 export const toWhere = (path: WherePath): DesugaredWhere => {
+  // ExpressionNode-based WHERE — passthrough to lowering
+  if ('expressionNode' in path) {
+    return {
+      kind: 'where_expression',
+      expressionNode: (path as {expressionNode: ExpressionNode}).expressionNode,
+    };
+  }
   if ((path as WhereAndOr).firstPath) {
     const grouped = path as WhereAndOr;
     return {

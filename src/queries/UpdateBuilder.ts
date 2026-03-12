@@ -8,6 +8,7 @@ import {buildCanonicalUpdateWhereMutationIR} from './IRMutation.js';
 import {toWhere} from './IRDesugar.js';
 import {canonicalizeWhere} from './IRCanonicalize.js';
 import {lowerWhereToIR} from './IRLower.js';
+import type {ExpressionUpdateProxy, ExpressionUpdateResult} from '../expressions/ExpressionMethods.js';
 
 type UpdateMode = 'for' | 'forAll' | 'where';
 
@@ -93,8 +94,10 @@ export class UpdateBuilder<S extends Shape = Shape, U extends UpdatePartial<S> =
   }
 
   /** Replace the update data. */
-  set<NewU extends UpdatePartial<S>>(data: NewU): UpdateBuilder<S, NewU, R> {
-    return this.clone({data}) as unknown as UpdateBuilder<S, NewU, R>;
+  set(fn: (p: ExpressionUpdateProxy<S>) => ExpressionUpdateResult<S>): UpdateBuilder<S, any, R>;
+  set<NewU extends UpdatePartial<S>>(data: NewU): UpdateBuilder<S, NewU, R>;
+  set(data: any): any {
+    return this.clone({data}) as any;
   }
 
   // ---------------------------------------------------------------------------
