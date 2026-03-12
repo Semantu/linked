@@ -36,6 +36,7 @@ import * as shacl from './ontologies/shacl.js';
 import * as lincd from './ontologies/lincd.js';
 import * as owl from './ontologies/owl.js';
 import * as npm from './ontologies/npm.js';
+import * as schemaOrg from './ontologies/schema.js';
 import * as Sparql from './sparql/index.js';
 import * as QueryBuilderModule from './queries/QueryBuilder.js';
 import * as PropertyPathModule from './queries/PropertyPath.js';

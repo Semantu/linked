@@ -56,14 +56,16 @@ Shape class → DSL query → IR (AST) → Target query language → Execute →
 Shape classes use decorators to generate SHACL metadata. These shapes define the data model, drive the DSL's type safety, and can be synced to a store for runtime data validation.
 
 ```typescript
+import {schema} from '@_linked/core/ontologies/schema';
+
 @linkedShape
 export class Person extends Shape {
-  static targetClass = schema('Person');
+  static targetClass = schema.Person;
 
-  @literalProperty({path: schema('name'), maxCount: 1})
+  @literalProperty({path: schema.name, maxCount: 1})
   get name(): string { return ''; }
 
-  @objectProperty({path: schema('knows'), shape: Person})
+  @objectProperty({path: schema.knows, shape: Person})
   get friends(): ShapeSet<Person> { return null; }
 }
 ```
@@ -199,22 +201,17 @@ Linked uses Shape classes to generate SHACL metadata. Paths, target classes, and
 import {Shape} from '@_linked/core';
 import {ShapeSet} from '@_linked/core/collections/ShapeSet';
 import {literalProperty, objectProperty} from '@_linked/core/shapes/SHACL';
-import {createNameSpace} from '@_linked/core/utils/NameSpace';
+import {schema} from '@_linked/core/ontologies/schema';
 import {linkedShape} from './package';
-
-const schema = createNameSpace('https://schema.org/');
-const PersonClass = schema('Person');
-const name = schema('name');
-const knows = schema('knows');
 
 @linkedShape
 export class Person extends Shape {
-  static targetClass = PersonClass;
+  static targetClass = schema.Person;
 
-  @literalProperty({path: name, required: true, maxCount: 1})
+  @literalProperty({path: schema.name, required: true, maxCount: 1})
   declare name: string;
 
-  @objectProperty({path: knows, shape: Person})
+  @objectProperty({path: schema.knows, shape: Person})
   declare knows: ShapeSet<Person>;
 }
 ```
@@ -288,9 +285,9 @@ The query DSL is schema-parameterized: you define your own SHACL shapes, and Lin
 - Outer `where(...)` chaining
 - Counting with `.size()`
 - Custom result formats (object mapping)
-- Computed expressions (arithmetic, string, date, logical, comparison)
+- Computed values — derive new fields with arithmetic, string, date, and comparison methods
 - Expression-based WHERE filters (`p.name.strlen().gt(5)`)
-- `Expr` module for non-property-first expressions (`Expr.now()`, `Expr.ifThen()`)
+- Standalone expressions with `Expr` — timestamps, conditionals, null coalescing
 - Type casting with `.as(Shape)`
 - MINUS exclusion (by shape, property, condition, multi-property, nested path)
 - Sorting, limiting, and `.one()`
@@ -408,7 +405,7 @@ const custom = await Person.select((p) => ({
 
 #### Computed expressions
 
-Fluent expression methods on property proxies produce computed fields. Expressions chain left-to-right and compile to SPARQL BIND/FILTER.
+You can compute derived values directly in your queries — string manipulation, arithmetic, date extraction, and more. Expression methods chain naturally left-to-right.
 
 ```typescript
 // String length as a computed field
@@ -436,15 +433,18 @@ const birthYear = await Person.select((p) => ({
 }));
 ```
 
-Available expression methods by type:
-- **Numeric**: `plus`, `minus`, `times`, `divide`, `abs`, `round`, `ceil`, `floor`, `power`
-- **String**: `concat`, `contains`, `startsWith`, `endsWith`, `substr`, `before`, `after`, `replace`, `ucase`, `lcase`, `strlen`, `encodeForUri`, `matches`
-- **Date**: `year`, `month`, `day`, `hours`, `minutes`, `seconds`, `timezone`, `tz`
-- **Boolean**: `and`, `or`, `not`
-- **Comparison** (all types): `eq`/`equals`, `neq`/`notEquals`, `gt`/`greaterThan`, `gte`/`greaterThanOrEqual`, `lt`/`lessThan`, `lte`/`lessThanOrEqual`
-- **Null-handling**: `isDefined`, `isNotDefined`, `defaultTo`
-- **Type**: `str`, `iri`, `isIri`, `isLiteral`, `isBlank`, `isNumeric`, `lang`, `datatype`
-- **Hash**: `md5`, `sha256`, `sha512`
+**Expression methods by type:**
+
+| Type | Methods |
+|------|---------|
+| **Numeric** | `plus`, `minus`, `times`, `divide`, `abs`, `round`, `ceil`, `floor`, `power` |
+| **String** | `concat`, `contains`, `startsWith`, `endsWith`, `substr`, `before`, `after`, `replace`, `ucase`, `lcase`, `strlen`, `encodeForUri`, `matches` |
+| **Date** | `year`, `month`, `day`, `hours`, `minutes`, `seconds`, `timezone`, `tz` |
+| **Boolean** | `and`, `or`, `not` |
+| **Comparison** | `eq`, `neq`, `gt`, `gte`, `lt`, `lte` |
+| **Null-handling** | `isDefined`, `isNotDefined`, `defaultTo` |
+| **Type** | `str`, `iri`, `isIri`, `isLiteral`, `isBlank`, `isNumeric`, `lang`, `datatype` |
+| **Hash** | `md5`, `sha256`, `sha512` |
 
 #### Expression-based WHERE filters
 
@@ -463,10 +463,6 @@ const young = await Person.select((p) => p.name)
 const filtered = await Person.select((p) => p.name)
   .where((p) => p.name.strlen().gt(3).and(p.age.gt(18)));
 
-// Mix with standard evaluation-based filters
-const mixed = await Person.select((p) => p.name)
-  .where((p) => p.name.equals('Bob').and((p) => p.name.strlen().gt(3)));
-
 // Expression WHERE on nested paths
 const deep = await Person.select((p) => p.name)
   .where((p) => p.bestFriend.name.strlen().gt(3));
@@ -477,7 +473,7 @@ await Person.update({status: 'senior'}).where((p) => p.age.plus(10).gt(65));
 
 #### `Expr` module
 
-For expressions that don't start from a property (like `NOW()`) or need a functional style, use the `Expr` module:
+Some expressions don't belong to a specific property — like getting the current timestamp, picking the first non-null value, or conditional logic. Use the `Expr` module for these:
 
 ```typescript
 import {Expr} from '@_linked/core';
@@ -497,8 +493,7 @@ const display = await Person.select((p) => ({
 ```
 
 #### Query As (type casting to a sub shape)
-If person.pets returns an array of Pets. And Dog extends Pet.
-And you want to select properties of those pets that are dogs:
+Cast to a subtype when you know the concrete shape — for example, selecting dog-specific properties from a pets collection:
 ```typescript
 const guards = await Person.select((p) => p.pets.as(Dog).guardDogLevel);
 ```
@@ -575,7 +570,7 @@ Returns:
 
 **Expression-based updates:**
 
-Use a callback to derive new values from existing properties. The callback receives a type-safe proxy with expression methods matching each property's type (`.plus()` on numbers, `.ucase()` on strings, etc.):
+Instead of static values, you can compute new values from existing ones. Pass a callback to reference the entity's current properties:
 
 ```typescript
 // Increment age by 1
@@ -593,6 +588,8 @@ await Person.update((p) => ({name: 'Bob', age: p.age.plus(1)})).for({id: 'https:
 // Use Expr module values directly in plain objects
 await Person.update({lastSeen: Expr.now()}).for({id: 'https://my.app/node1'});
 ```
+
+The callback is type-safe — `.plus()` only appears on number properties, `.ucase()` only on strings, etc.
 
 **Conditional and bulk updates:**
 ```typescript
@@ -669,23 +666,18 @@ This example assumes `Person` from the `Shapes` section above.
 
 ```typescript
 import {literalProperty} from '@_linked/core/shapes/SHACL';
-import {createNameSpace} from '@_linked/core/utils/NameSpace';
+import {schema} from '@_linked/core/ontologies/schema';
 import {linkedShape} from './package';
-
-const schema = createNameSpace('https://schema.org/');
-const EmployeeClass = schema('Employee');
-const name = schema('name');
-const employeeId = schema('employeeId');
 
 @linkedShape
 export class Employee extends Person {
-  static targetClass = EmployeeClass;
+  static targetClass = schema.Employee;
 
   // Override inherited "name" with stricter constraints (still maxCount: 1)
-  @literalProperty({path: name, required: true, minLength: 2, maxCount: 1})
+  @literalProperty({path: schema.name, required: true, minLength: 2, maxCount: 1})
   declare name: string;
 
-  @literalProperty({path: employeeId, required: true, maxCount: 1})
+  @literalProperty({path: schema.employeeId, required: true, maxCount: 1})
   declare employeeId: string;
 }
 ```
