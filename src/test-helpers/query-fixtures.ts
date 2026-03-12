@@ -314,43 +314,43 @@ export const queryFactories = {
   sortByAsc: () => Person.select((p) => p.name).orderBy((p) => p.name),
   sortByDesc: () =>
     Person.select((p) => p.name).orderBy((p) => p.name, 'DESC'),
-  updateSimple: () => Person.update(updateSimple).for(entity('p1')),
-  createSimple: () => Person.create({name: 'Test Create', hobby: 'Chess'}),
-  createWithFriends: () =>
+  updateSimple: (() => Person.update(updateSimple).for(entity('p1'))) as () => any,
+  createSimple: (() => Person.create({name: 'Test Create', hobby: 'Chess'})) as () => any,
+  createWithFriends: (() =>
     Person.create({
       name: 'Test Create',
       friends: [entity('p2'), {name: 'New Friend'}],
-    }),
-  createWithFixedId: () =>
+    })) as () => any,
+  createWithFixedId: (() =>
     Person.create({
       __id: `${tmpEntityBase}fixed-id`,
       name: 'Fixed',
       bestFriend: entity('fixed-id-2'),
-    } as any),
+    } as any)) as () => any,
   deleteSingle: () => Person.delete(entity('to-delete')),
   deleteSingleRef: () => Person.delete(entity('to-delete')),
   deleteMultiple: () =>
     Person.delete([entity('to-delete-1'), entity('to-delete-2')]),
   deleteMultipleFull: () =>
     Person.delete([entity('to-delete-1'), entity('to-delete-2')]),
-  updateOverwriteSet: () => Person.update(updateOverwriteSet).for(entity('p1')),
-  updateUnsetSingleUndefined: () =>
-    Person.update(updateUnsetSingleUndefined).for(entity('p1')),
-  updateUnsetSingleNull: () =>
-    Person.update(updateUnsetSingleNull).for(entity('p1')),
-  updateOverwriteNested: () =>
-    Person.update(updateOverwriteNested).for(entity('p1')),
-  updatePassIdReferences: () =>
-    Person.update(updatePassIdReferences).for(entity('p1')),
-  updateAddRemoveMulti: () =>
-    Person.update(updateAddRemoveMulti).for(entity('p1')),
-  updateRemoveMulti: () => Person.update(updateRemoveMulti).for(entity('p1')),
-  updateAddRemoveSame: () => Person.update(updateAddRemoveSame).for(entity('p1')),
-  updateUnsetMultiUndefined: () =>
-    Person.update(updateUnsetMultiUndefined).for(entity('p1')),
-  updateNestedWithPredefinedId: () =>
-    Person.update(updateNestedWithPredefinedId).for(entity('p1')),
-  updateBirthDate: () => Person.update(updateBirthDate).for(entity('p1')),
+  updateOverwriteSet: (() => Person.update(updateOverwriteSet).for(entity('p1'))) as () => any,
+  updateUnsetSingleUndefined: (() =>
+    Person.update(updateUnsetSingleUndefined).for(entity('p1'))) as () => any,
+  updateUnsetSingleNull: (() =>
+    Person.update(updateUnsetSingleNull).for(entity('p1'))) as () => any,
+  updateOverwriteNested: (() =>
+    Person.update(updateOverwriteNested).for(entity('p1'))) as () => any,
+  updatePassIdReferences: (() =>
+    Person.update(updatePassIdReferences).for(entity('p1'))) as () => any,
+  updateAddRemoveMulti: (() =>
+    Person.update(updateAddRemoveMulti).for(entity('p1'))) as () => any,
+  updateRemoveMulti: (() => Person.update(updateRemoveMulti).for(entity('p1'))) as () => any,
+  updateAddRemoveSame: (() => Person.update(updateAddRemoveSame).for(entity('p1'))) as () => any,
+  updateUnsetMultiUndefined: (() =>
+    Person.update(updateUnsetMultiUndefined).for(entity('p1'))) as () => any,
+  updateNestedWithPredefinedId: (() =>
+    Person.update(updateNestedWithPredefinedId).for(entity('p1'))) as () => any,
+  updateBirthDate: (() => Person.update(updateBirthDate).for(entity('p1'))) as () => any,
   preloadBestFriend: () =>
     Person.select((p) => p.bestFriend.preloadFor(componentLike)),
   preloadBestFriendWithFieldSet: () =>
@@ -489,8 +489,97 @@ export const queryFactories = {
   // --- Conditional update tests ---
 
   // Update all instances
-  updateForAll: () => Person.update({hobby: 'Chess'}).forAll(),
+  updateForAll: (): any => Person.update({hobby: 'Chess'}).forAll(),
 
   // Update with where condition
-  updateWhere: () => Person.update({hobby: 'Archived'}).where((p) => p.hobby.equals('Chess')),
+  updateWhere: (): any => Person.update({hobby: 'Archived'}).where((p) => p.hobby.equals('Chess')),
+
+  // --- Computed expression tests ---
+
+  // Simple expression: string length
+  exprStrlen: () =>
+    Person.select((p) => (p.name as any).strlen()),
+
+  // Expression with custom key
+  exprCustomKey: () =>
+    Person.select((p) => ({nameLen: (p.name as any).strlen()})),
+
+  // Expression on nested path
+  exprNestedPath: () =>
+    Person.select((p) => (p.bestFriend.name as any).ucase()),
+
+  // Multiple expressions in array
+  exprMultiple: () =>
+    Person.select((p) => [
+      p.name,
+      (p.name as any).strlen(),
+    ]),
+
+  // --- Mutation expression tests ---
+
+  // Functional callback update with expression
+  updateExprCallback: (): any =>
+    Dog.update((p) => ({guardDogLevel: p.guardDogLevel.plus(1)})).for(entity('d1')),
+
+  // Expression in update with Expr.now()
+  updateExprNow: (): any => {
+    const {Expr} = require('../expressions/Expr');
+    return Person.update({birthDate: Expr.now()}).for(entity('p1'));
+  },
+
+  // --- Traversal expression mutation tests ---
+
+  // Multi-segment expression ref: p.bestFriend.name.ucase()
+  updateExprTraversal: (): any =>
+    Person.update((p) => ({hobby: p.bestFriend.name.ucase()})).for(entity('p1')),
+
+  // Shared traversal: two fields referencing same intermediate (p.bestFriend)
+  updateExprSharedTraversal: (): any =>
+    Person.update((p) => ({
+      name: p.bestFriend.name.ucase(),
+      hobby: p.bestFriend.hobby.lcase(),
+    })).for(entity('p1')),
+
+  // --- Expression-based WHERE filter tests (Phase 8) ---
+
+  // Expression WHERE: STRLEN filter
+  whereExprStrlen: () =>
+    Person.select((p) => ({name: p.name})).where(((p: any) => p.name.strlen().gt(5)) as any),
+
+  // Expression WHERE: arithmetic
+  whereExprArithmetic: () =>
+    Person.select((p) => ({name: p.name})).where(((p: any) => p.name.strlen().plus(10).lt(100)) as any),
+
+  // Expression WHERE: AND chaining on ExpressionNode
+  whereExprAndChain: () =>
+    Person.select((p) => ({name: p.name})).where(((p: any) =>
+      p.name.strlen().gt(5).and(p.name.strlen().lt(20))
+    ) as any),
+
+  // Expression WHERE: mixed Evaluation .and() with ExpressionNode
+  whereExprMixed: () =>
+    Person.select((p) => ({name: p.name})).where((p) =>
+      p.name.equals('Bob').and((p.name as any).strlen().gt(3)),
+    ),
+
+  // Expression WHERE on UpdateBuilder
+  whereExprUpdateBuilder: () =>
+    Person.update({hobby: 'Archived'}).where(((p: any) => p.name.strlen().gt(3)) as any),
+
+  // Expression WHERE on DeleteBuilder
+  whereExprDeleteBuilder: () =>
+    DeleteBuilder.from(Person).where(((p: any) => p.name.strlen().gt(3)) as any),
+
+  // Expression WHERE with nested path traversal
+  whereExprNestedPath: () =>
+    Person.select((p) => ({name: p.name})).where(((p: any) =>
+      p.bestFriend.name.strlen().gt(3)
+    ) as any),
+
+  // Expression WHERE combined with expression projection
+  whereExprWithProjection: () =>
+    Person.select((p) => ({
+      name: p.name,
+      nameLen: (p.name as any).strlen(),
+    })).where(((p: any) => p.name.strlen().gt(2)) as any),
 };

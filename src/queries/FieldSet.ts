@@ -4,6 +4,8 @@ import {PropertyPath, walkPropertyPath} from './PropertyPath.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {WherePath} from './SelectQuery.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
+import {isExpressionNode} from '../expressions/ExpressionNode.js';
+import type {ExpressionNode} from '../expressions/ExpressionNode.js';
 
 // Duck-type helpers for runtime detection.
 // These check structural shape since the classes live in SelectQuery.ts (runtime circular dep).
@@ -61,6 +63,8 @@ export type FieldSetEntry = {
   /** Component preload composition — the FieldSet comes from a linked component's own query,
    *  merged in via `preloadFor()`. Distinct from subSelect which is a user-authored nested query. */
   preloadSubSelect?: FieldSet;
+  /** Computed expression from proxy tracing (e.g. `p.age.times(12)`) */
+  expressionNode?: ExpressionNode;
 };
 
 /**
@@ -525,6 +529,10 @@ export class FieldSet<R = any, Source = any> {
     if (isBoundComponent(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
+    // Single ExpressionNode (e.g. p.age.times(12))
+    if (isExpressionNode(result)) {
+      return [FieldSet.convertTraceResult(nodeShape, result)];
+    }
     if (typeof result === 'object' && result !== null) {
       // Custom object form: {name: p.name, hobby: p.hobby}
       const entries: FieldSetEntry[] = [];
@@ -579,6 +587,14 @@ export class FieldSet<R = any, Source = any> {
       return {
         path: new PropertyPath(rootShape, segments),
         preloadSubSelect: componentFieldSet,
+      };
+    }
+
+    // ExpressionNode → computed expression (e.g. p.age.times(12))
+    if (isExpressionNode(obj)) {
+      return {
+        path: new PropertyPath(rootShape, []),
+        expressionNode: obj,
       };
     }
 
@@ -697,6 +713,10 @@ export class FieldSet<R = any, Source = any> {
     }
     // Single Evaluation
     if (isEvaluation(traceResponse)) {
+      return [FieldSet.convertTraceResult(rootShape, traceResponse)];
+    }
+    // Single ExpressionNode
+    if (isExpressionNode(traceResponse)) {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
     if (typeof traceResponse === 'object' && traceResponse !== null) {

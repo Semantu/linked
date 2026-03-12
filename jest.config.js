@@ -31,6 +31,9 @@ module.exports = {
     '**/field-set.test.ts',
     '**/mutation-builder.test.ts',
     '**/serialization.test.ts',
+    '**/expression-node.test.ts',
+    '**/expr-module.test.ts',
+    '**/expression-types.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {

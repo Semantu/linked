@@ -61,6 +61,20 @@ export {CreateBuilder} from './queries/CreateBuilder.js';
 export {UpdateBuilder} from './queries/UpdateBuilder.js';
 export {DeleteBuilder} from './queries/DeleteBuilder.js';
 
+// Expressions — computed fields and functions
+export {ExpressionNode} from './expressions/ExpressionNode.js';
+export type {ExpressionInput, PropertyRefMap} from './expressions/ExpressionNode.js';
+export {Expr} from './expressions/Expr.js';
+export type {
+  ExpressionUpdateProxy,
+  ExpressionUpdateResult,
+  BaseExpressionMethods,
+  NumericExpressionMethods,
+  StringExpressionMethods,
+  DateExpressionMethods,
+  BooleanExpressionMethods,
+} from './expressions/ExpressionMethods.js';
+
 // Phase 5 — Component query integration
 export type {LinkedComponentInterface, QueryComponentLike} from './queries/SelectQuery.js';
 

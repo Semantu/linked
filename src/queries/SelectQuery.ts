@@ -12,6 +12,7 @@ import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 import {FieldSet} from './FieldSet.js';
 import {PropertyPath} from './PropertyPath.js';
 import type {QueryBuilder} from './QueryBuilder.js';
+import {ExpressionNode, isExpressionNode, tracedPropertyExpression} from '../expressions/ExpressionNode.js';
 
 /**
  * The canonical SelectQuery type — an IR AST node representing a select query.
@@ -50,7 +51,8 @@ export type AccessorReturnValue =
 
 export type WhereClause<S extends Shape | AccessorReturnValue> =
   | Evaluation
-  | ((s: ToQueryBuilderObject<S>) => Evaluation);
+  | ExpressionNode
+  | ((s: ToQueryBuilderObject<S>) => Evaluation | ExpressionNode);
 
 export type QueryBuildFn<T extends Shape, ResponseType> = (
   p: ToQueryBuilderObject<T>,
@@ -196,7 +198,11 @@ export type ToQueryPrimitive<
         ? QueryPrimitive<boolean, Source, Property>
         : never & {__error: 'ToQueryPrimitive: no matching primitive type'};
 
-export type WherePath = WhereEvaluationPath | WhereAndOr;
+export type WhereExpressionPath = {
+  expressionNode: ExpressionNode;
+};
+
+export type WherePath = WhereEvaluationPath | WhereAndOr | WhereExpressionPath;
 
 export type WhereEvaluationPath = {
   path: QueryPropertyPath;
@@ -658,16 +664,16 @@ export class QueryBuilderObject<
     if (datatype) {
       if (singleValue) {
         if (isSameRef(datatype, xsd.integer)) {
-          return new QueryPrimitive<number>(0, property, subject);
+          return wrapWithExpressionProxy(new QueryPrimitive<number>(0, property, subject));
         } else if (isSameRef(datatype, xsd.boolean)) {
-          return new QueryPrimitive<boolean>(false, property, subject);
+          return wrapWithExpressionProxy(new QueryPrimitive<boolean>(false, property, subject));
         } else if (
           isSameRef(datatype, xsd.dateTime) ||
           isSameRef(datatype, xsd.date)
         ) {
-          return new QueryPrimitive<Date>(new Date(), property, subject);
+          return wrapWithExpressionProxy(new QueryPrimitive<Date>(new Date(), property, subject));
         } else if (isSameRef(datatype, xsd.string)) {
-          return new QueryPrimitive<string>('', property, subject);
+          return wrapWithExpressionProxy(new QueryPrimitive<string>('', property, subject));
         }
       } else {
         //TODO review this, do we need property & subject in both of these? currently yes, but why
@@ -705,7 +711,7 @@ export class QueryBuilderObject<
     ) {
       if (singleValue) {
         //default to string if no datatype is set
-        return new QueryPrimitive<string>('', property, subject);
+        return wrapWithExpressionProxy(new QueryPrimitive<string>('', property, subject));
       } else {
         //TODO review this, do we need property & subject in both of these? currently yes, but why
         return new QueryPrimitiveSet([''], property, subject, [
@@ -850,12 +856,57 @@ export const processWhereClause = (
       throw new Error('Cannot process where clause without shape');
     }
     const proxy = createProxiedPathBuilder(shape);
-    const evaluation = validation(proxy);
-    return evaluation.getWherePath();
+    const result = validation(proxy);
+    if (isExpressionNode(result)) {
+      return {expressionNode: result};
+    }
+    return result.getWherePath();
+  } else if (isExpressionNode(validation)) {
+    return {expressionNode: validation};
   } else {
     return (validation as Evaluation).getWherePath();
   }
 };
+
+// ---------------------------------------------------------------------------
+// Expression method proxy for QueryPrimitive
+// ---------------------------------------------------------------------------
+
+const EXPRESSION_METHODS = new Set([
+  'plus', 'minus', 'times', 'divide', 'abs', 'round', 'ceil', 'floor', 'power',
+  'eq', 'neq', 'notEquals', 'gt', 'greaterThan', 'gte', 'greaterThanOrEqual',
+  'lt', 'lessThan', 'lte', 'lessThanOrEqual',
+  'concat', 'contains', 'startsWith', 'endsWith', 'substr', 'before', 'after',
+  'replace', 'ucase', 'lcase', 'strlen', 'encodeForUri', 'matches',
+  'year', 'month', 'day', 'hours', 'minutes', 'seconds', 'timezone', 'tz',
+  'and', 'or', 'not',
+  'isDefined', 'isNotDefined', 'defaultTo',
+  'lang', 'datatype', 'str', 'iri', 'isIri', 'isLiteral', 'isBlank', 'isNumeric',
+  'md5', 'sha256', 'sha512',
+]);
+
+/**
+ * Wrap a QueryPrimitive in a Proxy that intercepts expression method calls.
+ * When an expression method (e.g., `.plus()`, `.gt()`) is accessed, creates a
+ * traced ExpressionNode based on the QueryPrimitive's property path.
+ *
+ * Note: `.equals()` is intentionally excluded — it's an existing QueryPrimitive
+ * method that returns an Evaluation (for WHERE clauses). Use `.eq()` for the
+ * expression form.
+ */
+function wrapWithExpressionProxy<T>(qp: QueryPrimitive<T>): QueryPrimitive<T> {
+  return new Proxy(qp, {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && EXPRESSION_METHODS.has(key)) {
+        const segments = FieldSet.collectPropertySegments(target);
+        const segmentIds = segments.map((s) => s.id);
+        const baseNode = tracedPropertyExpression(segmentIds);
+        return (...args: any[]) => (baseNode as any)[key](...args);
+      }
+      return Reflect.get(target, key, receiver);
+    },
+  }) as QueryPrimitive<T>;
+}
 
 /**
  * Evaluate a sort callback through the proxy and extract a SortByPath.

@@ -1182,3 +1182,159 @@ WHERE {
 }`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Computed expressions in projections
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — computed expressions', () => {
+  test('exprStrlen', async () => {
+    const sparql = await goldenSelect(queryFactories.exprStrlen);
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain(`<${P}/name>`);
+  });
+
+  test('exprCustomKey', async () => {
+    const sparql = await goldenSelect(queryFactories.exprCustomKey);
+    expect(sparql).toContain('STRLEN');
+  });
+
+  test('exprNestedPath', async () => {
+    const sparql = await goldenSelect(queryFactories.exprNestedPath);
+    expect(sparql).toContain('UCASE');
+    expect(sparql).toContain(`<${P}/bestFriend>`);
+    expect(sparql).toContain(`<${P}/name>`);
+  });
+
+  test('exprMultiple', async () => {
+    const sparql = await goldenSelect(queryFactories.exprMultiple);
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain(`<${P}/name>`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Expression-based WHERE filters
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — expression WHERE filters', () => {
+  test('whereExprStrlen — string expression WHERE', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprStrlen);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain('> "5"');
+  });
+
+  test('whereExprArithmetic — numeric expression WHERE', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprArithmetic);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('+');
+    expect(sparql).toContain('< "100"');
+  });
+
+  test('whereExprAndChain — two expressions AND\'d', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprAndChain);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('&&');
+    expect(sparql).toContain('STRLEN');
+  });
+
+  test('whereExprMixed — Evaluation AND ExpressionNode', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprMixed);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain('"Bob"');
+  });
+
+  test('whereExprNestedPath — traversal in WHERE', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprNestedPath);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain(`<${P}/bestFriend>`);
+  });
+
+  test('whereExprWithProjection — expression in both SELECT and WHERE', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprWithProjection);
+    // Expression projection may be inlined in SELECT or use BIND
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain('FILTER');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Computed expressions
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — computed expressions', () => {
+  test('exprStrlen', async () => {
+    const sparql = await goldenSelect(queryFactories.exprStrlen);
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain(`<${P}/name>`);
+  });
+
+  test('exprCustomKey', async () => {
+    const sparql = await goldenSelect(queryFactories.exprCustomKey);
+    expect(sparql).toContain('STRLEN');
+  });
+
+  test('exprNestedPath', async () => {
+    const sparql = await goldenSelect(queryFactories.exprNestedPath);
+    expect(sparql).toContain('UCASE');
+    expect(sparql).toContain(`<${P}/bestFriend>`);
+    expect(sparql).toContain(`<${P}/name>`);
+  });
+
+  test('exprMultiple', async () => {
+    const sparql = await goldenSelect(queryFactories.exprMultiple);
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain(`<${P}/name>`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Expression-based WHERE filters
+// ---------------------------------------------------------------------------
+
+describe('SPARQL golden — expression WHERE filters', () => {
+  test('whereExprStrlen — string expression WHERE', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprStrlen);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain('> "5"');
+  });
+
+  test('whereExprArithmetic — numeric expression WHERE', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprArithmetic);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('+');
+    expect(sparql).toContain('< "100"');
+  });
+
+  test('whereExprAndChain — two expressions AND\'d', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprAndChain);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('&&');
+    expect(sparql).toContain('STRLEN');
+  });
+
+  test('whereExprMixed — Evaluation AND ExpressionNode', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprMixed);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain('"Bob"');
+  });
+
+  test('whereExprNestedPath — traversal in WHERE', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprNestedPath);
+    expect(sparql).toContain('FILTER');
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain(`<${P}/bestFriend>`);
+  });
+
+  test('whereExprWithProjection — expression in both SELECT and WHERE', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprWithProjection);
+    // Expression projection may be inlined in SELECT or use BIND
+    expect(sparql).toContain('STRLEN');
+    expect(sparql).toContain('FILTER');
+  });
+});
