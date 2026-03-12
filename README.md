@@ -56,16 +56,26 @@ Shape class → DSL query → IR (AST) → Target query language → Execute →
 Shape classes use decorators to generate SHACL metadata. These shapes define the data model, drive the DSL's type safety, and can be synced to a store for runtime data validation.
 
 ```typescript
-import {schema} from '@_linked/core/ontologies/schema';
+import {createNameSpace} from '@_linked/core/utils/NameSpace';
+
+const ns = createNameSpace('https://example.org/');
+
+// Example ontology references
+const ex = {
+  Person: ns('Person'),
+  name: ns('name'),
+  knows: ns('knows'),
+  // ... rest of your ontology
+};
 
 @linkedShape
 export class Person extends Shape {
-  static targetClass = schema.Person;
+  static targetClass = ex.Person;
 
-  @literalProperty({path: schema.name, maxCount: 1})
+  @literalProperty({path: ex.name, maxCount: 1})
   get name(): string { return ''; }
 
-  @objectProperty({path: schema.knows, shape: Person})
+  @objectProperty({path: ex.knows, shape: Person})
   get friends(): ShapeSet<Person> { return null; }
 }
 ```
@@ -201,17 +211,27 @@ Linked uses Shape classes to generate SHACL metadata. Paths, target classes, and
 import {Shape} from '@_linked/core';
 import {ShapeSet} from '@_linked/core/collections/ShapeSet';
 import {literalProperty, objectProperty} from '@_linked/core/shapes/SHACL';
-import {schema} from '@_linked/core/ontologies/schema';
+import {createNameSpace} from '@_linked/core/utils/NameSpace';
 import {linkedShape} from './package';
+
+const ns = createNameSpace('https://example.org/');
+
+// Example ontology references
+const ex = {
+  Person: ns('Person'),
+  name: ns('name'),
+  knows: ns('knows'),
+  // ... rest of your ontology
+};
 
 @linkedShape
 export class Person extends Shape {
-  static targetClass = schema.Person;
+  static targetClass = ex.Person;
 
-  @literalProperty({path: schema.name, required: true, maxCount: 1})
+  @literalProperty({path: ex.name, required: true, maxCount: 1})
   declare name: string;
 
-  @objectProperty({path: schema.knows, shape: Person})
+  @objectProperty({path: ex.knows, shape: Person})
   declare knows: ShapeSet<Person>;
 }
 ```
@@ -666,18 +686,17 @@ This example assumes `Person` from the `Shapes` section above.
 
 ```typescript
 import {literalProperty} from '@_linked/core/shapes/SHACL';
-import {schema} from '@_linked/core/ontologies/schema';
 import {linkedShape} from './package';
 
 @linkedShape
 export class Employee extends Person {
-  static targetClass = schema.Employee;
+  static targetClass = ex.Employee;
 
   // Override inherited "name" with stricter constraints (still maxCount: 1)
-  @literalProperty({path: schema.name, required: true, minLength: 2, maxCount: 1})
+  @literalProperty({path: ex.name, required: true, minLength: 2, maxCount: 1})
   declare name: string;
 
-  @literalProperty({path: schema.employeeId, required: true, maxCount: 1})
+  @literalProperty({path: ex.employeeId, required: true, maxCount: 1})
   declare employeeId: string;
 }
 ```
