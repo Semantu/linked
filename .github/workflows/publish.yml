@@ -69,6 +69,33 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  sync-version-to-dev:
+    name: Sync Version to Dev
+    needs: release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Sync package.json version from main
+        run: |
+          MAIN_VERSION=$(git show origin/main:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          DEV_VERSION=$(node -p "require('./package.json').version")
+          if [ "$MAIN_VERSION" != "$DEV_VERSION" ]; then
+            npm version "$MAIN_VERSION" --no-git-tag-version --allow-same-version
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add package.json package-lock.json
+            git commit -m "chore: sync package.json version to $MAIN_VERSION from main"
+            git push
+          fi
+
   dev-release:
     name: Publish Dev Release
     needs: build-and-test
