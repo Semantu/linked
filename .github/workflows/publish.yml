@@ -98,7 +98,10 @@ jobs:
 
       - name: Publish next release
         run: |
-          # Apply pending changesets to get the next version (without committing)
+          # Start from main's version so changesets apply on top of the latest stable
+          MAIN_VERSION=$(git show origin/main:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          npm version "$MAIN_VERSION" --no-git-tag-version --allow-same-version
+          # Apply pending changesets to get the next version
           npx changeset version
           NEXT_VERSION=$(node -p "require('./package.json').version")
           # Append dev prerelease identifier
