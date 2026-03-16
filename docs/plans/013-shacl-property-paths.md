@@ -304,7 +304,7 @@ Strictly sequential — each phase depends on the prior.
 
 ### Summary
 
-All three phases implemented successfully. 906 tests passing (85 new), zero regressions, clean TypeScript compilation.
+All three phases implemented successfully. 927 tests passing (106 new including 29 Fuseki E2E), zero regressions. One significant gap identified: prefix resolution is not wired into the property path SPARQL rendering pipeline. The parser correctly preserves prefixed names, and the existing `Prefix` registry can resolve them, but `pathExprToSparql` and `algebraToString`'s `'path'` case bypass the prefix system entirely.
 
 ### Ideation decision coverage
 
@@ -321,11 +321,18 @@ All 8 decisions are reflected in the implementation:
 
 ### Gaps
 
-1. **No full-pipeline integration test**: Tests cover each layer in isolation (parser, normalizer, SHACL serializer, SPARQL emitter, IR threading). Missing: an end-to-end test that creates a Shape with a complex path decorator and asserts the final generated SPARQL. This would validate the full decorator → FieldSet → desugar → lower → algebra → string pipeline with complex paths.
+1. **Prefix resolution missing from `pathExprToSparql`** *(medium priority)*: The parser preserves prefixed names as raw strings per ideation decision #2 ("stateless parser; prefix resolution downstream"). But the "downstream" part was never implemented. `pathExprToSparql` uses its own `refToSparql()` which checks for `://` and wraps in `<>` if found, or emits bare otherwise. It does NOT call `Prefix.toFull()` or `formatUri()` from `sparqlUtils.ts`. Additionally, `algebraToString.ts` line 53-54 emits `case 'path': return term.value` — bypassing both `formatUri()` and `collectUri()`, so:
+   - Prefixed names in paths (e.g., `ex:knows/ex:name`) emit as bare text without PREFIX declarations
+   - URIs in paths are not collected for the PREFIX block
+   - **Fix**: `pathExprToSparql` (or a new wrapper) should resolve prefixed PathRef strings via `Prefix.toFull()` before rendering, OR `refToSparql` should call `formatUri()` and collect URIs. The `'path'` case in `algebraToString.ts` may also need to participate in URI collection.
 
-2. **sortBy with complex paths**: `PropertyShape.sortBy` is now `PathExpr`, but the sort-by lowering pipeline doesn't thread `pathExpr` through traversals. Complex sort paths (e.g., `sortBy: 'ex:a/ex:b'`) won't generate property path SPARQL. Low priority since sort-by paths are typically simple.
+2. **No full-pipeline integration test**: Tests cover each layer in isolation (parser, normalizer, SHACL serializer, SPARQL emitter, IR threading). Missing: an end-to-end test that creates a Shape with a complex path decorator and asserts the final generated SPARQL. This would validate the full decorator → FieldSet → desugar → lower → algebra → string pipeline with complex paths. *(Partially addressed: 29 Fuseki E2E tests now cover pathExprToSparql → Fuseki execution, but only via raw PathExpr objects and full-IRI strings, not through the shape decorator → IR pipeline.)*
 
-3. **IRProjection.ts not originally in plan**: Was modified to match the widened `resolveTraversal` signature. Functionally necessary, but the plan document didn't list it.
+3. **String decorator input only works with full IRIs**: The 8 new string-input Fuseki tests use `<http://...>` syntax. Prefixed string paths like `'ex:knows/ex:name'` parse correctly but produce SPARQL with bare prefixed names and no PREFIX declarations (see gap #1). Users must currently use `{id}` refs or `<IRI>` syntax in string paths to get working SPARQL.
+
+4. **sortBy with complex paths**: `PropertyShape.sortBy` is now `PathExpr`, but the sort-by lowering pipeline doesn't thread `pathExpr` through traversals. Complex sort paths (e.g., `sortBy: 'ex:a/ex:b'`) won't generate property path SPARQL. Low priority since sort-by paths are typically simple.
+
+5. **IRProjection.ts not originally in plan**: Was modified to match the widened `resolveTraversal` signature. Functionally necessary, but the plan document didn't list it.
 
 ## Parallelization notes
 
