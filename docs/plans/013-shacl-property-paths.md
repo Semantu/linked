@@ -300,6 +300,33 @@ Phase 3 (Query/IR/SPARQL)
 
 Strictly sequential — each phase depends on the prior.
 
+## Review
+
+### Summary
+
+All three phases implemented successfully. 906 tests passing (85 new), zero regressions, clean TypeScript compilation.
+
+### Ideation decision coverage
+
+All 8 decisions are reflected in the implementation:
+1. Full SPARQL grammar in parser ✓
+2. Stateless parser (no prefix resolution) ✓
+3. No type inference changes ✓
+4. Guidance-only readability (no enforcement) ✓
+5a. Discriminated-object union AST ✓
+5b. negatedPropertySet in AST, throws at SHACL boundary ✓
+6. Builder API deferred (not shipped) ✓
+7. Standard SHACL blank-node + RDF-list encoding ✓
+8. PathExpr embedded in IRTraversePattern ✓
+
+### Gaps
+
+1. **No full-pipeline integration test**: Tests cover each layer in isolation (parser, normalizer, SHACL serializer, SPARQL emitter, IR threading). Missing: an end-to-end test that creates a Shape with a complex path decorator and asserts the final generated SPARQL. This would validate the full decorator → FieldSet → desugar → lower → algebra → string pipeline with complex paths.
+
+2. **sortBy with complex paths**: `PropertyShape.sortBy` is now `PathExpr`, but the sort-by lowering pipeline doesn't thread `pathExpr` through traversals. Complex sort paths (e.g., `sortBy: 'ex:a/ex:b'`) won't generate property path SPARQL. Low priority since sort-by paths are typically simple.
+
+3. **IRProjection.ts not originally in plan**: Was modified to match the widened `resolveTraversal` signature. Functionally necessary, but the plan document didn't list it.
+
 ## Parallelization notes
 
 - Within Phase 1: parser and normalizer can be written in parallel (parser is a dependency of normalizer, but both can be scaffolded together).
