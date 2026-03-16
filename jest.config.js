@@ -38,6 +38,7 @@ module.exports = {
     '**/property-path-normalize.test.ts',
     '**/property-path-shacl.test.ts',
     '**/property-path-sparql.test.ts',
+    '**/property-path-fuseki.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {
