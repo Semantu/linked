@@ -34,6 +34,10 @@ module.exports = {
     '**/expression-node.test.ts',
     '**/expr-module.test.ts',
     '**/expression-types.test.ts',
+    '**/property-path-parser.test.ts',
+    '**/property-path-normalize.test.ts',
+    '**/property-path-shacl.test.ts',
+    '**/property-path-sparql.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {
