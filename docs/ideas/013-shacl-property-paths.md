@@ -32,7 +32,7 @@ Spec-aligned path forms to support:
 
 - [x] **String parser strictness:** Full SPARQL property path grammar from the start.
 - [x] **Prefix handling:** Parser operates on raw strings; prefix resolution happens downstream.
-- [ ] **Type inference:** How much static typing can we preserve for complex/non-linear paths in accessor return types?
+- [x] **Type inference:** No change — `shape` is always explicit or omitted. No ontology inference.
 - [ ] **Readability limits:** At what complexity should we recommend object/builder syntax over inline string syntax?
 - [ ] **AST type design:** Confirm the canonical internal AST shape (`PathExpr` union) is the right representation.
 - [ ] **Builder API scope:** Should we ship helper builders (`path.seq`, `path.alt`, etc.) in Phase 1 or defer to Phase 4?
@@ -45,6 +45,7 @@ Spec-aligned path forms to support:
 |---|----------|--------|-----------|
 | 1 | String parser strictness | Full SPARQL property path grammar | Start with maximum expressiveness; avoid needing a second parser pass later. Accept that negated property sets won't map to SHACL `sh:path` and handle that at the serialization boundary. |
 | 2 | Prefix handling | Parser is stateless; raw strings preserved | Prefix resolution happens downstream via existing `toPlainNodeRef` pipeline. Keeps parser context-free and reusable. |
+| 3 | Type inference | No change — existing behavior | `shape` is always user-provided or omitted; no ontology is available for inference. Complex paths follow the same rule as simple paths. |
 
 ## Notes
 
