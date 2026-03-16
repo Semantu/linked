@@ -37,7 +37,7 @@ Spec-aligned path forms to support:
 - [x] **AST type design:** Discriminated-object union; include `negatedPropertySet` for full SPARQL coverage.
 - [x] **Builder API scope:** Defer to Phase 4; object form suffices until real usage patterns inform builder design.
 - [x] **SHACL serialization approach:** Standard blank-node + RDF-list encoding; simple predicates stay as direct IRIs; `negatedPropertySet` errors at serialization boundary.
-- [ ] **Query/IR threading:** How should path expressions flow through the query IR and into SPARQL generation?
+- [x] **Query/IR threading:** Embed `PathExpr` directly in traversal IR nodes; SPARQL generation emits property-path syntax inline.
 
 ## Decisions
 
@@ -51,6 +51,7 @@ Spec-aligned path forms to support:
 | 5b | Negated property sets | Include in AST | Completes full SPARQL grammar per decision 1. SHACL serialization throws descriptive error at boundary. |
 | 6 | Builder API scope | Defer to Phase 4 | Object form (`{ inv: 'ex:parent' }`) is already concise. Wait for real usage patterns from Phases 1–3 to inform builder design. |
 | 7 | SHACL serialization approach | Standard blank-node + RDF-list encoding | Spec-compliant SHACL path serialization. Simple predicates as direct IRIs; complex paths use `sh:alternativePath`, `sh:inversePath`, etc. with blank nodes and RDF lists. `negatedPropertySet` throws at boundary. |
+| 8 | Query/IR threading | Embed PathExpr in traversal IR nodes | SPARQL generation emits property-path syntax inline (`?s (path) ?o`). Avoids expanding into multiple triple patterns. Simple predicates use existing field unchanged. |
 
 ## Notes
 
