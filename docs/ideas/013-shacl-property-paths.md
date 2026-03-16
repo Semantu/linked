@@ -31,7 +31,7 @@ Spec-aligned path forms to support:
 ## Open Questions
 
 - [x] **String parser strictness:** Full SPARQL property path grammar from the start.
-- [ ] **Prefix handling:** Should parser require expanded IRIs/URLs, or resolve `ex:name` through package prefixes?
+- [x] **Prefix handling:** Parser operates on raw strings; prefix resolution happens downstream.
 - [ ] **Type inference:** How much static typing can we preserve for complex/non-linear paths in accessor return types?
 - [ ] **Readability limits:** At what complexity should we recommend object/builder syntax over inline string syntax?
 - [ ] **AST type design:** Confirm the canonical internal AST shape (`PathExpr` union) is the right representation.
@@ -44,6 +44,7 @@ Spec-aligned path forms to support:
 | # | Decision | Chosen | Rationale |
 |---|----------|--------|-----------|
 | 1 | String parser strictness | Full SPARQL property path grammar | Start with maximum expressiveness; avoid needing a second parser pass later. Accept that negated property sets won't map to SHACL `sh:path` and handle that at the serialization boundary. |
+| 2 | Prefix handling | Parser is stateless; raw strings preserved | Prefix resolution happens downstream via existing `toPlainNodeRef` pipeline. Keeps parser context-free and reusable. |
 
 ## Notes
 
