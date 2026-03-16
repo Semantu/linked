@@ -34,7 +34,7 @@ Spec-aligned path forms to support:
 - [x] **Prefix handling:** Parser operates on raw strings; prefix resolution happens downstream.
 - [x] **Type inference:** No change — `shape` is always explicit or omitted. No ontology inference.
 - [x] **Readability limits:** Document guidance (recommend object/builder at ~2+ nesting levels) but don't enforce.
-- [ ] **AST type design:** Confirm the canonical internal AST shape (`PathExpr` union) is the right representation.
+- [x] **AST type design:** Discriminated-object union; include `negatedPropertySet` for full SPARQL coverage.
 - [ ] **Builder API scope:** Should we ship helper builders (`path.seq`, `path.alt`, etc.) in Phase 1 or defer to Phase 4?
 - [ ] **SHACL serialization approach:** Confirm blank-node + RDF-list encoding for complex paths.
 - [ ] **Query/IR threading:** How should path expressions flow through the query IR and into SPARQL generation?
@@ -47,6 +47,8 @@ Spec-aligned path forms to support:
 | 2 | Prefix handling | Parser is stateless; raw strings preserved | Prefix resolution happens downstream via existing `toPlainNodeRef` pipeline. Keeps parser context-free and reusable. |
 | 3 | Type inference | No change — existing behavior | `shape` is always user-provided or omitted; no ontology is available for inference. Complex paths follow the same rule as simple paths. |
 | 4 | Readability limits | Document guidance, don't enforce | Recommend object/builder syntax at ~2+ nesting levels. Parser accepts anything valid regardless. |
+| 5a | AST union style | Discriminated-object union | Concise, doubles as user-facing decorator input — no conversion layer needed. |
+| 5b | Negated property sets | Include in AST | Completes full SPARQL grammar per decision 1. SHACL serialization throws descriptive error at boundary. |
 
 ## Notes
 
@@ -65,7 +67,8 @@ type PathExpr =
   | { inv: PathExpr }
   | { zeroOrMore: PathExpr }
   | { oneOrMore: PathExpr }
-  | { zeroOrOne: PathExpr };
+  | { zeroOrOne: PathExpr }
+  | { negatedPropertySet: (PathRef | { inv: PathRef })[] };
 ```
 
 This shape maps directly to SHACL path node encodings and SPARQL property path operators.
