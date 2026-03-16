@@ -35,7 +35,7 @@ Spec-aligned path forms to support:
 - [x] **Type inference:** No change — `shape` is always explicit or omitted. No ontology inference.
 - [x] **Readability limits:** Document guidance (recommend object/builder at ~2+ nesting levels) but don't enforce.
 - [x] **AST type design:** Discriminated-object union; include `negatedPropertySet` for full SPARQL coverage.
-- [ ] **Builder API scope:** Should we ship helper builders (`path.seq`, `path.alt`, etc.) in Phase 1 or defer to Phase 4?
+- [x] **Builder API scope:** Defer to Phase 4; object form suffices until real usage patterns inform builder design.
 - [ ] **SHACL serialization approach:** Confirm blank-node + RDF-list encoding for complex paths.
 - [ ] **Query/IR threading:** How should path expressions flow through the query IR and into SPARQL generation?
 
@@ -49,6 +49,7 @@ Spec-aligned path forms to support:
 | 4 | Readability limits | Document guidance, don't enforce | Recommend object/builder syntax at ~2+ nesting levels. Parser accepts anything valid regardless. |
 | 5a | AST union style | Discriminated-object union | Concise, doubles as user-facing decorator input — no conversion layer needed. |
 | 5b | Negated property sets | Include in AST | Completes full SPARQL grammar per decision 1. SHACL serialization throws descriptive error at boundary. |
+| 6 | Builder API scope | Defer to Phase 4 | Object form (`{ inv: 'ex:parent' }`) is already concise. Wait for real usage patterns from Phases 1–3 to inform builder design. |
 
 ## Notes
 
