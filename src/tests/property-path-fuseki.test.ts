@@ -22,6 +22,7 @@ import {
   clearAllData,
 } from '../test-helpers/fuseki-test-store';
 import {pathExprToSparql} from '../paths/pathExprToSparql';
+import {normalizePropertyPath} from '../paths/normalizePropertyPath';
 import type {PathExpr} from '../paths/PropertyPathExpr';
 
 // ---------------------------------------------------------------------------
@@ -410,5 +411,110 @@ describe('Property path E2E — SPARQL rendering', () => {
     };
     const sparql = pathExprToSparql(path);
     expect(sparql).toBe(`(<${EX}knows>|<${EX}likes>)/<${EX}name>+`);
+  });
+});
+
+// =========================================================================
+// STRING INPUT — full pipeline: string → normalize → SPARQL → Fuseki
+// =========================================================================
+
+describe('Property path E2E — string decorator input', () => {
+  /**
+   * Helper: takes a raw string (as you'd write in a decorator),
+   * normalizes it, renders to SPARQL, and executes against Fuseki.
+   */
+  async function selectWithStringPath(
+    subject: string,
+    pathString: string,
+  ): Promise<string[]> {
+    const pathExpr = normalizePropertyPath(pathString);
+    const pathSparql = pathExprToSparql(pathExpr);
+    const sparql = `SELECT ?target WHERE { <${subject}> ${pathSparql} ?target . }`;
+    const result = await executeSparqlQuery(sparql);
+    return result.results.bindings.map((b: any) => b.target.value);
+  }
+
+  test('string sequence: <IRI>/<IRI> parses and executes', async () => {
+    if (!fusekiAvailable) return;
+
+    // Same as the {seq} object test but starting from a raw string
+    const values = await selectWithStringPath(
+      `${EX}alice`,
+      `<${EX}knows>/<${EX}name>`,
+    );
+    expect(values).toEqual(['Bob']);
+  });
+
+  test('string three-step sequence: <knows>/<knows>/<name>', async () => {
+    if (!fusekiAvailable) return;
+
+    const values = await selectWithStringPath(
+      `${EX}alice`,
+      `<${EX}knows>/<${EX}knows>/<${EX}name>`,
+    );
+    expect(values).toEqual(['Carol']);
+  });
+
+  test('string inverse: ^<IRI>', async () => {
+    if (!fusekiAvailable) return;
+
+    const values = await selectWithStringPath(
+      `${EX}bob`,
+      `^<${EX}knows>`,
+    );
+    expect(values).toContain(`${EX}alice`);
+  });
+
+  test('string inverse + sequence: ^<knows>/<hasPet>/<petName>', async () => {
+    if (!fusekiAvailable) return;
+
+    const values = await selectWithStringPath(
+      `${EX}bob`,
+      `^<${EX}knows>/<${EX}hasPet>/<${EX}petName>`,
+    );
+    expect(values).toContain('Fluffy');
+  });
+
+  test('string oneOrMore: <knows>+', async () => {
+    if (!fusekiAvailable) return;
+
+    const values = await selectWithStringPath(
+      `${EX}alice`,
+      `<${EX}knows>+`,
+    );
+    expect(values).toContain(`${EX}bob`);
+    expect(values).toContain(`${EX}carol`);
+    expect(values).toContain(`${EX}dave`);
+  });
+
+  test('string alternative: <knows>|<likes>', async () => {
+    if (!fusekiAvailable) return;
+
+    const values = await selectWithStringPath(
+      `${EX}alice`,
+      `<${EX}knows>|<${EX}likes>`,
+    );
+    expect(values).toContain(`${EX}bob`);
+  });
+
+  test('string complex: (<knows>|<manages>)/<worksAt>/<companyName>', async () => {
+    if (!fusekiAvailable) return;
+
+    const values = await selectWithStringPath(
+      `${EX}alice`,
+      `(<${EX}knows>|<${EX}manages>)/<${EX}worksAt>/<${EX}companyName>`,
+    );
+    expect(values).toContain('Acme Corp');
+  });
+
+  test('string transitive + sequence: <manages>+/<name>', async () => {
+    if (!fusekiAvailable) return;
+
+    const values = await selectWithStringPath(
+      `${EX}alice`,
+      `<${EX}manages>+/<${EX}name>`,
+    );
+    expect(values).toContain('Bob');
+    expect(values).toContain('Carol');
   });
 });
