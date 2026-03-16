@@ -228,7 +228,9 @@ All tests use Jest. New test files:
 
 ## Phases
 
-### Phase 1: AST types + string parser + normalizer
+### Phase 1: AST types + string parser + normalizer ✓
+
+**Status:** Complete — 50/50 tests passing.
 
 **Dependency:** None (leaf phase).
 
@@ -245,7 +247,9 @@ All tests use Jest. New test files:
 - Parser throws on malformed input with position info
 - Normalizer handles: string, `{id}`, `PathExpr` object, array
 
-### Phase 2: SHACL type integration + SHACL serialization
+### Phase 2: SHACL type integration + SHACL serialization ✓
+
+**Status:** Complete — 882/882 tests passing (11 new SHACL tests).
 
 **Dependency:** Phase 1 (uses `PathExpr` types and `normalizePropertyPath`).
 
@@ -261,7 +265,9 @@ All tests use Jest. New test files:
 - SHACL serializer handles: predicate, sequence, alternative, inverse, zeroOrMore, oneOrMore, zeroOrOne
 - SHACL serializer throws for negatedPropertySet
 
-### Phase 3: Query/IR/SPARQL generation
+### Phase 3: Query/IR/SPARQL generation ✓
+
+**Status:** Complete — 906/906 tests passing (24 new SPARQL path tests).
 
 **Dependency:** Phase 2 (uses `PathExpr` on `PropertyShape.path`).
 
