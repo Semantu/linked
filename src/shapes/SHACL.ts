@@ -10,13 +10,15 @@ import {URI} from '../utils/URI.js';
 import {toNodeReference} from '../utils/NodeReference.js';
 import {QResult} from '../queries/SelectQuery.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
+import type {PathExpr} from '../paths/PropertyPathExpr.js';
+import {normalizePropertyPath, type PropertyPathDecoratorInput} from '../paths/normalizePropertyPath.js';
 
 export const LINCD_DATA_ROOT: string = 'https://data.lincd.org/';
 
 type NodeKindConfig = NodeReferenceValue | NodeReferenceValue[];
 
-export type PropertyPathInput = NodeReferenceValue;
-export type PropertyPathInputList = PropertyPathInput | PropertyPathInput[];
+export type PropertyPathInput = PropertyPathDecoratorInput;
+export type PropertyPathInputList = PropertyPathDecoratorInput;
 
 const toPlainNodeRef = (
   value: NodeReferenceValue | {id: string} | string,
@@ -31,12 +33,9 @@ const toPlainNodeRef = (
 };
 
 const normalizePathInput = (
-  value: PropertyPathInputList,
-): PropertyPathInputList => {
-  if (Array.isArray(value)) {
-    return value.map((entry) => toPlainNodeRef(entry));
-  }
-  return toPlainNodeRef(value);
+  value: PropertyPathDecoratorInput,
+): PathExpr => {
+  return normalizePropertyPath(value);
 };
 
 const normalizeNodeKind = (
@@ -317,7 +316,7 @@ export class NodeShape extends Shape {
 export class PropertyShape extends Shape {
   static targetClass = shacl.PropertyShape;
   private _label?: string;
-  path: PropertyPathInputList;
+  path: PathExpr;
   nodeKind?: NodeReferenceValue;
   datatype?: NodeReferenceValue;
   minCount?: number;
@@ -332,7 +331,7 @@ export class PropertyShape extends Shape {
   disjoint?: NodeReferenceValue;
   hasValueConstraint?: NodeReferenceValue;
   defaultValue?: unknown;
-  sortBy?: PropertyPathInputList;
+  sortBy?: PathExpr;
   valueShape?: NodeReferenceValue;
   parentNodeShape?: NodeShape;
 

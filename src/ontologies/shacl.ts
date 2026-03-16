@@ -37,6 +37,12 @@ const node = ns('node');
 const nodeKind = ns('nodeKind');
 const Shape = ns('Shape');
 
+const alternativePath = ns('alternativePath');
+const inversePath = ns('inversePath');
+const zeroOrMorePath = ns('zeroOrMorePath');
+const oneOrMorePath = ns('oneOrMorePath');
+const zeroOrOnePath = ns('zeroOrOnePath');
+
 const BlankNode = ns('BlankNode');
 const IRI = ns('IRI');
 const Literal = ns('Literal');
@@ -133,4 +139,9 @@ export const shacl = {
   MaxLengthConstraintComponent,
   AbstractResult,
   result,
+  alternativePath,
+  inversePath,
+  zeroOrMorePath,
+  oneOrMorePath,
+  zeroOrOnePath,
 };
