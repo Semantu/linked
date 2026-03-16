@@ -3,7 +3,8 @@
 export type SparqlTerm =
   | {kind: 'variable'; name: string}
   | {kind: 'iri'; value: string}
-  | {kind: 'literal'; value: string; datatype?: string; language?: string};
+  | {kind: 'literal'; value: string; datatype?: string; language?: string}
+  | {kind: 'path'; value: string};
 
 export type SparqlTriple = {
   subject: SparqlTerm;

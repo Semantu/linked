@@ -1,4 +1,5 @@
 import {NodeReferenceValue} from './QueryFactory.js';
+import type {PathExpr} from '../paths/PropertyPathExpr.js';
 
 export type IRDirection = 'ASC' | 'DESC';
 export type IRAlias = string;
@@ -64,6 +65,7 @@ export type IRTraversePattern = {
   from: IRAlias;
   to: IRAlias;
   property: string;
+  pathExpr?: PathExpr;
   filter?: IRExpression;
 };
 

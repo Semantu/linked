@@ -30,6 +30,7 @@ import {canonicalizeWhere} from './IRCanonicalize.js';
 import {lowerSelectionPathExpression, projectionKeyFromPath} from './IRProjection.js';
 import {IRAliasScope} from './IRAliasScope.js';
 import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
+import type {PathExpr} from '../paths/PropertyPathExpr.js';
 
 /**
  * Creates a memoized traversal resolver that deduplicates (fromAlias, propertyShapeId)
@@ -70,18 +71,22 @@ class LoweringContext {
     return `a${this.counter++}`;
   }
 
-  getOrCreateTraversal(fromAlias: string, propertyShapeId: string): string {
+  getOrCreateTraversal(fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr): string {
     const key = `${fromAlias}:${propertyShapeId}`;
     const existing = this.traverseMap.get(key);
     if (existing) return existing;
 
     const toAlias = this.nextAlias();
-    this.patterns.push({
+    const pattern: IRTraversePattern = {
       kind: 'traverse',
       from: fromAlias,
       to: toAlias,
       property: propertyShapeId,
-    });
+    };
+    if (pathExpr) {
+      pattern.pathExpr = pathExpr;
+    }
+    this.patterns.push(pattern);
     this.traverseMap.set(key, toAlias);
     return toAlias;
   }
@@ -115,7 +120,7 @@ type AliasGenerator = {
 
 type PathLoweringOptions = {
   rootAlias: string;
-  resolveTraversal: (fromAlias: string, propertyShapeId: string) => string;
+  resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr) => string;
 };
 
 const isShapeRef = (value: unknown): value is ShapeReferenceValue =>
@@ -272,8 +277,8 @@ export const lowerSelectQuery = (
   const ctx = new LoweringContext();
   const pathOptions: PathLoweringOptions = {
     rootAlias: ctx.rootAlias,
-    resolveTraversal: (fromAlias: string, propertyShapeId: string) =>
-      ctx.getOrCreateTraversal(fromAlias, propertyShapeId),
+    resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr) =>
+      ctx.getOrCreateTraversal(fromAlias, propertyShapeId, pathExpr),
   };
 
   const root: IRShapeScanPattern = {
@@ -286,7 +291,7 @@ export const lowerSelectQuery = (
     let currentAlias = pathOptions.rootAlias;
     for (const step of steps) {
       if (step.kind === 'property_step') {
-        currentAlias = pathOptions.resolveTraversal(currentAlias, step.propertyShapeId);
+        currentAlias = pathOptions.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr);
       }
     }
     return currentAlias;

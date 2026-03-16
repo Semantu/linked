@@ -1,6 +1,7 @@
 import {DesugaredSelectionPath, DesugaredWhere} from './IRDesugar.js';
 import {IRAliasScope} from './IRAliasScope.js';
 import {IRExpression, IRProjectionItem, IRResultMapEntry} from './IntermediateRepresentation.js';
+import type {PathExpr} from '../paths/PropertyPathExpr.js';
 
 /**
  * Callback invoked when a property step with an inline `.where()` is encountered
@@ -14,7 +15,7 @@ export type InlineFilterCallback = (
 
 export type ProjectionPathLoweringOptions = {
   rootAlias: string;
-  resolveTraversal: (fromAlias: string, propertyShapeId: string) => string;
+  resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr) => string;
 };
 
 export type CanonicalProjectionResult = {
@@ -66,7 +67,7 @@ export const lowerSelectionPathExpression = (
     if (step.kind === 'property_step') {
       if (step.where && onInlineFilter) {
         // Force traversal creation for step with inline where
-        currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId);
+        currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr);
         onInlineFilter(currentAlias, step.where);
         if (isLast) {
           return {kind: 'alias_expr', alias: currentAlias};
@@ -82,7 +83,7 @@ export const lowerSelectionPathExpression = (
         };
       }
 
-      currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId);
+      currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr);
       continue;
     }
 

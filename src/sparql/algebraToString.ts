@@ -50,6 +50,8 @@ export function serializeTerm(
       }
       return formatLiteral(term.value, term.datatype);
     }
+    case 'path':
+      return term.value;
   }
 }
 
