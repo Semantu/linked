@@ -192,6 +192,7 @@ All tests use Jest. New test files:
 | `src/tests/property-path-normalize.test.ts` | **New** | Normalizer unit tests |
 | `src/tests/property-path-shacl.test.ts` | **New** | SHACL serialization tests |
 | `src/tests/property-path-sparql.test.ts` | **New** | End-to-end SPARQL golden tests |
+| `src/tests/property-path-integration.test.ts` | **New** | Full decorator-to-SPARQL integration tests |
 
 ## Pitfalls
 
@@ -202,6 +203,8 @@ All tests use Jest. New test files:
 3. **SHACL negatedPropertySet**: Must throw at serialization boundary, not at parse time. The AST accepts it (per decision 5b) but SHACL doesn't support it.
 
 4. **Traversal deduplication**: `LoweringContext.getOrCreateTraversal` keys on `${fromAlias}:${propertyShapeId}`. For complex paths, the `propertyShapeId` is the PropertyShape ID (not the path expression). This means two different complex paths on the same property shape correctly share traversals.
+
+5. **Prefix resolution direction in paths**: `refToSparql()` in Phase 4 must call `formatUri()` (full IRI → prefixed form) not `Prefix.toFull()` (prefixed → full). The path pipeline always stores full IRIs in `{id}` refs; the prefix shortening happens at SPARQL rendering time. String refs that are already prefixed (like `'ex:name'` from parser output) pass through unchanged — they rely on the ontology having registered its prefix at module load time.
 
 ## Contracts
 
@@ -288,17 +291,186 @@ All tests use Jest. New test files:
 - Golden tests cover: each path form individually + nested combination
 - Existing SPARQL golden tests produce identical output (no regression)
 
+### Phase 4: Prefix resolution in property path SPARQL
+
+**Status:** Planned
+
+**Dependency:** Phase 3 (modifies `pathExprToSparql` and `algebraToString`).
+
+**Problem:** The parser stores prefixed names as raw strings (ideation decision #2: "no prefix resolution in parser"). But the "downstream" resolution was never implemented. Two independent bugs:
+
+1. **`refToSparql()` in `pathExprToSparql.ts`** formats URIs independently of the `Prefix` registry. Full IRIs get `<>` wrapping, prefixed names pass through bare. It never calls `Prefix.toPrefixed()` or `formatUri()`.
+2. **`algebraToString.ts:53-54`** `case 'path': return term.value` — the path term is a pre-rendered string that bypasses `collectUri()` entirely. URIs inside paths are never registered for the PREFIX block.
+
+**Design:** Two-pronged fix that keeps `pathExprToSparql` pure (returns string) but adds a new companion that collects URIs:
+
+1. **Add `collectPathUris(expr: PathExpr): string[]`** to `pathExprToSparql.ts` — walks the `PathExpr` AST and returns all full IRIs found in `PathRef` nodes (both string refs containing `://` and `{id}` refs). This function does NOT collect prefixed-name refs since those are already in prefix:local form and don't need PREFIX declarations — the Prefix registry already registered them at ontology-load time.
+
+2. **Modify `refToSparql()`** to use `formatUri()` from `sparqlUtils.ts` for full IRIs (those with `://`), so that full IRIs in paths get shortened to prefixed form when a prefix is registered. Prefixed-name string refs continue to pass through as-is.
+
+3. **Extend `SparqlTerm` `'path'` variant** to carry `uris: string[]` alongside the rendered `value`:
+   ```ts
+   | {kind: 'path'; value: string; uris: string[]}
+   ```
+
+4. **Update `irToAlgebra.ts`** to populate `uris` when creating path terms:
+   ```ts
+   const predicate = pattern.pathExpr
+     ? {kind: 'path' as const, value: pathExprToSparql(pattern.pathExpr), uris: collectPathUris(pattern.pathExpr)}
+     : iriTerm(pattern.property);
+   ```
+
+5. **Update `algebraToString.ts`** `case 'path'` to collect URIs:
+   ```ts
+   case 'path':
+     if (collector && term.uris) {
+       for (const uri of term.uris) collectUri(collector, uri);
+     }
+     return term.value;
+   ```
+
+**Tasks:**
+1. Add `collectPathUris(expr: PathExpr): string[]` to `src/paths/pathExprToSparql.ts`
+2. Modify `refToSparql()` to call `formatUri()` for full IRIs (import from `sparqlUtils.ts`)
+3. Extend `SparqlTerm` path variant with `uris: string[]` in `SparqlAlgebra.ts`
+4. Update `irToAlgebra.ts` traverse case to populate `uris` via `collectPathUris`
+5. Update `algebraToString.ts` `'path'` case to forward `term.uris` to `collectUri()`
+6. Add tests: path with full IRIs gets PREFIX declarations; path with prefixed names renders correctly
+
+**Validation:**
+- `npm test` passes (all existing + new tests)
+- A path like `{seq: [{id: 'http://xmlns.com/foaf/0.1/knows'}, {id: 'http://xmlns.com/foaf/0.1/name'}]}` renders as `foaf:knows/foaf:name` with `PREFIX foaf: <http://xmlns.com/foaf/0.1/>` in the output
+- A path using prefixed string refs like `'foaf:knows'` renders as `foaf:knows` (bare, since it's already prefixed)
+- Existing SPARQL golden tests produce identical output
+
+### Phase 5: sortBy with complex property paths
+
+**Status:** Planned
+
+**Dependency:** Phase 3 (uses `pathExpr` on `DesugaredPropertyStep`).
+
+**Problem:** `toSortBy()` in `IRDesugar.ts:421-436` creates `DesugaredPropertyStep` objects from `PropertyPath.segments` but only copies `propertyShapeId` — it ignores `seg.path` entirely. The correct `segmentsToSteps()` function at line 179-189 shows the pattern that's missing.
+
+**Example of the bug:**
+
+```ts
+// Shape definition
+class PersonShape extends Shape {
+  @literalProperty({path: 'foaf:knows/foaf:name'})
+  friendName: string;
+}
+
+// Query with sortBy
+query.select(p => p.friendName).sortBy(p => p.friendName, 'ASC');
+```
+
+The `.select()` path correctly generates:
+```sparql
+?a0 foaf:knows/foaf:name ?a1 .     -- ✅ pathExpr present via segmentsToSteps
+ORDER BY ASC(?a1)                    -- sortBy variable reference works
+```
+
+But if the sort path involves an *intermediate* traversal with a complex path (a multi-segment sort path where an earlier segment has a complex path), that segment's pathExpr is lost:
+
+```ts
+// Shape with nested complex path
+class OrgShape extends Shape {
+  @objectProperty({path: 'org:hasMember/org:role'})  // complex path
+  memberRole: MemberRoleShape;
+}
+class MemberRoleShape extends Shape {
+  @literalProperty({path: rdfs.label})
+  label: string;
+}
+
+// Sort by nested path
+query.select(p => p.memberRole.label).sortBy(p => p.memberRole.label, 'ASC');
+```
+
+The `sortBy` traversal for `memberRole` generates:
+```sparql
+-- Expected (with pathExpr):
+?a0 org:hasMember/org:role ?sortA0 .
+?sortA0 rdfs:label ?sortA1 .
+ORDER BY ASC(?sortA1)
+
+-- Actual (without pathExpr — falls back to simple IRI):
+?a0 <http://example.org/OrgShape/memberRole> ?sortA0 .   -- ❌ uses propertyShapeId as IRI
+?sortA0 rdfs:label ?sortA1 .
+ORDER BY ASC(?sortA1)
+```
+
+The sort traversal for `memberRole` emits the PropertyShape ID as an IRI predicate instead of the complex path expression, because `toSortBy()` doesn't copy `pathExpr`.
+
+**Fix:** Apply the same pattern as `segmentsToSteps()`:
+
+```ts
+// IRDesugar.ts — toSortBy, line 430-433
+steps: path.segments.map((seg) => {
+  const step: DesugaredPropertyStep = {
+    kind: 'property_step' as const,
+    propertyShapeId: seg.id,
+  };
+  if (seg.path && isComplexPathExpr(seg.path)) {
+    step.pathExpr = seg.path;
+  }
+  return step;
+}),
+```
+
+**Tasks:**
+1. Modify `toSortBy()` in `IRDesugar.ts` to copy `pathExpr` from `seg.path` when complex (same pattern as `segmentsToSteps`)
+2. Add test: sortBy with a complex-path segment produces the correct property path in ORDER BY traversals
+
+**Validation:**
+- `npm test` passes
+- New test asserts that a sort path through a complex-path property emits property path syntax in the traversal triple, not the raw PropertyShape ID
+
+### Phase 6: Decorator-to-SPARQL integration tests
+
+**Status:** Planned
+
+**Dependency:** Phase 4 + Phase 5 (prefix resolution and sortBy must work first).
+
+**Problem:** No test exercises the full pipeline from shape decorators through to final SPARQL string. Existing tests cover layers in isolation. The 29 Fuseki E2E tests operate on raw `PathExpr` objects and full-IRI strings, not through the decorator → FieldSet → desugar → lower → algebra → string pipeline.
+
+**Design:** Create integration tests that define shapes with complex path decorators, build queries against them, and assert the final SPARQL output.
+
+**Test cases:**
+1. Simple sequence path decorator: `@literalProperty({path: '<http://ex.org/a>/<http://ex.org/b>'})` → SPARQL contains `ex:a/ex:b` with correct PREFIX block
+2. Alternative path decorator: `@literalProperty({path: '<http://ex.org/a>|<http://ex.org/b>'})` → SPARQL contains `ex:a|ex:b`
+3. Inverse path decorator: `@literalProperty({path: '^<http://ex.org/parent>'})` → SPARQL contains `^ex:parent`
+4. Nested combined path: `@literalProperty({path: {seq: [{inv: {id: 'http://ex.org/parent'}}, {id: 'http://ex.org/name'}]}})` → SPARQL contains `^ex:parent/ex:name`
+5. sortBy with complex path (from Phase 5 fix)
+6. WHERE filter on a complex-path property
+7. Backward compat: simple `{id}` path decorator produces same SPARQL as before
+
+**Tasks:**
+1. Create `src/tests/property-path-integration.test.ts` with test shapes and query assertions
+2. Each test: define shape → build query → call SPARQL generation → assert output string
+
+**Validation:**
+- `npm test -- --testPathPattern="property-path-integration"` passes
+- Tests cover the full decorator → FieldSet → desugar → lower → algebra → string chain
+- Each test asserts both the triple pattern syntax AND the PREFIX block
+
 ## Dependency graph
 
 ```
-Phase 1 (AST + parser + normalizer)
+Phase 1 (AST + parser + normalizer)  ✓
     ↓
-Phase 2 (SHACL integration + serialization)
+Phase 2 (SHACL integration + serialization)  ✓
     ↓
-Phase 3 (Query/IR/SPARQL)
+Phase 3 (Query/IR/SPARQL)  ✓
+    ↓
+    ├──→ Phase 4 (Prefix resolution in path SPARQL)
+    │        ↓
+    ├──→ Phase 5 (sortBy with complex paths)
+    │        ↓
+    └──→ Phase 6 (Decorator-to-SPARQL integration tests)  [depends on 4 + 5]
 ```
 
-Strictly sequential — each phase depends on the prior.
+Phases 4 and 5 are independent and can be implemented in parallel. Phase 6 depends on both.
 
 ## Review
 
