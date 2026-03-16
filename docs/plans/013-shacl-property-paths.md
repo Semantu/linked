@@ -225,3 +225,76 @@ All tests use Jest. New test files:
 - Input: `PathExpr`
 - Output: SPARQL property path string with correct precedence and parenthesization
 - Handles all forms including `negatedPropertySet`
+
+## Phases
+
+### Phase 1: AST types + string parser + normalizer
+
+**Dependency:** None (leaf phase).
+
+**Tasks:**
+1. Create `src/paths/PropertyPathExpr.ts` with `PathExpr`, `PathRef` types and `parsePropertyPath` function
+2. Create `src/paths/normalizePropertyPath.ts` with `normalizePropertyPath` function
+3. Create `src/tests/property-path-parser.test.ts` — parser unit tests
+4. Create `src/tests/property-path-normalize.test.ts` — normalizer unit tests
+
+**Validation:**
+- `npm test -- --testPathPattern="property-path-(parser|normalize)"` passes
+- Parser handles all 8 path forms: predicate, sequence, alternative, inverse, zeroOrMore, oneOrMore, zeroOrOne, negatedPropertySet
+- Parser handles nested/grouped expressions: `(ex:a|^ex:b)/ex:c+`
+- Parser throws on malformed input with position info
+- Normalizer handles: string, `{id}`, `PathExpr` object, array
+
+### Phase 2: SHACL type integration + SHACL serialization
+
+**Dependency:** Phase 1 (uses `PathExpr` types and `normalizePropertyPath`).
+
+**Tasks:**
+1. Modify `src/shapes/SHACL.ts`: widen `PropertyPathInput`/`PropertyPathInputList` types, update `PropertyShape.path` to `PathExpr`, delegate `normalizePathInput` to `normalizePropertyPath`
+2. Create `src/paths/serializePathToSHACL.ts` — SHACL path serialization
+3. Create `src/tests/property-path-shacl.test.ts` — SHACL serialization tests
+4. Verify all existing tests still pass (backward compat)
+
+**Validation:**
+- `npm test` passes (all existing tests unchanged)
+- `npm test -- --testPathPattern="property-path-shacl"` passes
+- SHACL serializer handles: predicate, sequence, alternative, inverse, zeroOrMore, oneOrMore, zeroOrOne
+- SHACL serializer throws for negatedPropertySet
+
+### Phase 3: Query/IR/SPARQL generation
+
+**Dependency:** Phase 2 (uses `PathExpr` on `PropertyShape.path`).
+
+**Tasks:**
+1. Add optional `pathExpr` to `IRTraversePattern` in `IntermediateRepresentation.ts`
+2. Add optional `pathExpr` to `DesugaredPropertyStep` in `IRDesugar.ts`; attach from `PropertyShape.path` when complex
+3. Propagate `pathExpr` in `IRLower.ts` through `getOrCreateTraversal`
+4. Create `src/paths/pathExprToSparql.ts` — PathExpr → SPARQL property path string
+5. Add `path` term kind to `SparqlTerm` in `SparqlAlgebra.ts`
+6. Update `irToAlgebra.ts`: when `pathExpr` present on traverse, emit `path` term as predicate
+7. Update `algebraToString.ts`: serialize `path` term kind directly (no `<>` wrapping)
+8. Create `src/tests/property-path-sparql.test.ts` — end-to-end golden tests
+9. Verify all existing tests still pass
+
+**Validation:**
+- `npm test` passes (all existing + new tests)
+- `npm test -- --testPathPattern="property-path-sparql"` passes
+- Golden tests cover: each path form individually + nested combination
+- Existing SPARQL golden tests produce identical output (no regression)
+
+## Dependency graph
+
+```
+Phase 1 (AST + parser + normalizer)
+    ↓
+Phase 2 (SHACL integration + serialization)
+    ↓
+Phase 3 (Query/IR/SPARQL)
+```
+
+Strictly sequential — each phase depends on the prior.
+
+## Parallelization notes
+
+- Within Phase 1: parser and normalizer can be written in parallel (parser is a dependency of normalizer, but both can be scaffolded together).
+- Within Phase 3: tasks 1–3 (IR changes) and task 4 (pathExprToSparql) are independent and can be done in parallel. Tasks 5–7 (algebra changes) depend on task 4. Task 8 (tests) depends on all prior tasks.
