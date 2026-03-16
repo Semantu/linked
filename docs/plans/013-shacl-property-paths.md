@@ -193,6 +193,7 @@ All tests use Jest. New test files:
 | `src/tests/property-path-shacl.test.ts` | **New** | SHACL serialization tests |
 | `src/tests/property-path-sparql.test.ts` | **New** | End-to-end SPARQL golden tests |
 | `src/tests/property-path-integration.test.ts` | **New** | Full decorator-to-SPARQL integration tests |
+| `src/queries/IRProjection.ts` | **Modify** | Pass `pathExpr` through `property_expr` leaf expressions |
 
 ## Pitfalls
 
@@ -291,9 +292,9 @@ All tests use Jest. New test files:
 - Golden tests cover: each path form individually + nested combination
 - Existing SPARQL golden tests produce identical output (no regression)
 
-### Phase 4: Prefix resolution in property path SPARQL
+### Phase 4: Prefix resolution in property path SPARQL ✓
 
-**Status:** Planned
+**Status:** Complete — 957/957 tests passing (15 new prefix/collectPathUris tests).
 
 **Dependency:** Phase 3 (modifies `pathExprToSparql` and `algebraToString`).
 
@@ -343,9 +344,9 @@ All tests use Jest. New test files:
 - A path using prefixed string refs like `'foaf:knows'` renders as `foaf:knows` (bare, since it's already prefixed)
 - Existing SPARQL golden tests produce identical output
 
-### Phase 5: sortBy with complex property paths
+### Phase 5: sortBy with complex property paths ✓
 
-**Status:** Planned
+**Status:** Complete — fix applied, verified via integration tests.
 
 **Dependency:** Phase 3 (uses `pathExpr` on `DesugaredPropertyStep`).
 
@@ -426,9 +427,9 @@ steps: path.segments.map((seg) => {
 - `npm test` passes
 - New test asserts that a sort path through a complex-path property emits property path syntax in the traversal triple, not the raw PropertyShape ID
 
-### Phase 6: Decorator-to-SPARQL integration tests
+### Phase 6: Decorator-to-SPARQL integration tests ✓
 
-**Status:** Planned
+**Status:** Complete — 7 new integration tests passing, plus 3 additional fixes discovered during testing.
 
 **Dependency:** Phase 4 + Phase 5 (prefix resolution and sortBy must work first).
 
@@ -463,20 +464,22 @@ Phase 2 (SHACL integration + serialization)  ✓
     ↓
 Phase 3 (Query/IR/SPARQL)  ✓
     ↓
-    ├──→ Phase 4 (Prefix resolution in path SPARQL)
+    ├──→ Phase 4 (Prefix resolution in path SPARQL)  ✓
     │        ↓
-    ├──→ Phase 5 (sortBy with complex paths)
+    ├──→ Phase 5 (sortBy with complex paths)  ✓
     │        ↓
-    └──→ Phase 6 (Decorator-to-SPARQL integration tests)  [depends on 4 + 5]
+    └──→ Phase 6 (Decorator-to-SPARQL integration tests)  ✓
 ```
 
-Phases 4 and 5 are independent and can be implemented in parallel. Phase 6 depends on both.
+All phases complete.
 
 ## Review
 
 ### Summary
 
-All three phases implemented successfully. 927 tests passing (106 new including 29 Fuseki E2E), zero regressions. One significant gap identified: prefix resolution is not wired into the property path SPARQL rendering pipeline. The parser correctly preserves prefixed names, and the existing `Prefix` registry can resolve them, but `pathExprToSparql` and `algebraToString`'s `'path'` case bypass the prefix system entirely.
+All six phases implemented successfully. 957 tests passing (129 new including 29 Fuseki E2E, 15 prefix/URI-collection tests, 7 integration tests), zero regressions.
+
+Phases 4–6 addressed the prefix resolution gap (now wired via `formatUri` and `collectPathUris`), the sortBy bug (`toSortBy` now copies `pathExpr`), and discovered+fixed two additional bugs: (1) `desugarEntry` main code path didn't copy `pathExpr` from segments (only `segmentsToSteps` did, which was only used for count aggregations), and (2) `IRPropertyExpression` leaf properties didn't carry `pathExpr`, so complex-path properties used as leaf selections emitted their PropertyShape ID instead of the path expression.
 
 ### Ideation decision coverage
 
@@ -493,18 +496,19 @@ All 8 decisions are reflected in the implementation:
 
 ### Gaps
 
-1. **Prefix resolution missing from `pathExprToSparql`** *(medium priority)*: The parser preserves prefixed names as raw strings per ideation decision #2 ("stateless parser; prefix resolution downstream"). But the "downstream" part was never implemented. `pathExprToSparql` uses its own `refToSparql()` which checks for `://` and wraps in `<>` if found, or emits bare otherwise. It does NOT call `Prefix.toFull()` or `formatUri()` from `sparqlUtils.ts`. Additionally, `algebraToString.ts` line 53-54 emits `case 'path': return term.value` — bypassing both `formatUri()` and `collectUri()`, so:
-   - Prefixed names in paths (e.g., `ex:knows/ex:name`) emit as bare text without PREFIX declarations
-   - URIs in paths are not collected for the PREFIX block
-   - **Fix**: `pathExprToSparql` (or a new wrapper) should resolve prefixed PathRef strings via `Prefix.toFull()` before rendering, OR `refToSparql` should call `formatUri()` and collect URIs. The `'path'` case in `algebraToString.ts` may also need to participate in URI collection.
+1. ~~**Prefix resolution missing from `pathExprToSparql`**~~ ✓ Fixed in Phase 4. `refToSparql()` now calls `formatUri()` for full IRIs. `collectPathUris()` extracts URIs from PathExpr for PREFIX block generation. `algebraToString.ts` `'path'` case now forwards `term.uris` to `collectUri()`.
 
-2. **No full-pipeline integration test**: Tests cover each layer in isolation (parser, normalizer, SHACL serializer, SPARQL emitter, IR threading). Missing: an end-to-end test that creates a Shape with a complex path decorator and asserts the final generated SPARQL. This would validate the full decorator → FieldSet → desugar → lower → algebra → string pipeline with complex paths. *(Partially addressed: 29 Fuseki E2E tests now cover pathExprToSparql → Fuseki execution, but only via raw PathExpr objects and full-IRI strings, not through the shape decorator → IR pipeline.)*
+2. ~~**No full-pipeline integration test**~~ ✓ Fixed in Phase 6. 7 integration tests cover decorator → FieldSet → desugar → lower → algebra → string pipeline with sequence, inverse, alternative, sortBy, where filter, and backward compat paths.
 
-3. **String decorator input only works with full IRIs**: The 8 new string-input Fuseki tests use `<http://...>` syntax. Prefixed string paths like `'ex:knows/ex:name'` parse correctly but produce SPARQL with bare prefixed names and no PREFIX declarations (see gap #1). Users must currently use `{id}` refs or `<IRI>` syntax in string paths to get working SPARQL.
+3. ~~**String decorator input only works with full IRIs**~~ ✓ Resolved by Phase 4. `refToSparql()` now uses `formatUri()` for full IRIs, producing prefixed form with proper PREFIX declarations. Prefixed-name string refs pass through as-is (relying on ontology prefix registration).
 
-4. **sortBy with complex paths**: `PropertyShape.sortBy` is now `PathExpr`, but the sort-by lowering pipeline doesn't thread `pathExpr` through traversals. Complex sort paths (e.g., `sortBy: 'ex:a/ex:b'`) won't generate property path SPARQL. Low priority since sort-by paths are typically simple.
+4. ~~**sortBy with complex paths**~~ ✓ Fixed in Phase 5. `toSortBy()` now copies `pathExpr` from `seg.path` when complex.
 
-5. **IRProjection.ts not originally in plan**: Was modified to match the widened `resolveTraversal` signature. Functionally necessary, but the plan document didn't list it.
+5. **IRProjection.ts not originally in plan**: Was modified in Phase 3 to match the widened `resolveTraversal` signature, and again in Phase 6 to pass `pathExpr` through `property_expr` leaf expressions. Both changes were functionally necessary.
+
+6. **Discovered during Phase 6 — `desugarEntry` main path missing pathExpr**: The main desugaring code path (lines 237-246) created property steps without checking `segment.path`. Only the `segmentsToSteps` helper (used for count aggregations) correctly copied pathExpr. Fixed by adding the same `isComplexPathExpr` check to the main path.
+
+7. **Discovered during Phase 6 — `IRPropertyExpression` missing pathExpr**: Leaf property selections (OPTIONAL triples) went through `property_expr` which had no `pathExpr` field. Added optional `pathExpr` to `IRPropertyExpression`, threaded it through `IRProjection.ts`, and used it in `processExpressionForProperties` in `irToAlgebra.ts`.
 
 ## Parallelization notes
 

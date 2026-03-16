@@ -51,6 +51,9 @@ export function serializeTerm(
       return formatLiteral(term.value, term.datatype);
     }
     case 'path':
+      if (collector && term.uris) {
+        for (const uri of term.uris) collectUri(collector, uri);
+      }
       return term.value;
   }
 }

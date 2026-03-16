@@ -76,11 +76,15 @@ export const lowerSelectionPathExpression = (
       }
 
       if (isLast) {
-        return {
+        const expr: IRExpression = {
           kind: 'property_expr',
           sourceAlias: currentAlias,
           property: step.propertyShapeId,
         };
+        if (step.pathExpr) {
+          (expr as import('./IntermediateRepresentation.js').IRPropertyExpression).pathExpr = step.pathExpr;
+        }
+        return expr;
       }
 
       currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr);

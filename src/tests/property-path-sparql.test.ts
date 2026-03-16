@@ -1,5 +1,10 @@
-import {pathExprToSparql} from '../paths/pathExprToSparql';
+import {pathExprToSparql, collectPathUris} from '../paths/pathExprToSparql';
 import type {PathExpr} from '../paths/PropertyPathExpr';
+import {selectPlanToSparql} from '../sparql/algebraToString';
+import type {SparqlSelectPlan} from '../sparql/SparqlAlgebra';
+
+// Ensure rdf prefix is registered for prefix-shortening tests
+import '../ontologies/rdf';
 
 describe('pathExprToSparql', () => {
   // ------ Simple refs ------
@@ -146,5 +151,136 @@ describe('pathExprToSparql with IRTraversePattern integration', () => {
   it('produces valid SPARQL for zero-or-more with IRI', () => {
     const sparql = pathExprToSparql({zeroOrMore: {id: 'http://ex.org/broader'}});
     expect(sparql).toBe('<http://ex.org/broader>*');
+  });
+});
+
+describe('pathExprToSparql prefix shortening', () => {
+  // rdf prefix is registered via import '../ontologies/rdf' above
+
+  it('shortens full IRI to prefixed form when prefix is registered', () => {
+    const sparql = pathExprToSparql({id: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'});
+    expect(sparql).toBe('rdf:type');
+  });
+
+  it('shortens {id} refs in a sequence path', () => {
+    const expr: PathExpr = {
+      seq: [
+        {id: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'},
+        {id: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#value'},
+      ],
+    };
+    expect(pathExprToSparql(expr)).toBe('rdf:type/rdf:value');
+  });
+
+  it('shortens full IRI string refs when prefix is registered', () => {
+    expect(pathExprToSparql('http://www.w3.org/1999/02/22-rdf-syntax-ns#type')).toBe('rdf:type');
+  });
+
+  it('preserves prefixed-name string refs as-is', () => {
+    expect(pathExprToSparql('rdf:type')).toBe('rdf:type');
+  });
+
+  it('falls back to <full-uri> when no prefix matches', () => {
+    expect(pathExprToSparql({id: 'http://unknown.org/foo'})).toBe('<http://unknown.org/foo>');
+  });
+});
+
+describe('collectPathUris', () => {
+  it('collects full IRI from string ref', () => {
+    expect(collectPathUris('http://example.org/name')).toEqual(['http://example.org/name']);
+  });
+
+  it('collects full IRI from {id} ref', () => {
+    expect(collectPathUris({id: 'http://example.org/name'})).toEqual(['http://example.org/name']);
+  });
+
+  it('does not collect prefixed-name string ref', () => {
+    expect(collectPathUris('ex:name')).toEqual([]);
+  });
+
+  it('collects all IRIs from sequence', () => {
+    const expr: PathExpr = {
+      seq: [{id: 'http://ex.org/a'}, {id: 'http://ex.org/b'}],
+    };
+    expect(collectPathUris(expr)).toEqual(['http://ex.org/a', 'http://ex.org/b']);
+  });
+
+  it('collects IRIs from nested expressions', () => {
+    const expr: PathExpr = {
+      seq: [
+        {inv: {id: 'http://ex.org/parent'}},
+        {oneOrMore: {id: 'http://ex.org/child'}},
+      ],
+    };
+    expect(collectPathUris(expr)).toEqual(['http://ex.org/parent', 'http://ex.org/child']);
+  });
+
+  it('collects IRIs from alternative', () => {
+    const expr: PathExpr = {alt: [{id: 'http://ex.org/a'}, {id: 'http://ex.org/b'}]};
+    expect(collectPathUris(expr)).toEqual(['http://ex.org/a', 'http://ex.org/b']);
+  });
+
+  it('collects IRIs from negatedPropertySet', () => {
+    const expr: PathExpr = {
+      negatedPropertySet: [{id: 'http://ex.org/a'}, {inv: {id: 'http://ex.org/b'}}],
+    };
+    expect(collectPathUris(expr)).toEqual(['http://ex.org/a', 'http://ex.org/b']);
+  });
+
+  it('skips prefixed names in mixed expression', () => {
+    const expr: PathExpr = {seq: ['ex:a', {id: 'http://ex.org/b'}]};
+    expect(collectPathUris(expr)).toEqual(['http://ex.org/b']);
+  });
+});
+
+describe('path term PREFIX block integration', () => {
+  // Verify that URIs inside path terms produce PREFIX declarations
+  // when serialized through algebraToString.
+
+  it('includes PREFIX declarations for path URIs', () => {
+    const plan: SparqlSelectPlan = {
+      type: 'select',
+      projection: [{kind: 'variable', name: 'a0'}, {kind: 'variable', name: 'a1'}],
+      algebra: {
+        type: 'bgp',
+        triples: [{
+          subject: {kind: 'variable', name: 'a0'},
+          predicate: {
+            kind: 'path',
+            value: 'rdf:type/rdf:value',
+            uris: [
+              'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+              'http://www.w3.org/1999/02/22-rdf-syntax-ns#value',
+            ],
+          },
+          object: {kind: 'variable', name: 'a1'},
+        }],
+      },
+    };
+    const sparql = selectPlanToSparql(plan);
+    expect(sparql).toContain('PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>');
+    expect(sparql).toContain('?a0 rdf:type/rdf:value ?a1');
+  });
+
+  it('does not produce PREFIX block when path has no registered prefixes', () => {
+    const plan: SparqlSelectPlan = {
+      type: 'select',
+      projection: [{kind: 'variable', name: 'a0'}, {kind: 'variable', name: 'a1'}],
+      algebra: {
+        type: 'bgp',
+        triples: [{
+          subject: {kind: 'variable', name: 'a0'},
+          predicate: {
+            kind: 'path',
+            value: '<http://unknown.org/a>/<http://unknown.org/b>',
+            uris: ['http://unknown.org/a', 'http://unknown.org/b'],
+          },
+          object: {kind: 'variable', name: 'a1'},
+        }],
+      },
+    };
+    const sparql = selectPlanToSparql(plan);
+    expect(sparql).not.toContain('PREFIX');
+    expect(sparql).toContain('?a0 <http://unknown.org/a>/<http://unknown.org/b> ?a1');
   });
 });

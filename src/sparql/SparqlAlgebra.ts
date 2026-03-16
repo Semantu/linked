@@ -4,7 +4,7 @@ export type SparqlTerm =
   | {kind: 'variable'; name: string}
   | {kind: 'iri'; value: string}
   | {kind: 'literal'; value: string; datatype?: string; language?: string}
-  | {kind: 'path'; value: string};
+  | {kind: 'path'; value: string; uris: string[]};
 
 export type SparqlTriple = {
   subject: SparqlTerm;

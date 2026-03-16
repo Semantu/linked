@@ -127,6 +127,7 @@ export type IRPropertyExpression = {
   kind: 'property_expr';
   sourceAlias: IRAlias;
   property: string;
+  pathExpr?: import('../paths/PropertyPathExpr.js').PathExpr;
 };
 
 export type IRContextPropertyExpression = {

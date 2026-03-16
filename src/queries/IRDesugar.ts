@@ -239,6 +239,9 @@ const desugarEntry = (entry: FieldSetEntry): DesugaredSelection => {
       kind: 'property_step',
       propertyShapeId: segment.id,
     };
+    if (segment.path && isComplexPathExpr(segment.path)) {
+      step.pathExpr = segment.path;
+    }
     if (entry.scopedFilter && i === segments.length - 1) {
       step.where = toWhere(entry.scopedFilter);
     }
@@ -427,10 +430,16 @@ const toSortBy = (query: RawSelectInput): DesugaredSortBy | undefined => {
     direction: query.sortBy.direction,
     paths: query.sortBy.paths.map((path) => ({
       kind: 'selection_path' as const,
-      steps: path.segments.map((seg) => ({
-        kind: 'property_step' as const,
-        propertyShapeId: seg.id,
-      })),
+      steps: path.segments.map((seg) => {
+        const step: DesugaredPropertyStep = {
+          kind: 'property_step' as const,
+          propertyShapeId: seg.id,
+        };
+        if (seg.path && isComplexPathExpr(seg.path)) {
+          step.pathExpr = seg.path;
+        }
+        return step;
+      }),
     })),
   };
 };
