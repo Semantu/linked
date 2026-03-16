@@ -30,7 +30,7 @@ Spec-aligned path forms to support:
 
 ## Open Questions
 
-- [ ] **String parser strictness:** Should we support full SPARQL path grammar immediately, or a constrained subset with clear errors?
+- [x] **String parser strictness:** Full SPARQL property path grammar from the start.
 - [ ] **Prefix handling:** Should parser require expanded IRIs/URLs, or resolve `ex:name` through package prefixes?
 - [ ] **Type inference:** How much static typing can we preserve for complex/non-linear paths in accessor return types?
 - [ ] **Readability limits:** At what complexity should we recommend object/builder syntax over inline string syntax?
@@ -43,6 +43,7 @@ Spec-aligned path forms to support:
 
 | # | Decision | Chosen | Rationale |
 |---|----------|--------|-----------|
+| 1 | String parser strictness | Full SPARQL property path grammar | Start with maximum expressiveness; avoid needing a second parser pass later. Accept that negated property sets won't map to SHACL `sh:path` and handle that at the serialization boundary. |
 
 ## Notes
 
