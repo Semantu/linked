@@ -62,6 +62,16 @@ static targetClass = 'foaf:Person';
 
 | # | Decision | Chosen | Rationale |
 |---|----------|--------|-----------|
+| 1 | Where should prefix resolution happen? | (C) Enhance `Prefix` singleton — resolve at decoration/normalization time using `Prefix.toFullIfPossible()` | Core resolution logic stays centralized in `Prefix`. Eager resolution at decoration time means all downstream code sees full IRIs. `toFullIfPossible` already exists. |
+| 2 | Should `NodeReferenceValue` be widened? | (B) Keep `NodeReferenceValue` internal, widen only input types | `NodeReferenceInput = NodeReferenceValue \| string` already exists. Resolve prefixed strings to `{id: fullIRI}` at the boundary via `toNodeReference`/`toPlainNodeRef`. Zero changes to internal code. |
+| 3 | How to handle `targetClass`? | (C) Widen type, normalize immediately in `@linkedShape` | The `@linkedShape` decorator normalizes `targetClass` to `{id: string}` before storing. All runtime reads see `{id: string}`. |
+| 4 | Should `PathRef` in PathExpr AST resolve prefixed strings? | (A) Resolve at normalization time | `normalizePropertyPath` calls `Prefix.toFullIfPossible()` on all string refs. AST becomes canonical (all full IRIs). Simplifies every downstream consumer. |
+| 5 | Error behavior for unregistered prefixes? | (A) Throw immediately (fail-fast) | `Prefix.toFull()` already throws. Clear error message with the offending prefix. Surfaces errors at shape registration time. |
+| 6 | Scope — which input points to include? | (B) Decorators + query API | `.for()` always takes a node ref (unambiguous). `{id: 'prefix:name'}` resolves because `{id}` signals IRI. Bare string `.equals('hello')` remains a literal. |
 
 ## Notes
 
+- `Prefix.toFullIfPossible()` already exists in the codebase — no new method needed on Prefix itself
+- `toNodeReference` and `toPlainNodeRef` are the two normalization functions that need prefix resolution added
+- The `in` field in PropertyShapeConfig is `NodeReferenceValue[]` — needs widening to `(NodeReferenceValue | string)[]`
+- `collectPathUris` currently skips prefixed-name strings — after D4 resolution, all refs are full IRIs, fixing this gap

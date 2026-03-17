@@ -7,7 +7,7 @@ import {NodeReferenceValue} from '../utils/NodeReference.js';
 import {Shape, ShapeConstructor} from './Shape.js';
 import {shacl} from '../ontologies/shacl.js';
 import {URI} from '../utils/URI.js';
-import {toNodeReference} from '../utils/NodeReference.js';
+import {toNodeReference, type NodeReferenceInput} from '../utils/NodeReference.js';
 import {QResult} from '../queries/SelectQuery.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {PathExpr} from '../paths/PropertyPathExpr.js';
@@ -23,13 +23,7 @@ export type PropertyPathInputList = PropertyPathDecoratorInput;
 const toPlainNodeRef = (
   value: NodeReferenceValue | {id: string} | string,
 ): NodeReferenceValue => {
-  if (typeof value === 'string') {
-    return {id: value};
-  }
-  if (value && typeof value === 'object' && 'id' in value) {
-    return {id: (value as NodeReferenceValue).id};
-  }
-  return toNodeReference(value as NodeReferenceValue);
+  return toNodeReference(value as NodeReferenceInput);
 };
 
 const normalizePathInput = (
@@ -129,7 +123,7 @@ export interface LiteralPropertyShapeConfig extends PropertyShapeConfig {
   /**
    * Each value of the property must occur in this set
    */
-  in?: NodeReferenceValue[];
+  in?: (NodeReferenceValue | string)[];
 }
 
 export interface ObjectPropertyShapeConfig extends PropertyShapeConfig {
@@ -190,7 +184,7 @@ export interface PropertyShapeConfig {
   /**
    * Each value of the property must occur in this set
    */
-  in?: NodeReferenceValue[];
+  in?: (NodeReferenceValue | string)[];
   /**
    * Values of the configured property path are sorted by the values of this property path.
    */

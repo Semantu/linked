@@ -40,6 +40,7 @@ module.exports = {
     '**/property-path-sparql.test.ts',
     '**/property-path-fuseki.test.ts',
     '**/property-path-integration.test.ts',
+    '**/prefix-resolution.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {

@@ -19,7 +19,7 @@ import {addNodeShapeToShapeClass,getShapeClass} from './ShapeClass.js';
 import {shacl} from '../ontologies/shacl.js';
 import {rdfs} from '../ontologies/rdfs.js';
 import {xsd} from '../ontologies/xsd.js';
-import {NodeReferenceValue} from './NodeReference.js';
+import {NodeReferenceValue, toNodeReference} from './NodeReference.js';
 
 //global tree
 declare var lincd: any;
@@ -330,7 +330,7 @@ export function linkedPackage(packageName: string): LinkedPackageObject
 
     if (constructor.targetClass)
     {
-      (constructor.shape as NodeShape).targetClass = constructor.targetClass;
+      (constructor.shape as NodeShape).targetClass = toNodeReference(constructor.targetClass);
     }
 
     // return the original class without modifications

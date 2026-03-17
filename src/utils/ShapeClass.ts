@@ -1,12 +1,14 @@
 import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {ICoreIterable} from '../interfaces/ICoreIterable.js';
-import {NodeReferenceValue} from './NodeReference.js';
+import {NodeReferenceValue, type NodeReferenceInput} from './NodeReference.js';
 
 const resolveTargetClassId = (
-  targetClass?: NodeReferenceValue | null,
+  targetClass?: NodeReferenceInput | null,
 ): string | null => {
-  return targetClass?.id ?? null;
+  if (!targetClass) return null;
+  if (typeof targetClass === 'string') return targetClass;
+  return targetClass.id ?? null;
 };
 
 let subShapesSpecificityCache: Map<string, (typeof Shape)[][]> = new Map();
