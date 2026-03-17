@@ -10,6 +10,11 @@ export type NodeReferenceInput = NodeReferenceValue | string;
  * - Strings without ':' are plain IDs — returned as-is.
  * - Strings matching 'prefix:local' are resolved via Prefix.toFullIfPossible()
  *   (returns original string if prefix is not registered).
+ *
+ * @example
+ * resolvePrefixedUri('foaf:Person')         // 'http://xmlns.com/foaf/0.1/Person'
+ * resolvePrefixedUri('http://example.org/x') // 'http://example.org/x' (unchanged)
+ * resolvePrefixedUri('my-id')                // 'my-id' (unchanged, no colon)
  */
 export function resolvePrefixedUri(str: string): string {
   if (str.includes('://')) return str;
@@ -17,6 +22,15 @@ export function resolvePrefixedUri(str: string): string {
   return Prefix.toFullIfPossible(str);
 }
 
+/**
+ * Convert a NodeReferenceInput to a NodeReferenceValue, resolving prefixed names.
+ *
+ * @example
+ * toNodeReference('foaf:Person')          // {id: 'http://xmlns.com/foaf/0.1/Person'}
+ * toNodeReference({id: 'foaf:Person'})    // {id: 'http://xmlns.com/foaf/0.1/Person'}
+ * toNodeReference('http://example.org/x') // {id: 'http://example.org/x'}
+ * toNodeReference('my-entity-id')         // {id: 'my-entity-id'}
+ */
 export function toNodeReference(value: NodeReferenceInput): NodeReferenceValue {
   if (typeof value === 'string') {
     return {id: resolvePrefixedUri(value)};

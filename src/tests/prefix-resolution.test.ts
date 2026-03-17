@@ -1,6 +1,8 @@
 import {Prefix} from '../utils/Prefix';
 import {toNodeReference, resolvePrefixedUri} from '../utils/NodeReference';
 import {normalizePropertyPath} from '../paths/normalizePropertyPath';
+import {createPropertyShape} from '../shapes/SHACL';
+import type {LiteralPropertyShapeConfig, ObjectPropertyShapeConfig} from '../shapes/SHACL';
 
 // Register test prefixes before tests run
 const FOAF_NS = 'http://xmlns.com/foaf/0.1/';
@@ -147,5 +149,110 @@ describe('normalizePropertyPath with prefix resolution', () => {
         {zeroOrMore: {id: `${FOAF_NS}mbox`}},
       ],
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createPropertyShape — integration with prefix resolution
+// ---------------------------------------------------------------------------
+
+describe('createPropertyShape with prefix resolution', () => {
+  it('resolves prefixed path string', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name'} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.path).toEqual({id: `${FOAF_NS}name`});
+  });
+
+  it('resolves prefixed path in sequence expression', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:knows/foaf:name'} as LiteralPropertyShapeConfig,
+      'friendName',
+    );
+    expect(ps.path).toEqual({
+      seq: [{id: `${FOAF_NS}knows`}, {id: `${FOAF_NS}name`}],
+    });
+  });
+
+  it('resolves prefixed datatype string', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name', datatype: 'xsd:string'} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.datatype).toEqual({id: `${XSD_NS}string`});
+  });
+
+  it('resolves prefixed class string', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:knows', class: 'foaf:Person'} as ObjectPropertyShapeConfig,
+      'knows',
+    );
+    expect(ps.class).toEqual({id: `${FOAF_NS}Person`});
+  });
+
+  it('resolves prefixed equals constraint', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name', equals: 'foaf:givenName'} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.equalsConstraint).toEqual({id: `${FOAF_NS}givenName`});
+  });
+
+  it('resolves prefixed disjoint constraint', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name', disjoint: 'foaf:familyName'} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.disjoint).toEqual({id: `${FOAF_NS}familyName`});
+  });
+
+  it('resolves prefixed hasValue constraint', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name', hasValue: 'foaf:Person'} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.hasValueConstraint).toEqual({id: `${FOAF_NS}Person`});
+  });
+
+  it('resolves prefixed strings in "in" array', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name', in: ['foaf:Person', 'foaf:Agent']} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.in).toEqual([
+      {id: `${FOAF_NS}Person`},
+      {id: `${FOAF_NS}Agent`},
+    ]);
+  });
+
+  it('resolves mixed strings and {id} objects in "in" array', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name', in: ['foaf:Person', {id: 'foaf:Agent'}]} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.in).toEqual([
+      {id: `${FOAF_NS}Person`},
+      {id: `${FOAF_NS}Agent`},
+    ]);
+  });
+
+  it('resolves {id} objects with prefixed values in "in" array', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name', in: [{id: 'foaf:Person'}, {id: `${FOAF_NS}Agent`}]} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.in).toEqual([
+      {id: `${FOAF_NS}Person`},
+      {id: `${FOAF_NS}Agent`},
+    ]);
+  });
+
+  it('resolves prefixed sortBy path', () => {
+    const ps = createPropertyShape(
+      {path: 'foaf:name', sortBy: 'foaf:familyName'} as LiteralPropertyShapeConfig,
+      'name',
+    );
+    expect(ps.sortBy).toEqual({id: `${FOAF_NS}familyName`});
   });
 });

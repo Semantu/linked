@@ -182,7 +182,13 @@ export interface PropertyShapeConfig {
    */
   defaultValue?: unknown;
   /**
-   * Each value of the property must occur in this set
+   * Each value of the property must occur in this set.
+   * Accepts prefixed names as strings, full IRI strings, or {id} objects.
+   * Prefixed strings are resolved to full IRIs at decoration time.
+   *
+   * @example
+   * in: ['foaf:Person', 'foaf:Agent']
+   * in: [{id: 'http://xmlns.com/foaf/0.1/Person'}, 'foaf:Agent']
    */
   in?: (NodeReferenceValue | string)[];
   /**

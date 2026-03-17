@@ -165,3 +165,82 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 **Validation:**
 - All tests pass: `npm test`
 - Build passes: `npm run build`
+
+---
+
+## Review
+
+### Gap analysis findings
+
+1. **No integration test with decorator pipeline**: Unit tests register prefixes manually but don't verify the full `createPropertyShape` pipeline with prefixed strings in `path`, `datatype`, `class`, `equals`, `in`, etc.
+2. **D5 strictness**: Adjusted to lenient `toFullIfPossible` — deferred, working correctly.
+3. **Documentation**: No user-facing docs or JSDoc examples on public APIs.
+4. **`in` field resolution**: Type widened but no dedicated test for mixed `in: ['foaf:Person', {id: 'foaf:Agent'}]` flowing through `createPropertyShape`.
+
+## Iteration 1 — Ideation
+
+### Gap 1 of 4: Integration test with decorator pipeline
+- **Chosen:** Add integration tests to `prefix-resolution.test.ts` that call `createPropertyShape` directly with prefixed strings in all URI config fields, verifying the output `PropertyShape` has fully-resolved `{id}` values.
+- **Rationale:** Co-locates all prefix resolution tests. No new files. Direct verification of the decorator pipeline.
+
+### Gap 2 of 4: D5 strictness
+- **Chosen:** Deferred. Lenient `toFullIfPossible` is correct and backward-compatible.
+
+### Gap 3 of 4: Documentation
+- **Chosen:** Add JSDoc examples to key public functions (`toNodeReference`, `resolvePrefixedUri`) and to the decorator config type fields. Most discoverable — shows up in IDE autocomplete.
+- **Rationale:** JSDoc lives next to the code, easiest to maintain.
+
+### Gap 4 of 4: `in` field resolution test
+- **Chosen:** Add tests to `prefix-resolution.test.ts` verifying mixed `in` values (strings + `{id}` objects) flow through `createPropertyShape` correctly.
+
+## Iteration 1 — Plan
+
+### Architecture decisions
+- No new code paths — just tests and JSDoc additions
+- `createPropertyShape` is the function under test for the integration tests — it calls `toPlainNodeRef` (→ `toNodeReference`) and `normalizePathInput` (→ `normalizePropertyPath`) internally
+
+### File changes
+
+| File | Change |
+|------|--------|
+| `src/tests/prefix-resolution.test.ts` | Add `createPropertyShape` integration tests (path, datatype, class, equals, disjoint, hasValue, in fields with prefixed strings) |
+| `src/utils/NodeReference.ts` | Add JSDoc examples to `resolvePrefixedUri` and `toNodeReference` |
+| `src/shapes/SHACL.ts` | Add JSDoc examples to `PropertyShapeConfig.in` showing mixed string/node usage |
+
+### Contracts
+- Integration tests call `createPropertyShape(config, 'propName', null, null)` and inspect the returned `PropertyShape`
+- All URI fields on the returned `PropertyShape` should contain `{id: fullIRI}` when given prefixed string input
+
+## Iteration 1 — Phases
+
+### Phase 7: Integration tests for createPropertyShape with prefix resolution
+
+**Files:** `src/tests/prefix-resolution.test.ts`
+
+**Tasks:**
+1. Import `createPropertyShape` and `PropertyShape` from SHACL
+2. Add a `describe('createPropertyShape with prefix resolution')` block covering:
+   - `path: 'foaf:name'` → `propertyShape.path` is `{id: fullIRI}`
+   - `datatype: 'xsd:string'` → `propertyShape.datatype` is `{id: fullIRI}`
+   - `class: 'foaf:Person'` → `propertyShape.class` is `{id: fullIRI}`
+   - `equals: 'foaf:name'` → `propertyShape.equalsConstraint` is `{id: fullIRI}`
+   - `disjoint: 'foaf:name'` → `propertyShape.disjoint` is `{id: fullIRI}`
+   - `hasValue: 'foaf:Person'` → `propertyShape.hasValueConstraint` is `{id: fullIRI}`
+   - `in: ['foaf:Person', {id: 'foaf:Agent'}]` → `propertyShape.in` has both resolved
+   - Complex path: `'foaf:knows/foaf:name'` → `propertyShape.path` is `{seq: [...]}`
+
+**Validation:** All new tests pass. No regressions in full suite.
+
+**Dependencies:** None — can run independently.
+
+### Phase 8: JSDoc documentation
+
+**Files:** `src/utils/NodeReference.ts`, `src/shapes/SHACL.ts`
+
+**Tasks:**
+1. Add JSDoc `@example` blocks to `resolvePrefixedUri` and `toNodeReference` in NodeReference.ts
+2. Add JSDoc example to `PropertyShapeConfig.in` showing mixed string/node usage
+
+**Validation:** Build passes. No functional changes.
+
+**Dependencies:** None — can run in parallel with Phase 7.
