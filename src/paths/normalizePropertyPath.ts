@@ -4,8 +4,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
-import {PathExpr, PathRef, parsePropertyPath, PATH_OPERATOR_CHARS, isPathRef} from './PropertyPathExpr.js';
-import {resolvePrefixedUri} from '../utils/NodeReference.js';
+import {PathExpr, parsePropertyPath, PATH_OPERATOR_CHARS} from './PropertyPathExpr.js';
 
 /**
  * Input type for property path decorators.
@@ -67,83 +66,7 @@ export function normalizePropertyPath(input: PropertyPathDecoratorInput): PathEx
     throw new Error(`Invalid property path input: ${JSON.stringify(input)}`);
   }
 
-  // Resolve prefixed string refs to {id: fullIRI}
-  return resolvePathExprPrefixes(result);
-}
-
-/**
- * Resolve all prefixed string refs in a PathExpr AST to `{id: fullIRI}` form.
- * Strings that resolve to a full IRI become `{id: resolved}`.
- * Strings that don't change (no prefix match) are left as-is.
- */
-function resolvePathRef(ref: PathRef): PathRef {
-  if (typeof ref === 'string') {
-    const resolved = resolvePrefixedUri(ref);
-    return resolved !== ref ? {id: resolved} : ref;
-  }
-  // {id} ref — resolve the id value
-  const resolved = resolvePrefixedUri(ref.id);
-  return resolved !== ref.id ? {id: resolved} : ref;
-}
-
-/** Map array, returning original if nothing changed (preserves identity). */
-function mapIfChanged<T>(arr: T[], fn: (item: T) => T): T[] {
-  let changed = false;
-  const result = arr.map((item) => {
-    const mapped = fn(item);
-    if (mapped !== item) changed = true;
-    return mapped;
-  });
-  return changed ? result : arr;
-}
-
-function resolvePathExprPrefixes(expr: PathExpr): PathExpr {
-  if (isPathRef(expr)) {
-    return resolvePathRef(expr as PathRef);
-  }
-  if ('seq' in (expr as any)) {
-    const orig = (expr as {seq: PathExpr[]}).seq;
-    const resolved = mapIfChanged(orig, resolvePathExprPrefixes);
-    return resolved === orig ? expr : {seq: resolved};
-  }
-  if ('alt' in (expr as any)) {
-    const orig = (expr as {alt: PathExpr[]}).alt;
-    const resolved = mapIfChanged(orig, resolvePathExprPrefixes);
-    return resolved === orig ? expr : {alt: resolved};
-  }
-  if ('inv' in (expr as any)) {
-    const inner = (expr as {inv: PathExpr}).inv;
-    const resolved = resolvePathExprPrefixes(inner);
-    return resolved === inner ? expr : {inv: resolved};
-  }
-  if ('zeroOrMore' in (expr as any)) {
-    const inner = (expr as {zeroOrMore: PathExpr}).zeroOrMore;
-    const resolved = resolvePathExprPrefixes(inner);
-    return resolved === inner ? expr : {zeroOrMore: resolved};
-  }
-  if ('oneOrMore' in (expr as any)) {
-    const inner = (expr as {oneOrMore: PathExpr}).oneOrMore;
-    const resolved = resolvePathExprPrefixes(inner);
-    return resolved === inner ? expr : {oneOrMore: resolved};
-  }
-  if ('zeroOrOne' in (expr as any)) {
-    const inner = (expr as {zeroOrOne: PathExpr}).zeroOrOne;
-    const resolved = resolvePathExprPrefixes(inner);
-    return resolved === inner ? expr : {zeroOrOne: resolved};
-  }
-  if ('negatedPropertySet' in (expr as any)) {
-    const items = (expr as {negatedPropertySet: (PathRef | {inv: PathRef})[]}).negatedPropertySet;
-    const resolved = mapIfChanged(items, (item) => {
-      if (typeof item === 'string' || (typeof item === 'object' && 'id' in item && !('inv' in item))) {
-        return resolvePathRef(item as PathRef) as typeof item;
-      }
-      const invItem = item as {inv: PathRef};
-      const resolvedInv = resolvePathRef(invItem.inv);
-      return resolvedInv === invItem.inv ? item : {inv: resolvedInv} as typeof item;
-    });
-    return resolved === items ? expr : {negatedPropertySet: resolved};
-  }
-  return expr;
+  return result;
 }
 
 /**
