@@ -8,7 +8,6 @@ import {Shape, ShapeConstructor} from './Shape.js';
 import {shacl} from '../ontologies/shacl.js';
 import {URI} from '../utils/URI.js';
 import {toNodeReference, type NodeReferenceInput} from '../utils/NodeReference.js';
-import {QResult} from '../queries/SelectQuery.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {PathExpr} from '../paths/PropertyPathExpr.js';
 import {normalizePropertyPath, type PropertyPathDecoratorInput} from '../paths/normalizePropertyPath.js';
@@ -19,6 +18,31 @@ type NodeKindConfig = NodeReferenceValue | NodeReferenceValue[];
 
 export type PropertyPathInput = PropertyPathDecoratorInput;
 export type PropertyPathInputList = PropertyPathDecoratorInput;
+
+/** Result object returned by PropertyShape.getResult() and NodeShape.properties. */
+export interface PropertyShapeResult {
+  id: string;
+  label: string;
+  path: PathExpr;
+  nodeKind?: NodeReferenceValue;
+  datatype?: NodeReferenceValue;
+  minCount?: number;
+  maxCount?: number;
+  name?: string;
+  description?: string;
+  order?: number;
+  group?: string;
+  class?: NodeReferenceValue;
+  in?: (NodeReferenceValue | string | number | boolean)[];
+  equals?: NodeReferenceValue;
+  disjoint?: NodeReferenceValue;
+  lessThan?: NodeReferenceValue;
+  lessThanOrEquals?: NodeReferenceValue;
+  hasValue?: NodeReferenceValue | string | number | boolean;
+  defaultValue?: unknown;
+  sortBy?: PathExpr;
+  valueShape?: NodeReferenceValue;
+}
 
 const toPlainNodeRef = (
   value: NodeReferenceValue | {id: string} | string,
@@ -242,7 +266,7 @@ export class NodeShape extends Shape {
     this._label = value;
   }
 
-  get properties(): QResult<PropertyShape>[] {
+  get properties(): PropertyShapeResult[] {
     return this.propertyShapes.map((propertyShape) => propertyShape.getResult());
   }
 
@@ -354,8 +378,8 @@ export class PropertyShape extends Shape {
     this._label = value;
   }
 
-  getResult(): QResult<PropertyShape> {
-    const result: QResult<PropertyShape, Record<string, unknown>> = {
+  getResult(): PropertyShapeResult {
+    const result: Record<string, unknown> & {id: string; label: string; path: PathExpr} = {
       id: this.id,
       label: this.label,
       path: this.path,
@@ -414,7 +438,7 @@ export class PropertyShape extends Shape {
     if (this.valueShape) {
       result.valueShape = this.valueShape;
     }
-    return result as QResult<PropertyShape>;
+    return result as PropertyShapeResult;
   }
 
   clone(): this {
