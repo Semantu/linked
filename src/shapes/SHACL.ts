@@ -123,9 +123,10 @@ export interface LiteralPropertyShapeConfig extends PropertyShapeConfig {
    */
   datatype?: NodeReferenceValue;
   /**
-   * Each value of the property must occur in this set
+   * Each value of the property must occur in this set.
+   * Use {id: '...'} for IRI nodes, or plain strings/numbers/booleans for literal values.
    */
-  in?: (NodeReferenceValue | string)[];
+  in?: (NodeReferenceValue | string | number | boolean)[];
 }
 
 export interface ObjectPropertyShapeConfig extends PropertyShapeConfig {
@@ -177,7 +178,7 @@ export interface PropertyShapeConfig {
    * At least one value of this property must equal the given value.
    * Use {id: '...'} for IRI nodes, or a plain string for literal values.
    */
-  hasValue?: NodeReferenceValue | string;
+  hasValue?: NodeReferenceValue | string | number | boolean;
   name?: string;
   description?: string;
   order?: number;
@@ -194,7 +195,7 @@ export interface PropertyShapeConfig {
    * in: ['ACTIVE', 'PENDING', 'CLOSED']
    * in: [{id: 'http://example.org/StatusA'}, {id: 'http://example.org/StatusB'}]
    */
-  in?: (NodeReferenceValue | string)[];
+  in?: (NodeReferenceValue | string | number | boolean)[];
   /**
    * Values of the configured property path are sorted by the values of this property path.
    */
@@ -330,10 +331,10 @@ export class PropertyShape extends Shape {
   order?: number;
   group?: string;
   class?: NodeReferenceValue;
-  in?: NodeReferenceValue[];
+  in?: (NodeReferenceValue | string | number | boolean)[];
   equalsConstraint?: NodeReferenceValue;
   disjoint?: NodeReferenceValue;
-  hasValueConstraint?: NodeReferenceValue;
+  hasValueConstraint?: NodeReferenceValue | string | number | boolean;
   defaultValue?: unknown;
   sortBy?: PathExpr;
   valueShape?: NodeReferenceValue;
@@ -393,7 +394,7 @@ export class PropertyShape extends Shape {
     if (this.disjoint) {
       result.disjoint = this.disjoint;
     }
-    if (this.hasValueConstraint) {
+    if (this.hasValueConstraint !== undefined) {
       result.hasValue = this.hasValueConstraint;
     }
     if (this.defaultValue !== undefined) {
@@ -603,14 +604,17 @@ export function createPropertyShape<
   if (config.disjoint) {
     propertyShape.disjoint = toPlainNodeRef(config.disjoint);
   }
-  if (config.hasValue) {
-    propertyShape.hasValueConstraint = toPlainNodeRef(config.hasValue);
+  if (config.hasValue !== undefined) {
+    const v = config.hasValue;
+    propertyShape.hasValueConstraint = typeof v === 'object' && v !== null ? toPlainNodeRef(v) : v;
   }
   if (config.defaultValue !== undefined) {
     propertyShape.defaultValue = config.defaultValue;
   }
   if (config.in) {
-    propertyShape.in = config.in.map((entry) => toPlainNodeRef(entry));
+    propertyShape.in = config.in.map((entry) =>
+      typeof entry === 'object' && entry !== null ? toPlainNodeRef(entry) : entry,
+    );
   }
   if (config.sortBy) {
     propertyShape.sortBy = normalizePathInput(config.sortBy);
