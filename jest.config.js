@@ -41,6 +41,7 @@ module.exports = {
     '**/property-path-fuseki.test.ts',
     '**/property-path-integration.test.ts',
     '**/prefix-resolution.test.ts',
+    '**/shacl-constraints.test.ts',
   ],
   testPathIgnorePatterns: ['/old/'],
   transform: {
