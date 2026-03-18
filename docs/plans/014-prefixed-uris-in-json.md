@@ -244,3 +244,121 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 **Validation:** Build passes. No functional changes.
 
 **Dependencies:** None — can run in parallel with Phase 7.
+
+---
+
+## Iteration 2 — Scope Change: No Prefix Resolution in Decorators
+
+### Decision
+
+**Option B chosen**: Prefix shorthand is supported **only in the query API**, not in decorators or shape config.
+
+**Rationale:**
+- Decorators are static definitions — ontology imports (`foaf.name`, `xsd.string`) provide compile-time safety, IDE autocomplete, and guarantee the prefix is registered.
+- Prefix strings in decorators are dangerous: if the ontology isn't imported, the string silently passes through unresolved (with `toFullIfPossible`), producing broken SPARQL downstream.
+- In the LINCD/create.now world, each ontology has a canonical prefix, but relying on prefix strings in decorators still creates a hidden dependency on import order.
+
+**Type clarifications:**
+- `equals`, `disjoint`, `lessThan`, `lessThanOrEquals` — these are **property references** in SHACL (always IRIs). Should be `NodeReferenceValue` only. A bare string is ambiguous.
+- `hasValue` — can be a literal string or an IRI node. Type `NodeReferenceValue | string` is correct, but string = literal, `{id}` = IRI. No prefix resolution.
+- `in` — same as `hasValue`: mixed literals and IRI nodes. `(NodeReferenceValue | string)[]` is correct.
+- `datatype`, `class` — always IRIs in SHACL. Should be `NodeReferenceValue` only.
+
+### Summary of what stays vs what gets reverted
+
+| Component | Before iteration 2 | After iteration 2 |
+|-----------|--------------------|--------------------|
+| `resolvePrefixedUri()` | Resolves prefixes | **Stays** — used by query API |
+| `toNodeReference()` | Resolves prefixed strings and `{id}` values | **Revert** — simple wrap, no resolution |
+| `toPlainNodeRef()` | Delegates to `toNodeReference` (resolves) | **Revert** — simple extraction, no resolution |
+| `normalizePropertyPath` | Resolves prefixed refs in AST | **Revert** — no prefix resolution pass |
+| `Shape.targetClass` | `NodeReferenceInput` (accepts strings) | **Revert** — `NodeReferenceValue` only |
+| `Package.ts applyLinkedShape` | Normalizes string targetClass | **Revert** — direct assignment |
+| `PropertyShapeConfig.equals` | `NodeReferenceValue \| string` | **Narrow** to `NodeReferenceValue` |
+| `PropertyShapeConfig.disjoint` | `NodeReferenceValue \| string` | **Narrow** to `NodeReferenceValue` |
+| `LiteralPropertyShapeConfig.lessThan` | `NodeReferenceValue \| string` | **Narrow** to `NodeReferenceValue` |
+| `LiteralPropertyShapeConfig.lessThanOrEquals` | `NodeReferenceValue \| string` | **Narrow** to `NodeReferenceValue` |
+| `LiteralPropertyShapeConfig.datatype` | `NodeReferenceValue \| string` | **Narrow** to `NodeReferenceValue` |
+| `ObjectPropertyShapeConfig.class` | `NodeReferenceValue \| string` | **Narrow** to `NodeReferenceValue` |
+| `PropertyShapeConfig.hasValue` | `NodeReferenceValue \| string` | **Keep** — string = literal |
+| `PropertyShapeConfig.in` | `(NodeReferenceValue \| string)[]` | **Keep** — strings = literals |
+| `QueryBuilder.for()` | Uses `toNodeReference` (resolves) | **Keep resolution** — use `resolvePrefixedUri` inline |
+| `QueryBuilder.forAll()` | Uses `toNodeReference` (resolves) | **Keep resolution** — use `resolvePrefixedUri` inline |
+
+## Iteration 2 — Phases
+
+### Phase 9: Revert `toNodeReference` and `toPlainNodeRef`
+
+**Files:** `src/utils/NodeReference.ts`, `src/shapes/SHACL.ts`
+
+**Tasks:**
+1. Revert `toNodeReference` to original simple form: string → `{id: string}`, `{id}` → pass through. No `resolvePrefixedUri` calls.
+2. Keep `resolvePrefixedUri` exported (still used by query API).
+3. Revert `toPlainNodeRef` in SHACL.ts to original form (simple extraction, not delegating to `toNodeReference`).
+
+**Validation:** Build passes. Existing non-prefix tests still pass.
+
+### Phase 10: Revert `normalizePropertyPath` prefix resolution
+
+**Files:** `src/paths/normalizePropertyPath.ts`
+
+**Tasks:**
+1. Remove `resolvePathExprPrefixes` call from `normalizePropertyPath` — revert to original flow.
+2. Keep the `resolvePathExprPrefixes`, `resolvePathRef`, `mapIfChanged` functions in the file (they're useful utilities if ever needed). OR remove if cleaner.
+3. Remove `resolvePrefixedUri` import if no longer used.
+
+**Validation:** `property-path-normalize.test.ts` passes. Build passes.
+
+### Phase 11: Revert `targetClass` type widening
+
+**Files:** `src/shapes/Shape.ts`, `src/utils/Package.ts`, `src/utils/ShapeClass.ts`
+
+**Tasks:**
+1. Revert `Shape.targetClass` back to `NodeReferenceValue` (and `ShapeConstructor.targetClass`).
+2. Revert `applyLinkedShape` in Package.ts to direct assignment (remove `toNodeReference` call and import).
+3. Revert `ShapeClass.ts` `resolveTargetClassId` to original form.
+4. Revert `Shape.registerByType` to original form.
+5. Remove `NodeReferenceInput` import from Shape.ts.
+
+**Validation:** Build passes.
+
+### Phase 12: Narrow decorator config types
+
+**Files:** `src/shapes/SHACL.ts`
+
+**Tasks:**
+1. `equals`: narrow from `NodeReferenceValue | string` to `NodeReferenceValue`
+2. `disjoint`: narrow from `NodeReferenceValue | string` to `NodeReferenceValue`
+3. `lessThan`: narrow from `NodeReferenceValue | string` to `NodeReferenceValue`
+4. `lessThanOrEquals`: narrow from `NodeReferenceValue | string` to `NodeReferenceValue`
+5. `datatype`: narrow from `NodeReferenceValue | string` to `NodeReferenceValue`
+6. `class`: narrow from `NodeReferenceValue | string` to `NodeReferenceValue`
+7. `hasValue`: keep as `NodeReferenceValue | string` (string = literal value)
+8. `in`: keep as `(NodeReferenceValue | string)[]` (strings = literals, `{id}` = IRIs). Update JSDoc to reflect this.
+9. Verify `createPropertyShape` handles narrowed types correctly (remove casts if now unnecessary).
+
+**Validation:** Build passes. No existing code uses string form for narrowed fields.
+
+### Phase 13: Keep query API prefix resolution
+
+**Files:** `src/queries/QueryBuilder.ts`
+
+**Tasks:**
+1. `.for()`: use `resolvePrefixedUri` on string input before wrapping in `{id}`, instead of `toNodeReference`
+2. `.forAll()`: same pattern
+3. Import `resolvePrefixedUri` from NodeReference.ts
+
+**Validation:** Build passes.
+
+### Phase 14: Update tests
+
+**Files:** `src/tests/prefix-resolution.test.ts`
+
+**Tasks:**
+1. Remove `createPropertyShape` integration tests (prefixes no longer resolve in decorators)
+2. Remove `normalizePropertyPath` prefix resolution tests
+3. Keep `resolvePrefixedUri` unit tests (utility still exists)
+4. Keep `toNodeReference` tests but update: it no longer resolves prefixes, just wraps
+5. Add query API tests if not already covered (`.for('foaf:Person')` still resolves)
+
+**Validation:** All tests pass. Full suite green.
