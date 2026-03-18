@@ -73,13 +73,15 @@ export interface NodeShapeConfig {
 export interface LiteralPropertyShapeConfig extends PropertyShapeConfig {
   nodeKind?: NodeReferenceValue;
   /**
-   * Values of the configured property must be less than the values of this 'lessThan' property
+   * Values of the configured property must be less than the values of this 'lessThan' property.
+   * Value is always a property IRI (pair constraint).
    */
-  lessThan?: NodeReferenceValue | string;
+  lessThan?: NodeReferenceValue;
   /**
-   * Values of the configured property must be less than or equal the values of this 'lessThan' property
+   * Values of the configured property must be less than or equal the values of this 'lessThanOrEquals' property.
+   * Value is always a property IRI (pair constraint).
    */
-  lessThanOrEquals?: NodeReferenceValue | string;
+  lessThanOrEquals?: NodeReferenceValue;
   /**
    * All values of this property must be higher than this number
    */
@@ -119,7 +121,7 @@ export interface LiteralPropertyShapeConfig extends PropertyShapeConfig {
   /**
    * Each literal value of this property must use this datatype
    */
-  datatype?: NodeReferenceValue | string;
+  datatype?: NodeReferenceValue;
   /**
    * Each value of the property must occur in this set
    */
@@ -131,7 +133,7 @@ export interface ObjectPropertyShapeConfig extends PropertyShapeConfig {
   /**
    * Each value of this property must have this class as its rdf:type
    */
-  class?: NodeReferenceValue | string;
+  class?: NodeReferenceValue;
   /**
    * The shape that values of this property path need to confirm to.
    * You need to provide a class that extends Shape.
@@ -163,14 +165,17 @@ export interface PropertyShapeConfig {
   maxCount?: number;
   /**
    * Values of the configured property must equal the values of this 'equals' property.
+   * Value is always a property IRI (pair constraint).
    */
-  equals?: NodeReferenceValue | string;
+  equals?: NodeReferenceValue;
   /**
-   * Values of the configured property must differ from the values of this 'disjoint' property
+   * Values of the configured property must differ from the values of this 'disjoint' property.
+   * Value is always a property IRI (pair constraint).
    */
-  disjoint?: NodeReferenceValue | string;
+  disjoint?: NodeReferenceValue;
   /**
-   * At least one value of this property must equal the given Node
+   * At least one value of this property must equal the given value.
+   * Use {id: '...'} for IRI nodes, or a plain string for literal values.
    */
   hasValue?: NodeReferenceValue | string;
   name?: string;
@@ -183,12 +188,11 @@ export interface PropertyShapeConfig {
   defaultValue?: unknown;
   /**
    * Each value of the property must occur in this set.
-   * Accepts prefixed names as strings, full IRI strings, or {id} objects.
-   * Prefixed strings are resolved to full IRIs at decoration time.
+   * Use {id: '...'} for IRI nodes, or plain strings for literal values.
    *
    * @example
-   * in: ['foaf:Person', 'foaf:Agent']
-   * in: [{id: 'http://xmlns.com/foaf/0.1/Person'}, 'foaf:Agent']
+   * in: ['ACTIVE', 'PENDING', 'CLOSED']
+   * in: [{id: 'http://example.org/StatusA'}, {id: 'http://example.org/StatusB'}]
    */
   in?: (NodeReferenceValue | string)[];
   /**
