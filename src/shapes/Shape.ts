@@ -12,7 +12,6 @@ import {
   WhereClause,
 } from '../queries/SelectQuery.js';
 import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
-import type {NodeReferenceInput} from '../utils/NodeReference.js';
 import {NodeId} from '../queries/MutationQuery.js';
 import {QueryBuilder} from '../queries/QueryBuilder.js';
 import {CreateBuilder} from '../queries/CreateBuilder.js';
@@ -41,11 +40,11 @@ export type ShapeConstructor<S extends Shape = Shape> = (new (
   ...args: any[]
 ) => S) & {
   shape: NodeShape;
-  targetClass?: NodeReferenceInput;
+  targetClass?: NodeReferenceValue;
 };
 
 export abstract class Shape {
-  static targetClass: NodeReferenceInput = null;
+  static targetClass: NodeReferenceValue = null;
   static shape: NodeShape;
   static typesToShapes: Map<string, Set<typeof Shape>> = new Map();
 
@@ -82,7 +81,7 @@ export abstract class Shape {
       }
       const shapeType = shapeClass.targetClass;
       if (shapeType) {
-        type = typeof shapeType === 'string' ? {id: shapeType} : shapeType;
+        type = shapeType;
       }
     }
     if (!type) {

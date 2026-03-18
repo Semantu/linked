@@ -1,13 +1,12 @@
 import {Shape, ShapeConstructor} from '../shapes/Shape.js';
 import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {ICoreIterable} from '../interfaces/ICoreIterable.js';
-import {NodeReferenceValue, type NodeReferenceInput} from './NodeReference.js';
+import {NodeReferenceValue} from './NodeReference.js';
 
 const resolveTargetClassId = (
-  targetClass?: NodeReferenceInput | null,
+  targetClass?: NodeReferenceValue | null,
 ): string | null => {
   if (!targetClass) return null;
-  if (typeof targetClass === 'string') return targetClass;
   return targetClass.id ?? null;
 };
 
