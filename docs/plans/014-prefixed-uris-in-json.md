@@ -362,3 +362,85 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 5. Add query API tests if not already covered (`.for('foaf:Person')` still resolves)
 
 **Validation:** All tests pass. Full suite green.
+
+---
+
+## Iteration 3 — SHACL Constraint Field Fixes
+
+### Context
+
+SHACL constraint fields on `PropertyShapeConfig` have two issues:
+1. `hasValue` and `in` run all values through `toPlainNodeRef()`, which wraps strings as `{id: string}`. This is wrong for literal values — `hasValue: "active"` should stay as the literal `"active"`, not become `{id: "active"}` (an IRI node).
+2. `lessThan` and `lessThanOrEquals` exist in `LiteralPropertyShapeConfig` but `createPropertyShape` never reads them — they're silently dropped.
+
+These fields are metadata-only today (stored on PropertyShape, exposed via `getResult()`, not consumed in SPARQL generation or validation). But the stored values must be correct so downstream serialization to SHACL RDF produces the right type (literal vs IRI node).
+
+### SHACL Spec Semantics Reference
+
+| Config Field | SHACL Meaning | Value Is |
+|---|---|---|
+| `equals` | Values of property A must equal values of property B (pair constraint) | Always a property IRI |
+| `disjoint` | Values of property A must not overlap with property B (pair constraint) | Always a property IRI |
+| `lessThan` | Each value must be < values of referenced property (pair constraint) | Always a property IRI |
+| `lessThanOrEquals` | Each value must be <= values of referenced property (pair constraint) | Always a property IRI |
+| `hasValue` | At least one value node must equal this specific RDF term | IRI (`{id}`) or literal (`string`/`number`/`boolean`) |
+| `in` | Every value must be a member of this list | IRIs and/or literals |
+| `datatype` | Each literal value must have this XSD datatype | Always a datatype IRI |
+| `class` | Each value must be rdf:type of this class | Always a class IRI |
+
+### Phase 15: Fix `hasValue` and `in` to support literal values
+
+**Files:** `src/shapes/SHACL.ts`
+
+**Tasks:**
+1. Widen `PropertyShape.hasValueConstraint` type from `NodeReferenceValue` to `NodeReferenceValue | string | number | boolean`
+2. Widen `PropertyShape.in` type from `NodeReferenceValue[]` to `(NodeReferenceValue | string | number | boolean)[]`
+3. Widen `PropertyShapeConfig.hasValue` type to `NodeReferenceValue | string | number | boolean`
+4. Widen `PropertyShapeConfig.in` type to `(NodeReferenceValue | string | number | boolean)[]`
+5. In `createPropertyShape`, change `hasValue` processing: only use `toPlainNodeRef` for `{id}` objects, store primitives as-is
+6. In `createPropertyShape`, change `in` processing: per element, only use `toPlainNodeRef` for `{id}` objects, store primitives as-is
+7. Update `getResult()` — no change needed, already passes through whatever is stored
+8. Update `clone()` if needed — verify it copies these fields correctly
+
+**Validation:** Build passes. Existing tests pass (the prefix-resolution test for `hasValue: 'foaf:Person'` will need updating in Phase 17).
+
+### Phase 16: Wire up `lessThan` and `lessThanOrEquals`
+
+**Files:** `src/shapes/SHACL.ts`
+
+**Tasks:**
+1. Add `lessThan?: NodeReferenceValue` and `lessThanOrEquals?: NodeReferenceValue` fields to `PropertyShape` class
+2. In `createPropertyShape`, after the `disjoint` block, add:
+   ```ts
+   if ((config as LiteralPropertyShapeConfig).lessThan) {
+     propertyShape.lessThan = toPlainNodeRef((config as LiteralPropertyShapeConfig).lessThan);
+   }
+   if ((config as LiteralPropertyShapeConfig).lessThanOrEquals) {
+     propertyShape.lessThanOrEquals = toPlainNodeRef((config as LiteralPropertyShapeConfig).lessThanOrEquals);
+   }
+   ```
+3. In `getResult()`, expose them:
+   ```ts
+   if (this.lessThan) { result.lessThan = this.lessThan; }
+   if (this.lessThanOrEquals) { result.lessThanOrEquals = this.lessThanOrEquals; }
+   ```
+
+**Validation:** Build passes.
+
+### Phase 17: Tests for SHACL constraint fields
+
+**Files:** `src/tests/prefix-resolution.test.ts` (or new `src/tests/shacl-constraints.test.ts`)
+
+**Tasks:**
+1. `hasValue` with literal string: `hasValue: "active"` → stored as `"active"` (not `{id: "active"}`)
+2. `hasValue` with number: `hasValue: 42` → stored as `42`
+3. `hasValue` with boolean: `hasValue: true` → stored as `true`
+4. `hasValue` with IRI: `hasValue: {id: 'http://example.org/Foo'}` → stored as `{id: 'http://example.org/Foo'}`
+5. `in` with literal strings: `in: ["ACTIVE", "PENDING"]` → stored as `["ACTIVE", "PENDING"]`
+6. `in` with IRI nodes: `in: [{id: 'http://ex.org/A'}, {id: 'http://ex.org/B'}]` → resolved IRIs
+7. `in` with mixed: `in: [{id: 'http://ex.org/Foo'}, "bar", 42]` → `[{id: '...'}, "bar", 42]`
+8. `lessThan` wired up: config `lessThan: foaf.endDate` → stored and exposed via `getResult()`
+9. `lessThanOrEquals` wired up: same
+10. Fix existing test: `hasValue: 'foaf:Person'` as `LiteralPropertyShapeConfig` → change to `hasValue: {id: 'foaf:Person'}` since plain strings are now literals
+
+**Validation:** All tests pass. Full suite green.
