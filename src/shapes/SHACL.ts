@@ -334,6 +334,8 @@ export class PropertyShape extends Shape {
   in?: (NodeReferenceValue | string | number | boolean)[];
   equalsConstraint?: NodeReferenceValue;
   disjoint?: NodeReferenceValue;
+  lessThan?: NodeReferenceValue;
+  lessThanOrEquals?: NodeReferenceValue;
   hasValueConstraint?: NodeReferenceValue | string | number | boolean;
   defaultValue?: unknown;
   sortBy?: PathExpr;
@@ -393,6 +395,12 @@ export class PropertyShape extends Shape {
     }
     if (this.disjoint) {
       result.disjoint = this.disjoint;
+    }
+    if (this.lessThan) {
+      result.lessThan = this.lessThan;
+    }
+    if (this.lessThanOrEquals) {
+      result.lessThanOrEquals = this.lessThanOrEquals;
     }
     if (this.hasValueConstraint !== undefined) {
       result.hasValue = this.hasValueConstraint;
@@ -603,6 +611,12 @@ export function createPropertyShape<
   }
   if (config.disjoint) {
     propertyShape.disjoint = toPlainNodeRef(config.disjoint);
+  }
+  if ((config as LiteralPropertyShapeConfig).lessThan) {
+    propertyShape.lessThan = toPlainNodeRef((config as LiteralPropertyShapeConfig).lessThan);
+  }
+  if ((config as LiteralPropertyShapeConfig).lessThanOrEquals) {
+    propertyShape.lessThanOrEquals = toPlainNodeRef((config as LiteralPropertyShapeConfig).lessThanOrEquals);
   }
   if (config.hasValue !== undefined) {
     const v = config.hasValue;
