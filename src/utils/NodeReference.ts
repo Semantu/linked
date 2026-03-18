@@ -23,19 +23,14 @@ export function resolvePrefixedUri(str: string): string {
 }
 
 /**
- * Convert a NodeReferenceInput to a NodeReferenceValue, resolving prefixed names.
- *
- * @example
- * toNodeReference('foaf:Person')          // {id: 'http://xmlns.com/foaf/0.1/Person'}
- * toNodeReference({id: 'foaf:Person'})    // {id: 'http://xmlns.com/foaf/0.1/Person'}
- * toNodeReference('http://example.org/x') // {id: 'http://example.org/x'}
- * toNodeReference('my-entity-id')         // {id: 'my-entity-id'}
+ * Convert a NodeReferenceInput to a NodeReferenceValue.
+ * Simple wrap — no prefix resolution. Use resolvePrefixedUri() for that.
  */
 export function toNodeReference(value: NodeReferenceInput): NodeReferenceValue {
   if (typeof value === 'string') {
-    return {id: resolvePrefixedUri(value)};
+    return {id: value};
   }
-  return {id: resolvePrefixedUri(value.id)};
+  return {id: value.id};
 }
 
 export function isNodeReferenceValue(value: unknown): value is NodeReferenceValue {
