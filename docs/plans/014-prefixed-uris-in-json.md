@@ -287,7 +287,7 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 
 ## Iteration 2 — Phases
 
-### Phase 9: Revert `toNodeReference` and `toPlainNodeRef`
+### Phase 9: Revert `toNodeReference` and `toPlainNodeRef` ✓
 
 **Files:** `src/utils/NodeReference.ts`, `src/shapes/SHACL.ts`
 
@@ -298,7 +298,7 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 
 **Validation:** Build passes. Existing non-prefix tests still pass.
 
-### Phase 10: Revert `normalizePropertyPath` prefix resolution
+### Phase 10: Revert `normalizePropertyPath` prefix resolution ✓
 
 **Files:** `src/paths/normalizePropertyPath.ts`
 
@@ -309,7 +309,7 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 
 **Validation:** `property-path-normalize.test.ts` passes. Build passes.
 
-### Phase 11: Revert `targetClass` type widening
+### Phase 11: Revert `targetClass` type widening ✓
 
 **Files:** `src/shapes/Shape.ts`, `src/utils/Package.ts`, `src/utils/ShapeClass.ts`
 
@@ -322,7 +322,7 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 
 **Validation:** Build passes.
 
-### Phase 12: Narrow decorator config types
+### Phase 12: Narrow decorator config types ✓
 
 **Files:** `src/shapes/SHACL.ts`
 
@@ -339,7 +339,7 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 
 **Validation:** Build passes. No existing code uses string form for narrowed fields.
 
-### Phase 13: Keep query API prefix resolution
+### Phase 13: Keep query API prefix resolution ✓
 
 **Files:** `src/queries/QueryBuilder.ts`
 
@@ -350,7 +350,7 @@ This handles `urn:uuid:...`, `http://...`, and plain IDs correctly while catchin
 
 **Validation:** Build passes.
 
-### Phase 14: Update tests
+### Phase 14: Update tests ✓
 
 **Files:** `src/tests/prefix-resolution.test.ts`
 
@@ -388,7 +388,7 @@ These fields are metadata-only today (stored on PropertyShape, exposed via `getR
 | `datatype` | Each literal value must have this XSD datatype | Always a datatype IRI |
 | `class` | Each value must be rdf:type of this class | Always a class IRI |
 
-### Phase 15: Fix `hasValue` and `in` to support literal values
+### Phase 15: Fix `hasValue` and `in` to support literal values ✓
 
 **Files:** `src/shapes/SHACL.ts`
 
@@ -404,7 +404,7 @@ These fields are metadata-only today (stored on PropertyShape, exposed via `getR
 
 **Validation:** Build passes. Existing tests pass (the prefix-resolution test for `hasValue: 'foaf:Person'` will need updating in Phase 17).
 
-### Phase 16: Wire up `lessThan` and `lessThanOrEquals`
+### Phase 16: Wire up `lessThan` and `lessThanOrEquals` ✓
 
 **Files:** `src/shapes/SHACL.ts`
 
@@ -427,7 +427,7 @@ These fields are metadata-only today (stored on PropertyShape, exposed via `getR
 
 **Validation:** Build passes.
 
-### Phase 17: Tests for SHACL constraint fields
+### Phase 17: Tests for SHACL constraint fields ✓
 
 **Files:** `src/tests/prefix-resolution.test.ts` (or new `src/tests/shacl-constraints.test.ts`)
 
@@ -443,4 +443,32 @@ These fields are metadata-only today (stored on PropertyShape, exposed via `getR
 9. `lessThanOrEquals` wired up: same
 10. Fix existing test: `hasValue: 'foaf:Person'` as `LiteralPropertyShapeConfig` → change to `hasValue: {id: 'foaf:Person'}` since plain strings are now literals
 
-**Validation:** All tests pass. Full suite green.
+**Validation:** All tests pass. Full suite green. 33 suites, 989 tests, 0 failures.
+
+---
+
+## Review — Iterations 2 & 3
+
+### Summary
+
+All 9 phases (9–17) implemented successfully. 989 tests passing (21 new SHACL constraint tests), zero regressions.
+
+**Iteration 2** (Phases 9–14) reverted prefix resolution from decorators/shapes back to query-API-only:
+- `toNodeReference` is now a simple wrap (no `resolvePrefixedUri`)
+- `normalizePropertyPath` no longer resolves prefixed refs in ASTs
+- `targetClass` narrowed back to `NodeReferenceValue` only
+- Config types for `equals`, `disjoint`, `lessThan`, `lessThanOrEquals`, `datatype`, `class` narrowed to `NodeReferenceValue`
+- Query API `.for()`/`.forAll()` still resolve prefixes via `resolvePrefixedUri`
+
+**Iteration 3** (Phases 15–17) fixed SHACL constraint field semantics:
+- `hasValue` and `in` now correctly handle literal values (strings, numbers, booleans) — only `{id}` objects go through `toPlainNodeRef`
+- `lessThan` and `lessThanOrEquals` wired up in `createPropertyShape` and exposed via `getResult()`
+- `getResult()` uses `!== undefined` check for `hasValue` to handle falsy literals (0, false, "")
+
+### Gaps
+
+1. **`QResult` type doesn't expose constraint fields**: `getResult()` returns `QResult<PropertyShape>` which only types as `{id: string}`. The constraint fields are available at runtime but not in the TypeScript type. Tests use `as any` to access them. This is a pre-existing issue not introduced by these changes.
+
+2. **No SHACL RDF serialization yet**: The constraint fields are stored correctly but not serialized to SHACL RDF triples. Tracked in `docs/ideas/015-shacl-rdf-serialization.md`.
+
+3. **`resolvePrefixedUri` uses `toFullIfPossible` (lenient)**: Unregistered prefixes silently pass through unchanged. This was a deliberate choice from iteration 1 but means typos like `foa:Person` won't error.
