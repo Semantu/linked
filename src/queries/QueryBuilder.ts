@@ -16,7 +16,7 @@ import type {PropertyPathSegment, RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
 import type {NodeReferenceValue} from './QueryFactory.js';
-import {resolvePrefixedUri} from '../utils/NodeReference.js';
+import {resolveUriOrThrow} from '../utils/NodeReference.js';
 import {FieldSet, FieldSetJSON, FieldSetFieldJSON} from './FieldSet.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 
@@ -235,7 +235,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
 
   /** Target a single entity by ID. Implies singleResult; unwraps array Result type. */
   for(id: string | NodeReferenceValue): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result> {
-    const subject: NodeReferenceValue = typeof id === 'string' ? {id: resolvePrefixedUri(id)} : id;
+    const subject: NodeReferenceValue = typeof id === 'string' ? {id: resolveUriOrThrow(id)} : id;
     return this.clone({subject, subjects: undefined, singleResult: true}) as any;
   }
 
@@ -244,7 +244,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     if (!ids) {
       return this.clone({subject: undefined, subjects: undefined, singleResult: false});
     }
-    const subjects = ids.map((id) => typeof id === 'string' ? {id: resolvePrefixedUri(id)} : id);
+    const subjects = ids.map((id) => typeof id === 'string' ? {id: resolveUriOrThrow(id)} : id);
     return this.clone({subject: undefined, subjects, singleResult: false});
   }
 

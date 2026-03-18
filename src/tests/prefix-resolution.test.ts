@@ -1,5 +1,5 @@
 import {Prefix} from '../utils/Prefix';
-import {toNodeReference, resolvePrefixedUri} from '../utils/NodeReference';
+import {toNodeReference, resolvePrefixedUri, resolveUriOrThrow} from '../utils/NodeReference';
 
 // Register test prefixes before tests run
 const FOAF_NS = 'http://xmlns.com/foaf/0.1/';
@@ -68,5 +68,27 @@ describe('toNodeReference (simple wrap)', () => {
 
   it('passes through {id} with full IRI', () => {
     expect(toNodeReference({id: 'http://example.org/foo'})).toEqual({id: 'http://example.org/foo'});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveUriOrThrow — strict resolution
+// ---------------------------------------------------------------------------
+
+describe('resolveUriOrThrow', () => {
+  it('resolves a registered prefixed name to full IRI', () => {
+    expect(resolveUriOrThrow('foaf:Person')).toBe(`${FOAF_NS}Person`);
+  });
+
+  it('passes through full IRIs unchanged', () => {
+    expect(resolveUriOrThrow('http://example.org/foo')).toBe('http://example.org/foo');
+  });
+
+  it('throws on unregistered prefix', () => {
+    expect(() => resolveUriOrThrow('unknown:foo')).toThrow('Unknown prefix');
+  });
+
+  it('throws on typo prefix', () => {
+    expect(() => resolveUriOrThrow('foa:Person')).toThrow('Unknown prefix');
   });
 });

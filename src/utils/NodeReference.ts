@@ -23,6 +23,17 @@ export function resolvePrefixedUri(str: string): string {
 }
 
 /**
+ * Resolve a URI string strictly: must be either a full IRI (contains '://')
+ * or a registered prefixed name ('foaf:Person'). Throws if the prefix is unknown.
+ *
+ * Use this at API boundaries where strings are always URIs (never plain IDs).
+ */
+export function resolveUriOrThrow(str: string): string {
+  if (str.includes('://')) return str;
+  return Prefix.toFull(str);
+}
+
+/**
  * Convert a NodeReferenceInput to a NodeReferenceValue.
  * Simple wrap — no prefix resolution. Use resolvePrefixedUri() for that.
  */
