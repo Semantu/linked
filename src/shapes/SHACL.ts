@@ -3,11 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-import {NodeReferenceValue} from '../utils/NodeReference.js';
+import {NodeReferenceValue, toNodeReference} from '../utils/NodeReference.js';
 import {Shape, ShapeConstructor} from './Shape.js';
 import {shacl} from '../ontologies/shacl.js';
 import {URI} from '../utils/URI.js';
-import {toNodeReference} from '../utils/NodeReference.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {PathExpr} from '../paths/PropertyPathExpr.js';
 import {normalizePropertyPath, type PropertyPathDecoratorInput} from '../paths/normalizePropertyPath.js';
@@ -44,12 +43,6 @@ export interface PropertyShapeResult {
   valueShape?: NodeReferenceValue;
 }
 
-
-const normalizePathInput = (
-  value: PropertyPathDecoratorInput,
-): PathExpr => {
-  return normalizePropertyPath(value);
-};
 
 const normalizeNodeKind = (
   nodeKind?: NodeKindConfig,
@@ -590,7 +583,7 @@ export function createPropertyShape<
   shapeClass: typeof Shape | [string, string] = null,
 ) {
   const propertyShape = new PropertyShape();
-  propertyShape.path = normalizePathInput(config.path);
+  propertyShape.path = normalizePropertyPath(config.path);
   propertyShape.label = propertyKey;
 
   if (config.name) {
@@ -650,7 +643,7 @@ export function createPropertyShape<
     );
   }
   if (config.sortBy) {
-    propertyShape.sortBy = normalizePathInput(config.sortBy);
+    propertyShape.sortBy = normalizePropertyPath(config.sortBy);
   }
 
   propertyShape.nodeKind = normalizeNodeKind(config.nodeKind, defaultNodeKind);
