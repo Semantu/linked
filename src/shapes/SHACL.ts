@@ -7,7 +7,7 @@ import {NodeReferenceValue} from '../utils/NodeReference.js';
 import {Shape, ShapeConstructor} from './Shape.js';
 import {shacl} from '../ontologies/shacl.js';
 import {URI} from '../utils/URI.js';
-import {toNodeReference, type NodeReferenceInput} from '../utils/NodeReference.js';
+import {toNodeReference} from '../utils/NodeReference.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import type {PathExpr} from '../paths/PropertyPathExpr.js';
 import {normalizePropertyPath, type PropertyPathDecoratorInput} from '../paths/normalizePropertyPath.js';
@@ -44,11 +44,6 @@ export interface PropertyShapeResult {
   valueShape?: NodeReferenceValue;
 }
 
-const toPlainNodeRef = (
-  value: NodeReferenceValue | {id: string} | string,
-): NodeReferenceValue => {
-  return toNodeReference(value as NodeReferenceInput);
-};
 
 const normalizePathInput = (
   value: PropertyPathDecoratorInput,
@@ -619,39 +614,39 @@ export function createPropertyShape<
   (propertyShape as unknown as ExplicitFlags)[EXPLICIT_MAX_COUNT_SYMBOL] =
     config.maxCount !== undefined;
   if ((config as LiteralPropertyShapeConfig).datatype) {
-    propertyShape.datatype = toPlainNodeRef(
+    propertyShape.datatype = toNodeReference(
       (config as LiteralPropertyShapeConfig).datatype,
     );
   }
 
   if ((config as ObjectPropertyShapeConfig).class) {
-    propertyShape.class = toPlainNodeRef(
+    propertyShape.class = toNodeReference(
       (config as ObjectPropertyShapeConfig).class,
     );
   }
 
   if (config.equals) {
-    propertyShape.equalsConstraint = toPlainNodeRef(config.equals);
+    propertyShape.equalsConstraint = toNodeReference(config.equals);
   }
   if (config.disjoint) {
-    propertyShape.disjoint = toPlainNodeRef(config.disjoint);
+    propertyShape.disjoint = toNodeReference(config.disjoint);
   }
   if ((config as LiteralPropertyShapeConfig).lessThan) {
-    propertyShape.lessThan = toPlainNodeRef((config as LiteralPropertyShapeConfig).lessThan);
+    propertyShape.lessThan = toNodeReference((config as LiteralPropertyShapeConfig).lessThan);
   }
   if ((config as LiteralPropertyShapeConfig).lessThanOrEquals) {
-    propertyShape.lessThanOrEquals = toPlainNodeRef((config as LiteralPropertyShapeConfig).lessThanOrEquals);
+    propertyShape.lessThanOrEquals = toNodeReference((config as LiteralPropertyShapeConfig).lessThanOrEquals);
   }
   if (config.hasValue !== undefined) {
     const v = config.hasValue;
-    propertyShape.hasValueConstraint = typeof v === 'object' && v !== null ? toPlainNodeRef(v) : v;
+    propertyShape.hasValueConstraint = typeof v === 'object' && v !== null ? toNodeReference(v) : v;
   }
   if (config.defaultValue !== undefined) {
     propertyShape.defaultValue = config.defaultValue;
   }
   if (config.in) {
     propertyShape.in = config.in.map((entry) =>
-      typeof entry === 'object' && entry !== null ? toPlainNodeRef(entry) : entry,
+      typeof entry === 'object' && entry !== null ? toNodeReference(entry) : entry,
     );
   }
   if (config.sortBy) {
