@@ -15,6 +15,8 @@ import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
 import type {FieldSetEntry} from './FieldSet.js';
 import {ExpressionNode} from '../expressions/ExpressionNode.js';
 import type {PropertyShape} from '../shapes/SHACL.js';
+import type {PathExpr} from '../paths/PropertyPathExpr.js';
+import {isComplexPathExpr} from '../paths/PropertyPathExpr.js';
 
 /**
  * Pipeline input type — accepts FieldSet entries directly.
@@ -47,6 +49,7 @@ export type RawSelectInput = {
 export type DesugaredPropertyStep = {
   kind: 'property_step';
   propertyShapeId: string;
+  pathExpr?: PathExpr;
   where?: DesugaredWhere;
 };
 
@@ -174,10 +177,16 @@ const isNodeRef = (value: unknown): value is NodeReferenceValue =>
  * Convert PropertyShape segments to DesugaredPropertyStep[].
  */
 const segmentsToSteps = (segments: PropertyShape[]): DesugaredPropertyStep[] =>
-  segments.map((seg) => ({
-    kind: 'property_step' as const,
-    propertyShapeId: seg.id,
-  }));
+  segments.map((seg) => {
+    const step: DesugaredPropertyStep = {
+      kind: 'property_step' as const,
+      propertyShapeId: seg.id,
+    };
+    if (seg.path && isComplexPathExpr(seg.path)) {
+      step.pathExpr = seg.path;
+    }
+    return step;
+  });
 
 /**
  * Convert a FieldSetEntry directly to a DesugaredSelection.
@@ -230,6 +239,9 @@ const desugarEntry = (entry: FieldSetEntry): DesugaredSelection => {
       kind: 'property_step',
       propertyShapeId: segment.id,
     };
+    if (segment.path && isComplexPathExpr(segment.path)) {
+      step.pathExpr = segment.path;
+    }
     if (entry.scopedFilter && i === segments.length - 1) {
       step.where = toWhere(entry.scopedFilter);
     }
@@ -418,10 +430,16 @@ const toSortBy = (query: RawSelectInput): DesugaredSortBy | undefined => {
     direction: query.sortBy.direction,
     paths: query.sortBy.paths.map((path) => ({
       kind: 'selection_path' as const,
-      steps: path.segments.map((seg) => ({
-        kind: 'property_step' as const,
-        propertyShapeId: seg.id,
-      })),
+      steps: path.segments.map((seg) => {
+        const step: DesugaredPropertyStep = {
+          kind: 'property_step' as const,
+          propertyShapeId: seg.id,
+        };
+        if (seg.path && isComplexPathExpr(seg.path)) {
+          step.pathExpr = seg.path;
+        }
+        return step;
+      }),
     })),
   };
 };

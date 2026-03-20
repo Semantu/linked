@@ -6,7 +6,8 @@ import {NodeReferenceValue} from './NodeReference.js';
 const resolveTargetClassId = (
   targetClass?: NodeReferenceValue | null,
 ): string | null => {
-  return targetClass?.id ?? null;
+  if (!targetClass) return null;
+  return targetClass.id ?? null;
 };
 
 let subShapesSpecificityCache: Map<string, (typeof Shape)[][]> = new Map();

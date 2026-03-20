@@ -3,41 +3,46 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
-import {NodeReferenceValue} from '../utils/NodeReference.js';
+import {NodeReferenceValue, toNodeReference} from '../utils/NodeReference.js';
 import {Shape, ShapeConstructor} from './Shape.js';
 import {shacl} from '../ontologies/shacl.js';
 import {URI} from '../utils/URI.js';
-import {toNodeReference} from '../utils/NodeReference.js';
-import {QResult} from '../queries/SelectQuery.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
+import type {PathExpr} from '../paths/PropertyPathExpr.js';
+import {normalizePropertyPath, type PropertyPathDecoratorInput} from '../paths/normalizePropertyPath.js';
 
 export const LINCD_DATA_ROOT: string = 'https://data.lincd.org/';
 
 type NodeKindConfig = NodeReferenceValue | NodeReferenceValue[];
 
-export type PropertyPathInput = NodeReferenceValue;
-export type PropertyPathInputList = PropertyPathInput | PropertyPathInput[];
+export type PropertyPathInput = PropertyPathDecoratorInput;
+export type PropertyPathInputList = PropertyPathDecoratorInput;
 
-const toPlainNodeRef = (
-  value: NodeReferenceValue | {id: string} | string,
-): NodeReferenceValue => {
-  if (typeof value === 'string') {
-    return {id: value};
-  }
-  if (value && typeof value === 'object' && 'id' in value) {
-    return {id: (value as NodeReferenceValue).id};
-  }
-  return toNodeReference(value as NodeReferenceValue);
-};
+/** Result object returned by PropertyShape.getResult() and NodeShape.properties. */
+export interface PropertyShapeResult {
+  id: string;
+  label: string;
+  path: PathExpr;
+  nodeKind?: NodeReferenceValue;
+  datatype?: NodeReferenceValue;
+  minCount?: number;
+  maxCount?: number;
+  name?: string;
+  description?: string;
+  order?: number;
+  group?: string;
+  class?: NodeReferenceValue;
+  in?: (NodeReferenceValue | string | number | boolean)[];
+  equals?: NodeReferenceValue;
+  disjoint?: NodeReferenceValue;
+  lessThan?: NodeReferenceValue;
+  lessThanOrEquals?: NodeReferenceValue;
+  hasValue?: NodeReferenceValue | string | number | boolean;
+  defaultValue?: unknown;
+  sortBy?: PathExpr;
+  valueShape?: NodeReferenceValue;
+}
 
-const normalizePathInput = (
-  value: PropertyPathInputList,
-): PropertyPathInputList => {
-  if (Array.isArray(value)) {
-    return value.map((entry) => toPlainNodeRef(entry));
-  }
-  return toPlainNodeRef(value);
-};
 
 const normalizeNodeKind = (
   nodeKind?: NodeKindConfig,
@@ -80,13 +85,15 @@ export interface NodeShapeConfig {
 export interface LiteralPropertyShapeConfig extends PropertyShapeConfig {
   nodeKind?: NodeReferenceValue;
   /**
-   * Values of the configured property must be less than the values of this 'lessThan' property
+   * Values of the configured property must be less than the values of this 'lessThan' property.
+   * Value is always a property IRI (pair constraint).
    */
-  lessThan?: NodeReferenceValue | string;
+  lessThan?: NodeReferenceValue;
   /**
-   * Values of the configured property must be less than or equal the values of this 'lessThan' property
+   * Values of the configured property must be less than or equal the values of this 'lessThanOrEquals' property.
+   * Value is always a property IRI (pair constraint).
    */
-  lessThanOrEquals?: NodeReferenceValue | string;
+  lessThanOrEquals?: NodeReferenceValue;
   /**
    * All values of this property must be higher than this number
    */
@@ -126,11 +133,12 @@ export interface LiteralPropertyShapeConfig extends PropertyShapeConfig {
   /**
    * Each literal value of this property must use this datatype
    */
-  datatype?: NodeReferenceValue | string;
+  datatype?: NodeReferenceValue;
   /**
-   * Each value of the property must occur in this set
+   * Each value of the property must occur in this set.
+   * Use {id: '...'} for IRI nodes, or plain strings/numbers/booleans for literal values.
    */
-  in?: NodeReferenceValue[];
+  in?: (NodeReferenceValue | string | number | boolean)[];
 }
 
 export interface ObjectPropertyShapeConfig extends PropertyShapeConfig {
@@ -138,7 +146,7 @@ export interface ObjectPropertyShapeConfig extends PropertyShapeConfig {
   /**
    * Each value of this property must have this class as its rdf:type
    */
-  class?: NodeReferenceValue | string;
+  class?: NodeReferenceValue;
   /**
    * The shape that values of this property path need to confirm to.
    * You need to provide a class that extends Shape.
@@ -170,16 +178,19 @@ export interface PropertyShapeConfig {
   maxCount?: number;
   /**
    * Values of the configured property must equal the values of this 'equals' property.
+   * Value is always a property IRI (pair constraint).
    */
-  equals?: NodeReferenceValue | string;
+  equals?: NodeReferenceValue;
   /**
-   * Values of the configured property must differ from the values of this 'disjoint' property
+   * Values of the configured property must differ from the values of this 'disjoint' property.
+   * Value is always a property IRI (pair constraint).
    */
-  disjoint?: NodeReferenceValue | string;
+  disjoint?: NodeReferenceValue;
   /**
-   * At least one value of this property must equal the given Node
+   * At least one value of this property must equal the given value.
+   * Use {id: '...'} for IRI nodes, or a plain string for literal values.
    */
-  hasValue?: NodeReferenceValue | string;
+  hasValue?: NodeReferenceValue | string | number | boolean;
   name?: string;
   description?: string;
   order?: number;
@@ -189,9 +200,14 @@ export interface PropertyShapeConfig {
    */
   defaultValue?: unknown;
   /**
-   * Each value of the property must occur in this set
+   * Each value of the property must occur in this set.
+   * Use {id: '...'} for IRI nodes, or plain strings for literal values.
+   *
+   * @example
+   * in: ['ACTIVE', 'PENDING', 'CLOSED']
+   * in: [{id: 'http://example.org/StatusA'}, {id: 'http://example.org/StatusB'}]
    */
-  in?: NodeReferenceValue[];
+  in?: (NodeReferenceValue | string | number | boolean)[];
   /**
    * Values of the configured property path are sorted by the values of this property path.
    */
@@ -238,7 +254,7 @@ export class NodeShape extends Shape {
     this._label = value;
   }
 
-  get properties(): QResult<PropertyShape>[] {
+  get properties(): PropertyShapeResult[] {
     return this.propertyShapes.map((propertyShape) => propertyShape.getResult());
   }
 
@@ -317,7 +333,7 @@ export class NodeShape extends Shape {
 export class PropertyShape extends Shape {
   static targetClass = shacl.PropertyShape;
   private _label?: string;
-  path: PropertyPathInputList;
+  path: PathExpr;
   nodeKind?: NodeReferenceValue;
   datatype?: NodeReferenceValue;
   minCount?: number;
@@ -327,12 +343,14 @@ export class PropertyShape extends Shape {
   order?: number;
   group?: string;
   class?: NodeReferenceValue;
-  in?: NodeReferenceValue[];
+  in?: (NodeReferenceValue | string | number | boolean)[];
   equalsConstraint?: NodeReferenceValue;
   disjoint?: NodeReferenceValue;
-  hasValueConstraint?: NodeReferenceValue;
+  lessThan?: NodeReferenceValue;
+  lessThanOrEquals?: NodeReferenceValue;
+  hasValueConstraint?: NodeReferenceValue | string | number | boolean;
   defaultValue?: unknown;
-  sortBy?: PropertyPathInputList;
+  sortBy?: PathExpr;
   valueShape?: NodeReferenceValue;
   parentNodeShape?: NodeShape;
 
@@ -348,8 +366,8 @@ export class PropertyShape extends Shape {
     this._label = value;
   }
 
-  getResult(): QResult<PropertyShape> {
-    const result: QResult<PropertyShape, Record<string, unknown>> = {
+  getResult(): PropertyShapeResult {
+    const result: Record<string, unknown> & {id: string; label: string; path: PathExpr} = {
       id: this.id,
       label: this.label,
       path: this.path,
@@ -390,7 +408,13 @@ export class PropertyShape extends Shape {
     if (this.disjoint) {
       result.disjoint = this.disjoint;
     }
-    if (this.hasValueConstraint) {
+    if (this.lessThan) {
+      result.lessThan = this.lessThan;
+    }
+    if (this.lessThanOrEquals) {
+      result.lessThanOrEquals = this.lessThanOrEquals;
+    }
+    if (this.hasValueConstraint !== undefined) {
       result.hasValue = this.hasValueConstraint;
     }
     if (this.defaultValue !== undefined) {
@@ -402,7 +426,7 @@ export class PropertyShape extends Shape {
     if (this.valueShape) {
       result.valueShape = this.valueShape;
     }
-    return result as QResult<PropertyShape>;
+    return result as PropertyShapeResult;
   }
 
   clone(): this {
@@ -559,7 +583,7 @@ export function createPropertyShape<
   shapeClass: typeof Shape | [string, string] = null,
 ) {
   const propertyShape = new PropertyShape();
-  propertyShape.path = normalizePathInput(config.path);
+  propertyShape.path = normalizePropertyPath(config.path);
   propertyShape.label = propertyKey;
 
   if (config.name) {
@@ -583,34 +607,43 @@ export function createPropertyShape<
   (propertyShape as unknown as ExplicitFlags)[EXPLICIT_MAX_COUNT_SYMBOL] =
     config.maxCount !== undefined;
   if ((config as LiteralPropertyShapeConfig).datatype) {
-    propertyShape.datatype = toPlainNodeRef(
+    propertyShape.datatype = toNodeReference(
       (config as LiteralPropertyShapeConfig).datatype,
     );
   }
 
   if ((config as ObjectPropertyShapeConfig).class) {
-    propertyShape.class = toPlainNodeRef(
+    propertyShape.class = toNodeReference(
       (config as ObjectPropertyShapeConfig).class,
     );
   }
 
   if (config.equals) {
-    propertyShape.equalsConstraint = toPlainNodeRef(config.equals);
+    propertyShape.equalsConstraint = toNodeReference(config.equals);
   }
   if (config.disjoint) {
-    propertyShape.disjoint = toPlainNodeRef(config.disjoint);
+    propertyShape.disjoint = toNodeReference(config.disjoint);
   }
-  if (config.hasValue) {
-    propertyShape.hasValueConstraint = toPlainNodeRef(config.hasValue);
+  if ((config as LiteralPropertyShapeConfig).lessThan) {
+    propertyShape.lessThan = toNodeReference((config as LiteralPropertyShapeConfig).lessThan);
+  }
+  if ((config as LiteralPropertyShapeConfig).lessThanOrEquals) {
+    propertyShape.lessThanOrEquals = toNodeReference((config as LiteralPropertyShapeConfig).lessThanOrEquals);
+  }
+  if (config.hasValue !== undefined) {
+    const v = config.hasValue;
+    propertyShape.hasValueConstraint = typeof v === 'object' && v !== null ? toNodeReference(v) : v;
   }
   if (config.defaultValue !== undefined) {
     propertyShape.defaultValue = config.defaultValue;
   }
   if (config.in) {
-    propertyShape.in = config.in.map((entry) => toPlainNodeRef(entry));
+    propertyShape.in = config.in.map((entry) =>
+      typeof entry === 'object' && entry !== null ? toNodeReference(entry) : entry,
+    );
   }
   if (config.sortBy) {
-    propertyShape.sortBy = normalizePathInput(config.sortBy);
+    propertyShape.sortBy = normalizePropertyPath(config.sortBy);
   }
 
   propertyShape.nodeKind = normalizeNodeKind(config.nodeKind, defaultNodeKind);

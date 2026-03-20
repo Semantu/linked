@@ -13,6 +13,7 @@ import {
   IRSetModificationValue,
 } from '../queries/IntermediateRepresentation.js';
 import {NodeReferenceValue} from '../utils/NodeReference.js';
+import {pathExprToSparql, collectPathUris} from '../paths/pathExprToSparql.js';
 import {
   SparqlSelectPlan,
   SparqlInsertDataPlan,
@@ -521,9 +522,12 @@ function processPattern(
       // Register the traverse variable: (from, property) → to
       registry.set(pattern.from, pattern.property, pattern.to);
       // Add traverse triple to required pattern (or filtered block if inline where)
+      const predicate = pattern.pathExpr
+        ? {kind: 'path' as const, value: pathExprToSparql(pattern.pathExpr), uris: collectPathUris(pattern.pathExpr)}
+        : iriTerm(pattern.property);
       const triple = tripleOf(
         varTerm(pattern.from),
-        iriTerm(pattern.property),
+        predicate,
         varTerm(pattern.to),
       );
       if (pattern.filter && filteredTraverseBlocks) {
@@ -584,10 +588,13 @@ function processExpressionForProperties(
       if (!registry.has(expr.sourceAlias, expr.property)) {
         // Create a new OPTIONAL triple for this property
         const varName = registry.getOrCreate(expr.sourceAlias, expr.property);
+        const predicate = expr.pathExpr
+          ? {kind: 'path' as const, value: pathExprToSparql(expr.pathExpr), uris: collectPathUris(expr.pathExpr)}
+          : iriTerm(expr.property);
         optionalPropertyTriples.push(
           tripleOf(
             varTerm(expr.sourceAlias),
-            iriTerm(expr.property),
+            predicate,
             varTerm(varName),
           ),
         );
@@ -793,9 +800,12 @@ function convertExistsPattern(
 ): SparqlAlgebraNode {
   switch (pattern.kind) {
     case 'traverse': {
+      const existsPredicate = pattern.pathExpr
+        ? {kind: 'path' as const, value: pathExprToSparql(pattern.pathExpr), uris: collectPathUris(pattern.pathExpr)}
+        : iriTerm(pattern.property);
       const triple = tripleOf(
         varTerm(pattern.from),
-        iriTerm(pattern.property),
+        existsPredicate,
         varTerm(pattern.to),
       );
       return {type: 'bgp', triples: [triple]};
