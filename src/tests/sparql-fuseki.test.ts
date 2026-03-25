@@ -218,10 +218,17 @@ describe('Fuseki SELECT — basic', () => {
     const semmy = findRowById(rows, 'p1');
     expect(semmy).toBeDefined();
     const bd = semmy!.birthDate;
+    expect(bd).toBeDefined();
+    expect(bd).not.toBeNull();
     if (bd instanceof Date) {
       expect(bd.getFullYear()).toBe(1990);
+      expect(bd.getMonth()).toBe(0); // January
+      expect(bd.getDate()).toBe(1);
     } else {
-      expect(String(bd)).toContain('1990');
+      // Must be a parseable ISO date string starting with 1990-01-01
+      const dateStr = String(bd);
+      expect(dateStr).toMatch(/^1990-01-01/);
+      expect(new Date(dateStr).getFullYear()).toBe(1990);
     }
 
     const jinx = findRowById(rows, 'p3');
@@ -768,13 +775,59 @@ describe('Fuseki SELECT — inline where', () => {
     // Only friends matching name='Moa' should appear in the nested array.
     expect(rows.length).toBe(4);
 
+    // p1 has friends [p2(Moa), p3(Jinx)] — only Moa should match the filter
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
-    // p1 has friends [p2(Moa), p3(Jinx)] — only Moa matches the filter
-    const p1Friends = p1!.friends as ResultRow[] | undefined;
-    if (p1Friends && p1Friends.length > 0) {
-      const friendIds = p1Friends.map((f) => f.id);
-      expect(friendIds.some((id) => id.includes('p2'))).toBe(true);
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(1);
+    expect(p1Friends[0].id).toContain('p2'); // p2 = Moa
+    // p3 (Jinx) must NOT appear
+    expect(p1Friends.some((f) => f.id.includes('p3'))).toBe(false);
+
+    // p2 has friends [p3(Jinx), p4(Quinn)] — neither is Moa, so empty
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2Friends = p2!.friends as ResultRow[] | null;
+    if (p2Friends) {
+      expect(p2Friends.length).toBe(0);
+    }
+
+    // p3 and p4 have no friends at all — returns null or empty array
+    const p3 = findRowById(rows, 'p3');
+    expect(p3).toBeDefined();
+    const p3Friends = p3!.friends as ResultRow[] | null;
+    expect(!p3Friends || p3Friends.length === 0).toBe(true);
+  });
+
+  test('whereFriendsNameEqualsChained — .where().name property access', async () => {
+    if (!fusekiAvailable) return;
+
+    // Same filter as whereFriendsNameEquals but chains .name after .where().
+    // Query: Person.select((p) => p.friends.where((f) => f.name.equals('Moa')).name)
+    // Expected: each person's friends filtered to name=Moa, then name extracted.
+    const result = await runSelectMapped('whereFriendsNameEqualsChained');
+    expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+
+    expect(rows.length).toBe(4);
+
+    // p1 has friends [p2(Moa), p3(Jinx)] — filter to Moa, extract name
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(1);
+    expect(p1Friends[0].name).toBe('Moa');
+    // Jinx must NOT appear
+    expect(p1Friends.some((f) => f.name === 'Jinx')).toBe(false);
+
+    // p2 has friends [p3(Jinx), p4(Quinn)] — neither matches, so empty
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2Friends = p2!.friends as ResultRow[] | null;
+    if (p2Friends) {
+      expect(p2Friends.length).toBe(0);
     }
   });
 
@@ -785,6 +838,20 @@ describe('Fuseki SELECT — inline where', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
     expect(rows.length).toBe(4);
+
+    // p1 friends [p2(Moa,Jogging), p3(Jinx,none)] — only p2 matches both conditions
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(1);
+    expect(p1Friends[0].id).toContain('p2');
+
+    // p2 friends [p3(Jinx), p4(Quinn)] — neither is named Moa
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2Friends = p2!.friends as ResultRow[] | null;
+    expect(!p2Friends || p2Friends.length === 0).toBe(true);
   });
 
   test('whereOr — friends filtered by name=Jinx OR hobby=Jogging', async () => {
@@ -794,34 +861,81 @@ describe('Fuseki SELECT — inline where', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
     expect(rows.length).toBe(4);
+
+    // p1 friends [p2(Moa,Jogging), p3(Jinx,no hobby)]
+    // p2 matches via hobby=Jogging; p3 matches via name=Jinx
+    // (hobby triple is OPTIONAL within the filtered block)
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(2);
+    const p1Ids = p1Friends.map((f) => f.id);
+    expect(p1Ids.some((id) => id.includes('p2'))).toBe(true); // Moa (hobby match)
+    expect(p1Ids.some((id) => id.includes('p3'))).toBe(true); // Jinx (name match)
+
+    // p2 friends [p3(Jinx), p4(Quinn)] — p3 matches name=Jinx
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2Friends = p2!.friends as ResultRow[];
+    expect(Array.isArray(p2Friends)).toBe(true);
+    expect(p2Friends.length).toBe(1);
+    expect(p2Friends[0].id).toContain('p3');
   });
 
   test('whereAndOrAnd — (name=Jinx || hobby=Jogging) && name=Moa', async () => {
     if (!fusekiAvailable) return;
 
     // Parenthesized as (A || B) && C due to Phase 15.
-    // Only p2 (Moa, Jogging) satisfies: (Moa≠Jinx || Jogging=Jogging) && Moa=Moa.
-    // p3 (Jinx) has no hobby so the triple pattern fails.
+    // Filter: (name=Jinx || hobby=Jogging) && name=Moa
     const result = await runSelectMapped('whereAndOrAnd');
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
     expect(rows.length).toBe(4);
 
-    // p1 has friends [p2, p3] — only p2 matches the filter
+    // p1 friends: p2 matches (Jinx=Moa?no || Jogging=Jogging?yes) && Moa=Moa → yes
+    //             p3: (Jinx=Jinx?yes || _) && Jinx=Moa?no → fails AND
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(1);
+    expect(p1Friends[0].id).toContain('p2');
+    expect(p1Friends.some((f) => f.id.includes('p3'))).toBe(false);
+
+    // p2 friends: neither p3(Jinx) nor p4(Quinn) is named Moa → empty
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2Friends = p2!.friends as ResultRow[] | null;
+    expect(!p2Friends || p2Friends.length === 0).toBe(true);
   });
 
   test('whereAndOrAndNested — name=Jinx || (hobby=Jogging && name=Moa)', async () => {
     if (!fusekiAvailable) return;
 
-    // No parenthesization needed: && already binds tighter.
-    // Same effective filter as whereAndOrAnd with this test data
-    // (p3/Jinx has no hobby so can't match any branch that checks hobby).
+    // Filter: name=Jinx || (hobby=Jogging && name=Moa)
     const result = await runSelectMapped('whereAndOrAndNested');
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
     expect(rows.length).toBe(4);
+
+    // p1 friends: p2 matches (hobby=Jogging && name=Moa); p3 matches (name=Jinx)
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(2);
+    const p1Ids = p1Friends.map((f) => f.id);
+    expect(p1Ids.some((id) => id.includes('p2'))).toBe(true);
+    expect(p1Ids.some((id) => id.includes('p3'))).toBe(true);
+
+    // p2 friends: p3 matches (name=Jinx)
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    const p2Friends = p2!.friends as ResultRow[];
+    expect(Array.isArray(p2Friends)).toBe(true);
+    expect(p2Friends.length).toBe(1);
+    expect(p2Friends[0].id).toContain('p3');
   });
 });
 
@@ -847,9 +961,14 @@ describe('Fuseki SELECT — quantifiers and aggregates', () => {
     const rows = mapped as ResultRow[];
     // whereEvery: all friends must have name=Moa OR name=Jinx
     // p1 friends: [p2(Moa), p3(Jinx)] → both match → p1 passes
-    // p2 friends: [p3(Jinx), p4(Quinn)] → Quinn doesn't match → p2 fails
+    // p2 friends: [p3(Jinx), p4(Quinn)] → Quinn doesn't match → p2 excluded
     // p3, p4 have no friends → vacuously true
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.length).toBe(3);
+
+    expect(findRowById(rows, 'p1')).toBeDefined();
+    expect(findRowById(rows, 'p2')).toBeUndefined(); // Quinn fails the filter
+    expect(findRowById(rows, 'p3')).toBeDefined();
+    expect(findRowById(rows, 'p4')).toBeDefined();
   });
 
   test('whereSequences — EXISTS for some() quantifier', async () => {
@@ -861,9 +980,19 @@ describe('Fuseki SELECT — quantifiers and aggregates', () => {
     const mapped = mapSparqlSelectResult(results, ir);
     expect(Array.isArray(mapped)).toBe(true);
     const rows = mapped as ResultRow[];
-    // whereSequences: friends.some(f => f.name='Jinx') AND name='Semmy'
-    // p1 has friend p3(Jinx) and name=Semmy → p1 matches
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    // whereSequences: Person.select() with outer where
+    //   friends.some(f => f.name='Jinx') AND name='Semmy'
+    // p1 has friend p3(Jinx) and name=Semmy → only p1 matches
+    // select() returns id only (no property projections)
+    expect(rows.length).toBe(1);
+
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+    expect(p1!.id).toContain('p1');
+
+    expect(findRowById(rows, 'p2')).toBeUndefined();
+    expect(findRowById(rows, 'p3')).toBeUndefined();
+    expect(findRowById(rows, 'p4')).toBeUndefined();
   });
 
   test('countEquals — HAVING with aggregate', async () => {
@@ -878,7 +1007,17 @@ describe('Fuseki SELECT — quantifiers and aggregates', () => {
     const rows = mapped as ResultRow[];
     // countEquals: friends.size() = 2
     // p1 has 2 friends → matches. p2 has 2 friends → matches.
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    // p3, p4 have 0 friends → don't match.
+    expect(rows.length).toBe(2);
+
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+
+    expect(findRowById(rows, 'p3')).toBeUndefined();
+    expect(findRowById(rows, 'p4')).toBeUndefined();
   });
 });
 

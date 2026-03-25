@@ -39,11 +39,14 @@ export class FusekiStore extends SparqlStore {
   }
 
   async init(): Promise<void> {
-    // Check availability
+    // Check availability (use AbortController for jsdom compatibility)
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
     const response = await fetch(this.baseUrl, {
       method: 'HEAD',
-      signal: AbortSignal.timeout(2000),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     if (response.status !== 200) {
       throw new Error(`Fuseki not available at ${this.baseUrl}`);
     }

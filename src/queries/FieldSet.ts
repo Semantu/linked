@@ -55,6 +55,9 @@ export type FieldSetEntry = {
   path: PropertyPath;
   alias?: string;
   scopedFilter?: WherePath;
+  /** Index into path.segments indicating which segment the scopedFilter applies to.
+   *  Defaults to the last segment if not specified. */
+  scopedFilterIndex?: number;
   /** Nested object selection — the user explicitly selected sub-fields (e.g. `p.friends.select(...)`) */
   subSelect?: FieldSet;
   aggregation?: 'count';
@@ -604,8 +607,18 @@ export class FieldSet<R = any, Source = any> {
       const entry: FieldSetEntry = {
         path: new PropertyPath(rootShape, segments),
       };
-      if (obj.wherePath) {
-        entry.scopedFilter = obj.wherePath as WherePath;
+      // Walk from leaf to root to find wherePath on any object in the chain.
+      // Track which segment it belongs to so desugarEntry attaches the filter correctly.
+      let current: QueryBuilderObjectLike | undefined = obj;
+      let leafDistance = 0;
+      while (current) {
+        if (current.wherePath) {
+          entry.scopedFilter = current.wherePath as WherePath;
+          entry.scopedFilterIndex = segments.length - 1 - leafDistance;
+          break;
+        }
+        current = current.subject;
+        leafDistance++;
       }
       return entry;
     }

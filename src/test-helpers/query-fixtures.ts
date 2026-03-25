@@ -188,6 +188,8 @@ export const queryFactories = {
     Person.select((p) => p.friends.bestFriend.bestFriend.name),
   whereFriendsNameEquals: () =>
     Person.select((p) => p.friends.where((f) => f.name.equals('Moa'))),
+  whereFriendsNameEqualsChained: () =>
+    Person.select((p) => p.friends.where((f) => f.name.equals('Moa')).name),
   whereBestFriendEquals: () =>
     Person.select().where((p) => p.bestFriend.equals(entity('p3'))),
   whereHobbyEquals: () =>

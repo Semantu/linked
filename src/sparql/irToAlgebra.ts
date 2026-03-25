@@ -283,8 +283,19 @@ export function selectToAlgebra(
     processPattern(pattern, registry, traverseTriples, optionalPropertyTriples, filteredTraverseBlocks);
   }
 
-  // 3. Process projection expressions, where clause, orderBy expressions
-  //    to discover any additional property_expr references
+  // 3. Pre-register filter property references BEFORE processing projections.
+  //    This ensures that property triples needed by inline where filters are
+  //    co-located inside the filtered OPTIONAL block, not in separate OPTIONALs.
+  const filterPropertyTriplesMap = new Map<number, SparqlTriple[]>();
+  filteredTraverseBlocks.forEach((block, idx) => {
+    const filterPropertyTriples: SparqlTriple[] = [];
+    processExpressionForProperties(block.filter, registry, filterPropertyTriples);
+    filterPropertyTriplesMap.set(idx, filterPropertyTriples);
+  });
+
+  // 4. Process projection expressions, where clause, orderBy expressions
+  //    to discover any additional property_expr references.
+  //    Properties already registered by inline filters (above) will be skipped.
   for (const item of query.projection) {
     processExpressionForProperties(
       item.expression,
@@ -311,7 +322,7 @@ export function selectToAlgebra(
     }
   }
 
-  // 4. Build the algebra tree
+  // 5. Build the algebra tree
   //    - Start with the required BGP (type triple + traverse triples)
   //    - Wrap each optional property triple in a LeftJoin
   const requiredBgp: SparqlBGP = {
@@ -321,17 +332,21 @@ export function selectToAlgebra(
 
   let algebra: SparqlAlgebraNode = requiredBgp;
 
-  // 4b. Build filtered OPTIONAL blocks for inline where traversals.
-  //     Each block contains: traverse triple + filter property triples + FILTER.
-  //     Property triples referenced by the filter are co-located inside the OPTIONAL
-  //     so that the filter can reference them.
-  for (const block of filteredTraverseBlocks) {
-    const filterPropertyTriples: SparqlTriple[] = [];
-    processExpressionForProperties(block.filter, registry, filterPropertyTriples);
+  // 5b. Build filtered OPTIONAL blocks for inline where traversals.
+  //     Each block contains: traverse triple + OPTIONAL property triples + FILTER.
+  //     Filter property triples are nested as OPTIONALs so that OR filters work
+  //     even when some entities lack certain properties.
+  for (let i = 0; i < filteredTraverseBlocks.length; i++) {
+    const block = filteredTraverseBlocks[i];
+    const filterPropertyTriples = filterPropertyTriplesMap.get(i) || [];
     const filterExpr = convertExpression(block.filter, registry, filterPropertyTriples);
-    const blockTriples: SparqlTriple[] = [block.traverseTriple, ...filterPropertyTriples];
-    const blockBgp: SparqlBGP = {type: 'bgp', triples: blockTriples};
-    const filteredBlock: SparqlFilter = {type: 'filter', expression: filterExpr, inner: blockBgp};
+    // Start with the traverse triple as the required BGP
+    let blockInner: SparqlAlgebraNode = {type: 'bgp', triples: [block.traverseTriple]};
+    // Wrap each filter property triple in its own nested OPTIONAL
+    for (const propTriple of filterPropertyTriples) {
+      blockInner = wrapOptional(blockInner, {type: 'bgp', triples: [propTriple]});
+    }
+    const filteredBlock: SparqlFilter = {type: 'filter', expression: filterExpr, inner: blockInner};
     algebra = wrapOptional(algebra, filteredBlock);
   }
 
@@ -624,11 +639,9 @@ function processExpressionForProperties(
       }
       break;
     case 'exists_expr':
-      // exists_expr in IR has pattern + filter
-      // Process the filter for property references
-      if (expr.filter) {
-        processExpressionForProperties(expr.filter, registry, optionalPropertyTriples);
-      }
+      // exists_expr filter properties belong INSIDE the EXISTS block, not in
+      // the outer scope. Do NOT register them here — convertExpression's
+      // exists_expr handler will collect and emit them locally.
       break;
     case 'context_property_expr': {
       // Context entity property — emit a triple with fixed IRI as subject.
@@ -753,18 +766,30 @@ function convertExpression(
       };
 
     case 'exists_expr': {
-      // Convert exists expression with inner pattern + filter
-      const innerAlgebra = convertExistsPattern(
+      // Convert exists expression with inner pattern + filter.
+      // Filter property triples must live INSIDE the EXISTS block
+      // (not in the outer scope), so we collect them locally.
+      let innerAlgebra = convertExistsPattern(
         expr.pattern,
         registry,
       );
 
       if (expr.filter) {
+        // First, discover and register filter property references,
+        // collecting their triples into a local array (NOT the outer scope).
+        const existsPropertyTriples: SparqlTriple[] = [];
+        processExpressionForProperties(expr.filter, registry, existsPropertyTriples);
+
+        // Now convert the filter expression (variables are registered above).
         const filterExpr = convertExpression(
           expr.filter,
           registry,
-          optionalPropertyTriples,
+          existsPropertyTriples, // unused — properties already registered
         );
+        // Add filter property triples inside the EXISTS
+        for (const propTriple of existsPropertyTriples) {
+          innerAlgebra = joinNodes(innerAlgebra, {type: 'bgp', triples: [propTriple]})!;
+        }
         // Wrap the inner pattern with a filter
         const filteredInner: SparqlFilter = {
           type: 'filter',

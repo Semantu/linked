@@ -4,15 +4,15 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 import type {NodeShape, PropertyShape} from './SHACL.js';
-import {
+import type {
   QueryBuildFn,
   QueryResponseToResultType,
   QueryShape,
   SelectAllQueryResponse,
   WhereClause,
 } from '../queries/SelectQuery.js';
-import {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
-import {NodeId} from '../queries/MutationQuery.js';
+import type {NodeReferenceValue, UpdatePartial} from '../queries/QueryFactory.js';
+import type {NodeId} from '../queries/MutationQuery.js';
 import {QueryBuilder} from '../queries/QueryBuilder.js';
 import {CreateBuilder} from '../queries/CreateBuilder.js';
 import {UpdateBuilder} from '../queries/UpdateBuilder.js';
