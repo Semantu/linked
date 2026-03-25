@@ -381,7 +381,9 @@ WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
     ?a0 <${P}/friends> ?a1 .
-    ?a1 <${P}/name> ?a1_name .
+    OPTIONAL {
+      ?a1 <${P}/name> ?a1_name .
+    }
     FILTER(?a1_name = "Moa")
   }
 }`);
@@ -410,8 +412,12 @@ WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
     ?a0 <${P}/friends> ?a1 .
-    ?a1 <${P}/name> ?a1_name .
-    ?a1 <${P}/hobby> ?a1_hobby .
+    OPTIONAL {
+      ?a1 <${P}/name> ?a1_name .
+    }
+    OPTIONAL {
+      ?a1 <${P}/hobby> ?a1_hobby .
+    }
     FILTER(?a1_name = "Moa" && ?a1_hobby = "Jogging")
   }
 }`);
@@ -426,8 +432,12 @@ WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
     ?a0 <${P}/friends> ?a1 .
-    ?a1 <${P}/name> ?a1_name .
-    ?a1 <${P}/hobby> ?a1_hobby .
+    OPTIONAL {
+      ?a1 <${P}/name> ?a1_name .
+    }
+    OPTIONAL {
+      ?a1 <${P}/hobby> ?a1_hobby .
+    }
     FILTER(?a1_name = "Jinx" || ?a1_hobby = "Jogging")
   }
 }`);
@@ -442,8 +452,12 @@ WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
     ?a0 <${P}/friends> ?a1 .
-    ?a1 <${P}/name> ?a1_name .
-    ?a1 <${P}/hobby> ?a1_hobby .
+    OPTIONAL {
+      ?a1 <${P}/name> ?a1_name .
+    }
+    OPTIONAL {
+      ?a1 <${P}/hobby> ?a1_hobby .
+    }
     FILTER((?a1_name = "Jinx" || ?a1_hobby = "Jogging") && ?a1_name = "Moa")
   }
 }`);
@@ -458,8 +472,12 @@ WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
     ?a0 <${P}/friends> ?a1 .
-    ?a1 <${P}/name> ?a1_name .
-    ?a1 <${P}/hobby> ?a1_hobby .
+    OPTIONAL {
+      ?a1 <${P}/name> ?a1_name .
+    }
+    OPTIONAL {
+      ?a1 <${P}/hobby> ?a1_hobby .
+    }
     FILTER(?a1_name = "Jinx" || ?a1_hobby = "Jogging" && ?a1_name = "Moa")
   }
 }`);
@@ -553,11 +571,9 @@ WHERE {
 SELECT DISTINCT ?a0
 WHERE {
   ?a0 rdf:type <${P}> .
-  OPTIONAL {
-    ?a1 <${P}/name> ?a1_name .
-  }
   FILTER(EXISTS {
     ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
     FILTER(?a1_name = "Moa")
   })
 }`);
@@ -570,11 +586,9 @@ WHERE {
 SELECT DISTINCT ?a0
 WHERE {
   ?a0 rdf:type <${P}> .
-  OPTIONAL {
-    ?a1 <${P}/name> ?a1_name .
-  }
   FILTER(!(EXISTS {
     ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
     FILTER(!(?a1_name = "Moa" || ?a1_name = "Jinx"))
   }))
 }`);
@@ -588,13 +602,11 @@ SELECT DISTINCT ?a0
 WHERE {
   ?a0 rdf:type <${P}> .
   OPTIONAL {
-    ?a1 <${P}/name> ?a1_name .
-  }
-  OPTIONAL {
     ?a0 <${P}/name> ?a0_name .
   }
   FILTER(EXISTS {
     ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
     FILTER(?a1_name = "Jinx")
   } && ?a0_name = "Semmy")
 }`);
@@ -627,14 +639,10 @@ WHERE {
   OPTIONAL {
     ?a0 <${P}/name> ?a0_name .
   }
-  OPTIONAL {
-    ?a1 <${P}/name> ?a1_name .
-  }
-  OPTIONAL {
-    <user-1> <${P}/name> ?__ctx__user_1_name .
-  }
   FILTER(EXISTS {
     ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/name> ?a1_name .
+    <user-1> <${P}/name> ?__ctx__user_1_name .
     FILTER(?a1_name = ?__ctx__user_1_name)
   })
 }`);
