@@ -1,5 +1,5 @@
 import {Shape, ShapeConstructor} from '../shapes/Shape.js';
-import {PropertyShape} from '../shapes/SHACL.js';
+import type {PropertyShape} from '../shapes/SHACL.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
 import {shacl} from '../ontologies/shacl.js';
 import {CoreSet} from '../collections/CoreSet.js';

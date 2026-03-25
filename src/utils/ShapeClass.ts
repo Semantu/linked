@@ -1,5 +1,5 @@
 import {Shape, ShapeConstructor} from '../shapes/Shape.js';
-import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
+import type {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {ICoreIterable} from '../interfaces/ICoreIterable.js';
 import {NodeReferenceValue} from './NodeReference.js';
 
@@ -46,6 +46,13 @@ export function getShapeClass(
   // SAFETY: The map stores `typeof Shape` (abstract), but registered shapes are always
   // concrete subclasses with a constructor and static .shape — i.e. ShapeConstructor.
   return nodeShapeToShapeClass.get(id) as unknown as ShapeConstructor | undefined;
+}
+
+/**
+ * Returns all registered shape classes (keyed by NodeShape URI).
+ */
+export function getAllShapeClasses(): Map<string, typeof Shape> {
+  return nodeShapeToShapeClass;
 }
 
 /**

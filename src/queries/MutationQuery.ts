@@ -10,7 +10,7 @@ import {
   UpdateNodePropertyValue,
   UpdatePartial,
 } from './QueryFactory.js';
-import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
+import type {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {Shape} from '../shapes/Shape.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import {isExpressionNode, ExpressionNode} from '../expressions/ExpressionNode.js';
@@ -211,7 +211,7 @@ export class MutationQueryFactory extends QueryFactory {
         if (!propShape.valueShape) {
           //It's possible to define the shape of the value in the value itself for properties who do not define the shape in their objectProperty
           if (value.shape) {
-            if (!(value.shape.shape instanceof NodeShape)) {
+            if (!value.shape.shape || typeof (value.shape.shape as NodeShape).getPropertyShapes !== 'function') {
               throw new Error(
                 `The value of property "shape" is invalid and should be a class that extends Shape.`,
               );

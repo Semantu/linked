@@ -1,4 +1,4 @@
-import {NodeShape} from '../shapes/SHACL.js';
+import type {NodeShape} from '../shapes/SHACL.js';
 import {
   NodeDescriptionValue,
   NodeReferenceValue,

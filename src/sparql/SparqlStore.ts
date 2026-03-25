@@ -115,4 +115,18 @@ export abstract class SparqlStore implements IQuadStore {
       count: query.ids.length,
     };
   }
+
+  /**
+   * Execute a raw SPARQL query string directly against the store.
+   * Defaults to SELECT; pass `'update'` for INSERT/DELETE operations.
+   */
+  async rawQuery(
+    sparql: string,
+    mode?: 'query' | 'update',
+  ): Promise<SparqlJsonResults | void> {
+    if (mode === 'update') {
+      return this.executeSparqlUpdate(sparql);
+    }
+    return this.executeSparqlSelect(sparql);
+  }
 }

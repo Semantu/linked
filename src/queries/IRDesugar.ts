@@ -233,7 +233,10 @@ const desugarEntry = (entry: FieldSetEntry): DesugaredSelection => {
     return {kind: 'selection_path', steps: []};
   }
 
-  // Build property steps, attaching scopedFilter to the last segment
+  // Build property steps, attaching scopedFilter to the segment it belongs to.
+  // scopedFilterIndex indicates which segment the .where() was called on;
+  // defaults to the last segment for backwards compatibility.
+  const filterIndex = entry.scopedFilterIndex ?? (segments.length - 1);
   const steps: DesugaredStep[] = segments.map((segment, i) => {
     const step: DesugaredPropertyStep = {
       kind: 'property_step',
@@ -242,7 +245,7 @@ const desugarEntry = (entry: FieldSetEntry): DesugaredSelection => {
     if (segment.path && isComplexPathExpr(segment.path)) {
       step.pathExpr = segment.path;
     }
-    if (entry.scopedFilter && i === segments.length - 1) {
+    if (entry.scopedFilter && i === filterIndex) {
       step.where = toWhere(entry.scopedFilter);
     }
     return step;

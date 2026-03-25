@@ -1,4 +1,4 @@
-import {NodeShape, PropertyShape} from '../shapes/SHACL.js';
+import type {NodeShape, PropertyShape} from '../shapes/SHACL.js';
 import {Shape} from '../shapes/Shape.js';
 import {ShapeSet} from '../collections/ShapeSet.js';
 import {NodeReferenceValue} from '../utils/NodeReference.js';
