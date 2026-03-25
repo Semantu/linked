@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.1
+
+### Patch Changes
+
+- [#37](https://github.com/Semantu/linked/pull/37) [`0a3adc1`](https://github.com/Semantu/linked/commit/0a3adc1b9c47d9101da6d5c8b09e44531e2e396f) Thanks [@flyon](https://github.com/flyon)! - Fix SPARQL generation for `.where()` filters with OR conditions and `.every()`/`.some()` quantifiers.
+  Tightened assertions across multiple integration tests.
+
 ## 2.2.0
 
 ### Patch Changes
