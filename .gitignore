@@ -4,3 +4,4 @@ packages/
 .claude/
 .agents/
 OLD
+tsconfig.tsbuildinfo
