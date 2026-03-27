@@ -179,6 +179,57 @@ describe('Mutation builders — immutability', () => {
 });
 
 // =============================================================================
+// Input non-mutation tests
+// =============================================================================
+
+describe('Mutation builders — input non-mutation', () => {
+  test('create with __id does not mutate the input object', async () => {
+    const input = {
+      __id: `${tmpEntityBase}preserve-me`,
+      name: 'Alice',
+      hobby: 'Chess',
+    } as any;
+    const inputCopy = {...input};
+
+    // Build the IR (which internally calls convertNodeDescription)
+    await captureDslIR(() => Person.create(input));
+
+    // The original input object must be untouched
+    expect(input).toEqual(inputCopy);
+    expect(input.__id).toBe(`${tmpEntityBase}preserve-me`);
+    expect(input.name).toBe('Alice');
+  });
+
+  test('create with nested object ref does not strip id from the ref', async () => {
+    const friendRef = {id: `${tmpEntityBase}friend-1`, name: 'Bob'};
+    const input = {name: 'Alice', bestFriend: friendRef};
+
+    await captureDslIR(() => Person.create(input));
+
+    // The nested object's id must survive — this is the bug that broke JWT token creation
+    expect(friendRef.id).toBe(`${tmpEntityBase}friend-1`);
+    expect(friendRef.name).toBe('Bob');
+  });
+
+  test('sequential creates reusing objects do not corrupt earlier results', async () => {
+    const user = {id: `${tmpEntityBase}user-1`};
+    const accountInput = {name: 'Account', bestFriend: user};
+
+    // First build: uses user as a nested reference
+    const ir1 = await captureDslIR(() => Person.create(accountInput));
+
+    // user.id must still be intact after first create consumed it
+    expect(user.id).toBe(`${tmpEntityBase}user-1`);
+
+    // Second build: same user ref should still work
+    const ir2 = await captureDslIR(() =>
+      Person.create({name: 'Account2', bestFriend: user}),
+    );
+    expect(user.id).toBe(`${tmpEntityBase}user-1`);
+  });
+});
+
+// =============================================================================
 // Guard tests (LP3 + LP4: consistent validation across builders)
 // =============================================================================
 
