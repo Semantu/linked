@@ -14,9 +14,8 @@
  */
 import {describe, expect, test, beforeAll, afterAll} from '@jest/globals';
 import {
-  isFusekiAvailable,
+  ensureFuseki,
   createTestDataset,
-  deleteTestDataset,
   loadTestData,
   executeSparqlQuery,
   clearAllData,
@@ -109,7 +108,7 @@ const TEST_DATA = `
 let fusekiAvailable = false;
 
 beforeAll(async () => {
-  fusekiAvailable = await isFusekiAvailable();
+  fusekiAvailable = await ensureFuseki();
   if (!fusekiAvailable) {
     console.log(
       'Fuseki not available — skipping property path integration tests',
@@ -123,7 +122,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!fusekiAvailable) return;
-  await deleteTestDataset();
+  await clearAllData();
 });
 
 // ---------------------------------------------------------------------------

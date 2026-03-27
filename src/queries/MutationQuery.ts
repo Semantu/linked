@@ -110,18 +110,20 @@ export class MutationQueryFactory extends QueryFactory {
   }
 
   protected convertNodeDescription(
-    obj: Record<string, unknown>,
+    inputObj: Record<string, unknown>,
     shape: NodeShape,
   ): NodeDescriptionValue {
+    // Shallow-copy so we never mutate the caller's object
+    const obj = {...inputObj};
     const props = shape.getPropertyShapes(true);
     const fields: UpdateNodePropertyValue[] = [];
     let id;
-    if (obj && '__id' in obj) {
+    if ('__id' in obj) {
       //if the object has a __id key, then we should use that in the result
       id = obj.__id.toString();
       //but we should not include it in the fields
       delete obj.__id;
-    } else if (obj && 'id' in obj) {
+    } else if ('id' in obj) {
       //if the object has an id key alongside other data properties,
       //treat it as a nested create with a predefined ID
       id = String(obj.id);

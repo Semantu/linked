@@ -27,7 +27,7 @@ import type {
 } from '../queries/IntermediateRepresentation';
 import type {SparqlJsonResults} from '../sparql/resultMapping';
 import {
-  isFusekiAvailable,
+  ensureFuseki,
   createTestDataset,
   deleteTestDataset,
   loadTestData,
@@ -117,7 +117,7 @@ const TEST_DATA = `
 let fusekiAvailable = false;
 
 beforeAll(async () => {
-  fusekiAvailable = await isFusekiAvailable();
+  fusekiAvailable = await ensureFuseki();
   if (!fusekiAvailable) {
     console.log('Fuseki not available, skipping integration tests');
     return;
@@ -129,7 +129,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!fusekiAvailable) return;
-  await deleteTestDataset();
+  await clearAllData();
 });
 
 // ---------------------------------------------------------------------------
@@ -1742,6 +1742,79 @@ describe('SparqlStore (via FusekiStore)', () => {
 
     // Cleanup
     await executeSparqlUpdate(`DELETE WHERE { <${result.id}> ?p ?o }`);
+  });
+
+  test('createQuery — respects custom __id (fixed URI)', async () => {
+    if (!fusekiAvailable) return;
+
+    const customUri = `${ENT}custom-webid-test`;
+    const ir = (await captureQuery(
+      queryFactories.createWithFixedId,
+    )) as IRCreateMutation;
+
+    // The IR should have data.id set from __id
+    expect(ir.data.id).toBe(`${tmpEntityBase}fixed-id`);
+
+    // Override to our test URI to avoid collision with other tests
+    ir.data.id = customUri;
+    const result = await store.createQuery(ir);
+
+    // The returned id must be the custom URI, not an auto-generated one
+    expect(result.id).toBe(customUri);
+
+    // Verify it was stored under the custom URI in Fuseki
+    const verifyResult = await executeSparqlQuery(`
+      SELECT ?name WHERE { <${customUri}> <${P}/name> ?name . }
+    `);
+    expect(verifyResult.results.bindings.length).toBe(1);
+    expect(verifyResult.results.bindings[0].name.value).toBe('Fixed');
+
+    // Cleanup
+    await executeSparqlUpdate(`DELETE WHERE { <${customUri}> ?p ?o }`);
+  });
+
+  test('createQuery — sequential creates do not corrupt shared object refs', async () => {
+    if (!fusekiAvailable) return;
+
+    // Simulate the auth pattern: create user, then create account referencing user
+    const userIr = (await captureQuery(
+      queryFactories.createSimple,
+    )) as IRCreateMutation;
+    const userResult = await store.createQuery(userIr);
+    expect(userResult.id).toBeDefined();
+
+    // Now create a second entity that references the first via bestFriend
+    const accountIr = (await captureQuery(() =>
+      Person.create({
+        name: 'Account Entity',
+        bestFriend: {id: userResult.id},
+      } as any),
+    )) as IRCreateMutation;
+    const accountResult = await store.createQuery(accountIr);
+    expect(accountResult.id).toBeDefined();
+
+    // The critical check: userResult.id must still be intact after being
+    // passed as a nested reference to the second create.
+    // Before the fix, convertNodeDescription would delete id from the
+    // shared object, making userResult.id undefined.
+    expect(userResult.id).toBeDefined();
+    expect(typeof userResult.id).toBe('string');
+
+    // Verify both entities exist in Fuseki
+    const userVerify = await executeSparqlQuery(`
+      SELECT ?name WHERE { <${userResult.id}> <${P}/name> ?name . }
+    `);
+    expect(userVerify.results.bindings.length).toBe(1);
+
+    const accountVerify = await executeSparqlQuery(`
+      SELECT ?name WHERE { <${accountResult.id}> <${P}/name> ?name . }
+    `);
+    expect(accountVerify.results.bindings.length).toBe(1);
+    expect(accountVerify.results.bindings[0].name.value).toBe('Account Entity');
+
+    // Cleanup
+    await executeSparqlUpdate(`DELETE WHERE { <${userResult.id}> ?p ?o }`);
+    await executeSparqlUpdate(`DELETE WHERE { <${accountResult.id}> ?p ?o }`);
   });
 
   test('updateQuery — updates entity and returns echoed result', async () => {
