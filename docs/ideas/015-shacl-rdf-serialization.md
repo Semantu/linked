@@ -163,3 +163,37 @@ The current SHACL ontology file may not export all needed predicates. Need to ve
 3. Which output format(s) to support initially?
 4. Should the serialized output include `sh:closed` / `sh:ignoredProperties` based on shape configuration?
 5. How does this interact with shape inheritance (subclasses)?
+
+---
+
+## Extension: Shape Metadata Sync to Database
+
+### Context
+
+`lincd-server` had a `syncShapes()` function (`utils/Shapes.ts`) that built a shape metadata index on the backend at startup. It read all locally-registered `NodeShape` instances (populated by `@linkedShape` decorators) and converted their metadata (label, targetClass, properties with SHACL constraints) into a `Record<string, ShapeDetails>` index.
+
+The DB sync portion (comparing local shapes against shapes stored in Fuseki, creating/updating/deleting to keep them in sync) was already mostly commented out before the `@_linked/core` migration. The old sync code used `resolveQueryPropertyPath`, `instanceof NamedNode`, `instanceof NodeSet` — all removed APIs.
+
+### What's needed
+
+A function in `@_linked/core` that takes all registered `NodeShape` instances and produces **update/create queries** that can be executed against any store (Fuseki, etc.) to sync shape metadata. This is the "code is source of truth → Fuseki is runtime cache" pattern described in ARCHITECTURE_REVIEW.md.
+
+### Requirements
+
+1. Read all `NodeShape` instances from `NodeShape.getLocalInstancesByType()`
+2. For each shape, produce a `CreateQuery` or `UpdateQuery` containing:
+   - Shape-level: `id`, `label`, `targetClass`, `description`, `type`, `extends`
+   - Per-property: `id`, `label`, `path`, `valueShape`, `datatype`, `description`, `maxCount`, `minCount`, `nodeKind`, `name`, plus SHACL validation constraints (`pattern`, `minLength`, `maxLength`, `minInclusive`, `maxInclusive`, `minExclusive`, `maxExclusive`, `inList`)
+3. Handle diffing: compare local metadata against what's in the database, only update what changed
+4. Handle deletions: shapes/properties that exist in DB but not locally should be removed
+5. Output should be executable via `LinkedStorage` (the standard query execution path)
+
+### Relation to SHACL RDF serialization
+
+This is complementary to Routes A/B/C above. The serialization routes produce SHACL-compliant RDF triples for external consumption (validation engines, triplestores). The sync function uses the **query engine's own mutation pipeline** (`CreateQuery`/`UpdateQuery`) to maintain shape metadata as queryable data in the project's store.
+
+Both could share the shape-walking logic (iterating NodeShape properties, reading constraints), but the output format differs: raw RDF triples vs. query builder calls.
+
+### Current state
+
+The old `syncShapes()` in `lincd-server` is marked deprecated. The active code path just builds an in-memory index (no DB writes). The DB sync code is commented out. Once this feature is implemented in `@_linked/core`, the old code can be fully removed.
