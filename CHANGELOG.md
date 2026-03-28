@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.3
+
+### Patch Changes
+
+- [#42](https://github.com/Semantu/linked/pull/42) [`1b4d114`](https://github.com/Semantu/linked/commit/1b4d114f22aec4e984b744733dbab603df8b282d) Thanks [@flyon](https://github.com/flyon)! - Add `PendingQueryContext` for lazy query context resolution. `getQueryContext()` now returns a live reference with a lazy `.id` getter instead of `null` when the context hasn't been set yet. `QueryBuilder.for()` accepts `PendingQueryContext` and `null`. New `hasPendingContext()` method. `setQueryContext(name, null)` now properly clears the entry. Test Fuseki port changed to 3939; `globalSetup`/`globalTeardown` added for reliable Fuseki auto-start.
+
 ## 2.2.2
 
 ### Patch Changes
