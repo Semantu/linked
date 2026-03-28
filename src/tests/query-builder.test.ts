@@ -6,7 +6,7 @@ import {QueryBuilder} from '../queries/QueryBuilder';
 import {UpdateBuilder} from '../queries/UpdateBuilder';
 import {walkPropertyPath} from '../queries/PropertyPath';
 import {FieldSet} from '../queries/FieldSet';
-import {setQueryContext} from '../queries/QueryContext';
+import {setQueryContext, getQueryContext, PendingQueryContext} from '../queries/QueryContext';
 
 const personShape = Person.shape;
 
@@ -649,5 +649,104 @@ describe('Person.update(data).for(id) chaining', () => {
       .set({hobby: 'Chess'})
       .build();
     expect(sanitize(dslIR)).toEqual(sanitize(builderIR));
+  });
+});
+
+// =============================================================================
+// PendingQueryContext — lazy resolution & .for() integration
+// =============================================================================
+
+describe('PendingQueryContext', () => {
+  afterEach(() => {
+    // Reset the context entry used by these tests
+    setQueryContext('pendingTest', null as any);
+  });
+
+  test('getQueryContext returns PendingQueryContext when name is not set', () => {
+    const ctx = getQueryContext('neverSet');
+    expect(ctx).toBeInstanceOf(PendingQueryContext);
+    expect((ctx as any).contextName).toBe('neverSet');
+  });
+
+  test('.id is undefined before context is set', () => {
+    const ctx = getQueryContext('pendingTest');
+    expect(ctx.id).toBeUndefined();
+  });
+
+  test('.id resolves lazily after setQueryContext', () => {
+    const ctx = getQueryContext('pendingTest');
+    expect(ctx.id).toBeUndefined();
+
+    setQueryContext('pendingTest', {id: `${tmpEntityBase}u1`}, Person);
+    expect(ctx.id).toBe(`${tmpEntityBase}u1`);
+  });
+
+  test('.id tracks value changes', () => {
+    const ctx = getQueryContext('pendingTest');
+
+    setQueryContext('pendingTest', {id: `${tmpEntityBase}u1`}, Person);
+    expect(ctx.id).toBe(`${tmpEntityBase}u1`);
+
+    setQueryContext('pendingTest', {id: `${tmpEntityBase}u2`}, Person);
+    expect(ctx.id).toBe(`${tmpEntityBase}u2`);
+  });
+
+  test('getQueryContext returns resolved value after context is set', () => {
+    setQueryContext('pendingTest', {id: `${tmpEntityBase}u1`}, Person);
+    const ctx = getQueryContext('pendingTest');
+    expect(ctx).not.toBeInstanceOf(PendingQueryContext);
+    expect(ctx.id).toBe(`${tmpEntityBase}u1`);
+  });
+});
+
+// =============================================================================
+// QueryBuilder — .for() with PendingQueryContext
+// =============================================================================
+
+describe('QueryBuilder — .for() with PendingQueryContext', () => {
+  afterEach(() => {
+    setQueryContext('qbPending', null as any);
+  });
+
+  test('.for(PendingQueryContext) sets pending context name', () => {
+    const pending = new PendingQueryContext('qbPending');
+    const qb = Person.select((p) => p.name).for(pending as any);
+    expect(qb.hasPendingContext()).toBe(true);
+  });
+
+  test('hasPendingContext() returns false after context resolves', () => {
+    const pending = new PendingQueryContext('qbPending');
+    const qb = Person.select((p) => p.name).for(pending as any);
+    expect(qb.hasPendingContext()).toBe(true);
+
+    // Set the context — the PendingQueryContext's .id getter now resolves
+    setQueryContext('qbPending', {id: `${tmpEntityBase}u1`}, Person);
+    expect(qb.hasPendingContext()).toBe(false);
+  });
+
+  test('toJSON().subject resolves lazily from PendingQueryContext', () => {
+    const pending = new PendingQueryContext('qbPending');
+    const qb = Person.select((p) => p.name).for(pending as any);
+
+    // Before context is set, subject is undefined
+    expect(qb.toJSON().subject).toBeUndefined();
+
+    // After setting the context, subject resolves via the lazy getter
+    setQueryContext('qbPending', {id: `${tmpEntityBase}u1`}, Person);
+    expect(qb.toJSON().subject).toBe(`${tmpEntityBase}u1`);
+  });
+
+  test('.for(null) still sets _nullSubject (not pending)', () => {
+    const qb = Person.select((p) => p.name).for(null);
+    expect(qb.hasPendingContext()).toBe(false);
+  });
+
+  test('.for(id) after .for(PendingQueryContext) clears pending state', () => {
+    const pending = new PendingQueryContext('qbPending');
+    const qb = Person.select((p) => p.name)
+      .for(pending as any)
+      .for(`${tmpEntityBase}p1`);
+    expect(qb.hasPendingContext()).toBe(false);
+    expect(qb.toJSON().subject).toBe(`${tmpEntityBase}p1`);
   });
 });

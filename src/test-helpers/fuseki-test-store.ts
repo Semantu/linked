@@ -15,7 +15,7 @@ import {execSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {resolve} from 'node:path';
 
-const FUSEKI_BASE_URL = process.env.FUSEKI_BASE_URL || 'http://localhost:3030';
+export const FUSEKI_BASE_URL = process.env.FUSEKI_BASE_URL || 'http://localhost:3939';
 const FUSEKI_ADMIN_PASSWORD = process.env.FUSEKI_ADMIN_PASSWORD || 'admin';
 const DATASET_NAME = 'nashville-test';
 
