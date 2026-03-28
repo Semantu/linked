@@ -18,6 +18,7 @@ import {getQueryDispatch} from './queryDispatch.js';
 import type {NodeReferenceValue} from './QueryFactory.js';
 import {resolveUriOrThrow} from '../utils/NodeReference.js';
 import {FieldSet, FieldSetJSON, FieldSetFieldJSON} from './FieldSet.js';
+import {PendingQueryContext} from './QueryContext.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 
 /** JSON representation of a QueryBuilder. */
@@ -60,6 +61,8 @@ interface QueryBuilderInit<S extends Shape, R> {
   fieldSet?: FieldSet;
   preloads?: PreloadEntry[];
   minusEntries?: MinusEntry<S>[];
+  _nullSubject?: boolean;
+  _pendingContextName?: string;
 }
 
 /**
@@ -92,6 +95,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   private readonly _fieldSet?: FieldSet;
   private readonly _preloads?: PreloadEntry[];
   private readonly _minusEntries?: MinusEntry<S>[];
+  private readonly _nullSubject?: boolean;
+  private readonly _pendingContextName?: string;
 
   private constructor(init: QueryBuilderInit<S, R>) {
     this._shape = init.shape;
@@ -108,6 +113,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     this._fieldSet = init.fieldSet;
     this._preloads = init.preloads;
     this._minusEntries = init.minusEntries;
+    this._nullSubject = init._nullSubject;
+    this._pendingContextName = init._pendingContextName;
   }
 
   /** Create a shallow clone with overrides. */
@@ -127,6 +134,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       fieldSet: this._fieldSet,
       preloads: this._preloads,
       minusEntries: this._minusEntries,
+      _nullSubject: this._nullSubject,
+      _pendingContextName: this._pendingContextName,
       ...overrides,
     });
   }
@@ -234,9 +243,27 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   }
 
   /** Target a single entity by ID. Implies singleResult; unwraps array Result type. */
-  for(id: string | NodeReferenceValue): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result> {
+  for(id: string | NodeReferenceValue | null | undefined): QueryBuilder<S, R, Result extends (infer E)[] ? E : Result> {
+    if (id instanceof PendingQueryContext) {
+      // Store the pending context as subject — its .id getter resolves lazily
+      // from the global context map when the query is built/serialized.
+      return this.clone({subject: id as any, subjects: undefined, singleResult: true, _nullSubject: false, _pendingContextName: id.contextName}) as any;
+    }
+    if (id == null) {
+      // Return a builder that resolves to null when executed (no subject = no query).
+      // This commonly happens when getQueryContext() returns null before the user is authenticated.
+      return this.clone({subject: undefined, subjects: undefined, singleResult: true, _nullSubject: true}) as any;
+    }
     const subject: NodeReferenceValue = typeof id === 'string' ? {id: resolveUriOrThrow(id)} : id;
     return this.clone({subject, subjects: undefined, singleResult: true}) as any;
+  }
+
+  /**
+   * Whether the query has a pending (lazy) context that hasn't resolved yet.
+   * Returns true when .for() received a PendingQueryContext whose value isn't available yet.
+   */
+  hasPendingContext(): boolean {
+    return !!(this._pendingContextName && !this._subject?.id);
   }
 
   /** Target multiple entities by ID, or all if no ids given. */
@@ -514,6 +541,14 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
 
   /** Execute the query and return results. */
   exec(): Promise<Result> {
+    if (this._nullSubject) {
+      // .for(null/undefined) was called — return null instead of executing a broken query.
+      return Promise.resolve(null as Result);
+    }
+    if (this._pendingContextName && !this._subject?.id) {
+      // Pending context hasn't resolved yet — return null rather than querying without a subject.
+      return Promise.resolve(null as Result);
+    }
     return getQueryDispatch().selectQuery(this.build()) as Promise<Result>;
   }
 

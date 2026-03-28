@@ -266,6 +266,12 @@ export function selectToAlgebra(
   }> = [];
 
   // 1. Root shape scan → BGP with type triple
+  if (!query?.root) {
+    throw new Error(
+      'selectToAlgebra: query.root is undefined. The query IR is missing its root shape scan. ' +
+      'This usually means the query was built with a null/undefined subject (e.g. getQueryContext returned null).',
+    );
+  }
   const rootAlias = query.root.alias;
   const shapeUri = query.root.shape;
   const typeTriple = tripleOf(
