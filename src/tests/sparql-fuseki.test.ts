@@ -1686,7 +1686,7 @@ describe('Fuseki mutations — DELETE', () => {
 // SparqlStore base class — via FusekiStore
 // =========================================================================
 
-const FUSEKI_BASE_URL = process.env.FUSEKI_BASE_URL || 'http://localhost:3030';
+const FUSEKI_BASE_URL = process.env.FUSEKI_BASE_URL || 'http://localhost:3939';
 const FUSEKI_DATASET = 'nashville-test';
 
 describe('SparqlStore (via FusekiStore)', () => {

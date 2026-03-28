@@ -6,6 +6,8 @@ module.exports = {
   roots: ['<rootDir>/src/tests'],
   testMatch: ['<rootDir>/src/tests/*.test.ts'],
   testPathIgnorePatterns: ['/old/'],
+  globalSetup: '<rootDir>/src/tests/global-setup.ts',
+  globalTeardown: '<rootDir>/src/tests/global-teardown.ts',
   transform: {
     '^.+\\.(ts|tsx)$': [
       'ts-jest',

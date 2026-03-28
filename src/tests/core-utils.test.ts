@@ -14,7 +14,7 @@ import {
 import {LinkedStorage} from '../utils/LinkedStorage';
 import {getQueryDispatch} from '../queries/queryDispatch';
 import {isWhereEvaluationPath} from '../queries/SelectQuery';
-import {getQueryContext, setQueryContext} from '../queries/QueryContext';
+import {getQueryContext, setQueryContext, PendingQueryContext} from '../queries/QueryContext';
 import {NodeReferenceValue} from '../utils/NodeReference';
 
 const makeProp = (base: string) => (suffix: string): NodeReferenceValue => ({
@@ -202,14 +202,17 @@ describe('Query dispatch delegation', () => {
 });
 
 describe('QueryContext edge cases', () => {
-  test('getQueryContext returns null for unknown names', () => {
-    expect(getQueryContext('missing-context')).toBeNull();
+  test('getQueryContext returns PendingQueryContext for unknown names', () => {
+    const ctx = getQueryContext('missing-context');
+    expect(ctx).toBeInstanceOf(PendingQueryContext);
+    expect(ctx.id).toBeUndefined();
   });
 
   test('setQueryContext warns and ignores invalid values', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     setQueryContext('invalid-context', {foo: 'bar'} as any);
-    expect(getQueryContext('invalid-context')).toBeNull();
+    // Invalid value was rejected, so context remains unset → PendingQueryContext
+    expect(getQueryContext('invalid-context')).toBeInstanceOf(PendingQueryContext);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -217,7 +220,8 @@ describe('QueryContext edge cases', () => {
   test('setQueryContext warns when QResult provided without shapeType', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     setQueryContext('missing-shape', {id: 'ctx-1'} as any);
-    expect(getQueryContext('missing-shape')).toBeNull();
+    // Value was rejected, so context remains unset → PendingQueryContext
+    expect(getQueryContext('missing-shape')).toBeInstanceOf(PendingQueryContext);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

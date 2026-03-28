@@ -4,7 +4,7 @@ services:
     environment:
       - ADMIN_PASSWORD=admin
     ports:
-      - '3030:3030'
+      - '3939:3030'
     healthcheck:
       test:
         [
