@@ -610,7 +610,7 @@ describe('mapSparqlSelectResult', () => {
 
 describe('mapSparqlSelectResult — 3-level nesting', () => {
   // Query: Person.select(p => p.friends.select(f => f.bestFriend.select(bf => bf.name)))
-  // root: a0, traverse a0→a1 (hasFriend), traverse a1→a2 (bestFriend)
+  // root: a0, traverse a0→a1 (hasFriend), traverse a1→a2 (bestFriend, maxCount: 1)
   // projection: a3 = a2.name
 
   function deepNestedQuery(): IRSelectQuery {
@@ -619,7 +619,7 @@ describe('mapSparqlSelectResult — 3-level nesting', () => {
       root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
       patterns: [
         {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_HAS_FRIEND},
-        {kind: 'traverse', from: 'a1', to: 'a2', property: PROP_BEST_FRIEND},
+        {kind: 'traverse', from: 'a1', to: 'a2', property: PROP_BEST_FRIEND, maxCount: 1},
       ],
       projection: [
         {alias: 'a3', expression: {kind: 'property_expr', sourceAlias: 'a2', property: PROP_NAME}},
@@ -656,31 +656,29 @@ describe('mapSparqlSelectResult — 3-level nesting', () => {
     expect(result.length).toBe(1);
     expect(result[0].id).toBe(E('p1'));
 
-    // Level 1: friends
+    // Level 1: friends (multi-value, still an array)
     const friends = result[0].hasFriend as ResultRow[];
     expect(Array.isArray(friends)).toBe(true);
     expect(friends.length).toBe(2);
 
-    // p2's bestFriend chain
+    // p2's bestFriend (single-value, maxCount: 1 → unwrapped)
     const friendP2 = friends.find((f) => f.id === E('p2'))!;
     expect(friendP2).toBeDefined();
-    const p2Best = friendP2.bestFriend as ResultRow[];
-    expect(Array.isArray(p2Best)).toBe(true);
-    expect(p2Best.length).toBe(1);
-    expect(p2Best[0].id).toBe(E('p3'));
-    expect(p2Best[0].name).toBe('Jinx');
+    const p2Best = friendP2.bestFriend as ResultRow;
+    expect(Array.isArray(p2Best)).toBe(false);
+    expect(p2Best.id).toBe(E('p3'));
+    expect(p2Best.name).toBe('Jinx');
 
-    // p3's bestFriend chain
+    // p3's bestFriend (single-value, maxCount: 1 → unwrapped)
     const friendP3 = friends.find((f) => f.id === E('p3'))!;
     expect(friendP3).toBeDefined();
-    const p3Best = friendP3.bestFriend as ResultRow[];
-    expect(Array.isArray(p3Best)).toBe(true);
-    expect(p3Best.length).toBe(1);
-    expect(p3Best[0].id).toBe(E('p1'));
-    expect(p3Best[0].name).toBe('Semmy');
+    const p3Best = friendP3.bestFriend as ResultRow;
+    expect(Array.isArray(p3Best)).toBe(false);
+    expect(p3Best.id).toBe(E('p1'));
+    expect(p3Best.name).toBe('Semmy');
   });
 
-  test('entity with missing deep binding has empty nested array', () => {
+  test('entity with missing deep binding has null for single-value property', () => {
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a1', 'a2', 'a2_name']},
       results: {
@@ -708,9 +706,152 @@ describe('mapSparqlSelectResult — 3-level nesting', () => {
 
     const friendP4 = friends.find((f) => f.id === E('p4'))!;
     expect(friendP4).toBeDefined();
-    const p4Best = friendP4.bestFriend as ResultRow[];
-    expect(Array.isArray(p4Best)).toBe(true);
-    expect(p4Best.length).toBe(0);
+    // Single-value property with no match → null (not empty array)
+    expect(friendP4.bestFriend).toBeNull();
+  });
+});
+
+describe('mapSparqlSelectResult — single-value property (maxCount: 1)', () => {
+  test('single-value object property returns single ResultRow, not array', () => {
+    // Simulates: Person.select(p => p.bestFriend) where bestFriend has maxCount: 1
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_BEST_FRIEND, maxCount: 1},
+      ],
+      projection: [
+        {alias: 'p0', expression: {kind: 'alias_expr', alias: 'a1'}},
+      ],
+      resultMap: [{key: PROP_BEST_FRIEND, alias: 'p0'}],
+      singleResult: false,
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p3')},
+          },
+          {
+            a0: {type: 'uri', value: E('p2')},
+            a1: {type: 'uri', value: E('p4')},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(2);
+
+    // bestFriend should be a single ResultRow, NOT an array
+    const p1Best = result[0].bestFriend as ResultRow;
+    expect(Array.isArray(p1Best)).toBe(false);
+    expect(p1Best).not.toBeNull();
+    expect(p1Best.id).toBe(E('p3'));
+
+    const p2Best = result[1].bestFriend as ResultRow;
+    expect(Array.isArray(p2Best)).toBe(false);
+    expect(p2Best).not.toBeNull();
+    expect(p2Best.id).toBe(E('p4'));
+  });
+
+  test('single-value object property with no match returns null', () => {
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_BEST_FRIEND, maxCount: 1},
+      ],
+      projection: [
+        {alias: 'p0', expression: {kind: 'alias_expr', alias: 'a1'}},
+      ],
+      resultMap: [{key: PROP_BEST_FRIEND, alias: 'p0'}],
+      singleResult: false,
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            // a1 missing — no bestFriend
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    expect(result[0].bestFriend).toBeNull();
+  });
+
+  test('single-value property with nested select returns unwrapped ResultRow', () => {
+    // Simulates: Person.select(p => p.bestFriend.select(bf => bf.name))
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_BEST_FRIEND, maxCount: 1},
+      ],
+      projection: [
+        {alias: 'a2', expression: {kind: 'property_expr', sourceAlias: 'a1', property: PROP_NAME}},
+      ],
+      resultMap: [{key: PROP_NAME, alias: 'a2'}],
+      singleResult: false,
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1', 'a1_name']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p3')},
+            a1_name: {type: 'literal', value: 'Jinx'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+
+    // bestFriend should be a single ResultRow with name, not an array
+    const bestFriend = result[0].bestFriend as ResultRow;
+    expect(Array.isArray(bestFriend)).toBe(false);
+    expect(bestFriend).not.toBeNull();
+    expect(bestFriend.id).toBe(E('p3'));
+    expect(bestFriend.name).toBe('Jinx');
+  });
+
+  test('multi-value property without maxCount still returns array', () => {
+    // hasFriend has no maxCount → should remain as array
+    const query = nestedSelectQuery(
+      PROP_HAS_FRIEND,
+      [{key: PROP_NAME, property: PROP_NAME}],
+    );
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1', 'a1_name']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p2')},
+            a1_name: {type: 'literal', value: 'Moa'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const friends = result[0].hasFriend;
+    expect(Array.isArray(friends)).toBe(true);
   });
 });
 

@@ -150,6 +150,7 @@ type NestedGroup = {
   traverseAlias: string;
   flatFields: FieldDescriptor[];
   nestedGroups: NestedGroup[];
+  maxCount?: number;
 };
 
 type NestingDescriptor = {
@@ -168,14 +169,14 @@ type NestingDescriptor = {
 function buildAliasChain(
   sourceAlias: string,
   rootAlias: string,
-  traverseMap: Map<string, {from: string; property: string}>,
-): Array<{alias: string; property: string}> {
-  const chain: Array<{alias: string; property: string}> = [];
+  traverseMap: Map<string, {from: string; property: string; maxCount?: number}>,
+): Array<{alias: string; property: string; maxCount?: number}> {
+  const chain: Array<{alias: string; property: string; maxCount?: number}> = [];
   let current = sourceAlias;
   while (current !== rootAlias) {
     const info = traverseMap.get(current);
     if (!info) break;
-    chain.unshift({alias: current, property: info.property});
+    chain.unshift({alias: current, property: info.property, maxCount: info.maxCount});
     current = info.from;
   }
   return chain;
@@ -187,7 +188,7 @@ function buildAliasChain(
  */
 function insertIntoTree(
   root: {flatFields: FieldDescriptor[]; nestedGroups: NestedGroup[]},
-  chain: Array<{alias: string; property: string}>,
+  chain: Array<{alias: string; property: string; maxCount?: number}>,
   field: FieldDescriptor,
 ): void {
   if (chain.length === 0) {
@@ -212,6 +213,7 @@ function insertIntoTree(
       traverseAlias: target.alias,
       flatFields: [],
       nestedGroups: [],
+      maxCount: target.maxCount,
     };
     root.nestedGroups.push(group);
   }
@@ -228,10 +230,10 @@ function buildNestingDescriptor(query: IRSelectQuery): NestingDescriptor {
   const rootAlias = query.root.alias;
 
   // Build a map from alias → traverse pattern (to identify which aliases are traversals)
-  const traverseMap = new Map<string, {from: string; property: string}>();
+  const traverseMap = new Map<string, {from: string; property: string; maxCount?: number}>();
   for (const pattern of query.patterns) {
     if (pattern.kind === 'traverse') {
-      traverseMap.set(pattern.to, {from: pattern.from, property: pattern.property});
+      traverseMap.set(pattern.to, {from: pattern.from, property: pattern.property, maxCount: pattern.maxCount});
     }
   }
 
@@ -449,6 +451,29 @@ function collectLiteralTraversalValue(
 }
 
 /**
+ * Assigns the collected value of a nested group to a result row,
+ * unwrapping single-value properties (maxCount <= 1) from arrays to
+ * a single ResultRow or null.
+ */
+function assignNestedGroupValue(
+  row: ResultRow,
+  nestedGroup: NestedGroup,
+  bindings: SparqlBinding[],
+  literalAliases: Set<string>,
+): void {
+  if (literalAliases.has(nestedGroup.traverseAlias)) {
+    row[nestedGroup.key] = collectLiteralTraversalValue(nestedGroup, bindings);
+  } else {
+    const collected = collectNestedGroup(nestedGroup, bindings);
+    if (typeof nestedGroup.maxCount === 'number' && nestedGroup.maxCount <= 1) {
+      row[nestedGroup.key] = collected.length > 0 ? collected[0] : null;
+    } else {
+      row[nestedGroup.key] = collected;
+    }
+  }
+}
+
+/**
  * Recursively collects entities for a nested group from a set of bindings.
  * Groups bindings by the nested entity's ID, populates fields, and recurses
  * into any deeper nested groups.
@@ -479,11 +504,7 @@ function collectNestedGroup(
   const deepLiteralAliases = detectLiteralTraversals(nestedGroup.nestedGroups, allNestedBindings);
   for (const [, entry] of entityMap) {
     for (const deeperGroup of nestedGroup.nestedGroups) {
-      if (deepLiteralAliases.has(deeperGroup.traverseAlias)) {
-        entry.row[deeperGroup.key] = collectLiteralTraversalValue(deeperGroup, entry.bindings);
-      } else {
-        entry.row[deeperGroup.key] = collectNestedGroup(deeperGroup, entry.bindings);
-      }
+      assignNestedGroupValue(entry.row, deeperGroup, entry.bindings, deepLiteralAliases);
     }
   }
 
@@ -531,11 +552,7 @@ function mapNestedRows(
 
     // Nested groups — recursively collect traversed entities (or literal values)
     for (const nestedGroup of descriptor.nestedGroups) {
-      if (literalAliases.has(nestedGroup.traverseAlias)) {
-        row[nestedGroup.key] = collectLiteralTraversalValue(nestedGroup, groupBindings);
-      } else {
-        row[nestedGroup.key] = collectNestedGroup(nestedGroup, groupBindings);
-      }
+      assignNestedGroupValue(row, nestedGroup, groupBindings, literalAliases);
     }
 
     rows.push(row);
