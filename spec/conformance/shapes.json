@@ -1,0 +1,111 @@
+{
+  "$comment": "Test shapes used by conformance fixtures. Implementations must register these shapes before running tests.",
+  "shapes": {
+    "Person": {
+      "id": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "properties": {
+        "name": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "datatype": "string",
+          "maxCount": 1
+        },
+        "hobby": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/hobby",
+          "datatype": "string",
+          "maxCount": 1
+        },
+        "nickNames": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/nickNames",
+          "datatype": "string"
+        },
+        "birthDate": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/birthDate",
+          "datatype": "xsd:dateTime",
+          "maxCount": 1
+        },
+        "isRealPerson": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/isRealPerson",
+          "datatype": "xsd:boolean",
+          "maxCount": 1
+        },
+        "bestFriend": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend",
+          "shape": "Person",
+          "maxCount": 1
+        },
+        "friends": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "shape": "Person"
+        },
+        "pets": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/pets",
+          "shape": "Pet"
+        },
+        "firstPet": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/firstPet",
+          "shape": "Pet",
+          "maxCount": 1
+        },
+        "pluralTestProp": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/person/pluralTestProp",
+          "shape": "Person"
+        }
+      }
+    },
+    "Employee": {
+      "id": "https://data.lincd.org/module/-_linked-core/shape/employee",
+      "extends": "Person",
+      "properties": {
+        "name": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/employee/name",
+          "datatype": "string",
+          "maxCount": 1
+        },
+        "bestFriend": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/employee/bestFriend",
+          "shape": "Employee",
+          "maxCount": 1
+        },
+        "department": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/employee/department",
+          "datatype": "string",
+          "maxCount": 1
+        }
+      }
+    },
+    "Pet": {
+      "id": "https://data.lincd.org/module/-_linked-core/shape/pet",
+      "properties": {
+        "bestFriend": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/pet/bestFriend",
+          "shape": "Pet",
+          "maxCount": 1
+        }
+      }
+    },
+    "Dog": {
+      "id": "https://data.lincd.org/module/-_linked-core/shape/dog",
+      "extends": "Pet",
+      "properties": {
+        "guardDogLevel": {
+          "path": "https://data.lincd.org/module/-_linked-core/shape/dog/guardDogLevel",
+          "datatype": "xsd:integer",
+          "maxCount": 1
+        }
+      }
+    }
+  },
+  "baseShapeProperties": {
+    "$comment": "Properties inherited by all shapes from the base Shape class",
+    "label": {
+      "path": "https://data.lincd.org/module/lincd/shape/shape/label",
+      "datatype": "string",
+      "maxCount": 1
+    },
+    "type": {
+      "path": "https://data.lincd.org/module/lincd/shape/shape/type",
+      "datatype": "string",
+      "maxCount": 1
+    }
+  }
+}

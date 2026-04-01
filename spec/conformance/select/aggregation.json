@@ -1,0 +1,239 @@
+[
+  {
+    "name": "countFriends",
+    "description": "Count friends with GROUP BY",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "aggregate_expr",
+            "name": "count",
+            "args": [
+              {
+                "kind": "property_expr",
+                "sourceAlias": "a0",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+              }
+            ]
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "friends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT ?a0 (count(?a0_friends) AS ?a1)\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a0_friends .\n  }\n}\nGROUP BY ?a0"
+  },
+  {
+    "name": "countNestedFriends",
+    "description": "Count nested friends.friends with GROUP BY",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "aggregate_expr",
+            "name": "count",
+            "args": [
+              {
+                "kind": "property_expr",
+                "sourceAlias": "a1",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+              }
+            ]
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "friends",
+          "alias": "a1_agg"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT ?a0 (count(?a1_friends) AS ?a1_agg)\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n  OPTIONAL {\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1_friends .\n  }\n}\nGROUP BY ?a0"
+  },
+  {
+    "name": "countLabel",
+    "description": "Count with custom label in sub-select",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "aggregate_expr",
+            "name": "count",
+            "args": [
+              {
+                "kind": "property_expr",
+                "sourceAlias": "a1",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+              }
+            ]
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "numFriends",
+          "alias": "a1_agg"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT ?a0 (count(?a1_friends) AS ?a1_agg)\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n  OPTIONAL {\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1_friends .\n  }\n}\nGROUP BY ?a0"
+  },
+  {
+    "name": "customResultNumFriends",
+    "description": "Custom result object with count",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "aggregate_expr",
+            "name": "count",
+            "args": [
+              {
+                "kind": "property_expr",
+                "sourceAlias": "a0",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+              }
+            ]
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "numFriends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT ?a0 (count(?a0_friends) AS ?a1)\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a0_friends .\n  }\n}\nGROUP BY ?a0"
+  },
+  {
+    "name": "countEquals",
+    "description": "Where clause on aggregate (HAVING)",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [],
+      "where": {
+        "kind": "binary_expr",
+        "operator": "=",
+        "left": {
+          "kind": "aggregate_expr",
+          "name": "count",
+          "args": [
+            {
+              "kind": "property_expr",
+              "sourceAlias": "a0",
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+            }
+          ]
+        },
+        "right": {
+          "kind": "literal_expr",
+          "value": 2
+        }
+      },
+      "singleResult": false,
+      "resultMap": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nSELECT ?a0\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a0_friends .\n  }\n}\nGROUP BY ?a0\nHAVING(count(?a0_friends) = \"2\"^^xsd:integer)"
+  },
+  {
+    "name": "customResultEqualsBoolean",
+    "description": "Boolean comparison in projection",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "binary_expr",
+            "operator": "=",
+            "left": {
+              "kind": "property_expr",
+              "sourceAlias": "a0",
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend"
+            },
+            "right": {
+              "kind": "reference_expr",
+              "value": "linked://tmp/entities/p3"
+            }
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "isBestFriend",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 (?a0_bestFriend = <linked://tmp/entities/p3> AS ?a1)\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?a0_bestFriend .\n  }\n}"
+  }
+]

@@ -1,0 +1,205 @@
+[
+  {
+    "name": "minusMultiProperty",
+    "description": "MINUS: exclude where multiple properties exist",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "minus",
+          "pattern": {
+            "kind": "join",
+            "patterns": [
+              {
+                "kind": "traverse",
+                "from": "a0",
+                "to": "a1",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+              },
+              {
+                "kind": "traverse",
+                "from": "a0",
+                "to": "a2",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/nickNames"
+              }
+            ]
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  MINUS {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a1 .\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/nickNames> ?a2 .\n  }\n}"
+  },
+  {
+    "name": "minusNestedPath",
+    "description": "MINUS: exclude where nested path exists",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "minus",
+          "pattern": {
+            "kind": "join",
+            "patterns": [
+              {
+                "kind": "traverse",
+                "from": "a0",
+                "to": "a1",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend"
+              },
+              {
+                "kind": "traverse",
+                "from": "a1",
+                "to": "a2",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+              }
+            ]
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  MINUS {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?a1 .\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a2 .\n  }\n}"
+  },
+  {
+    "name": "minusMixed",
+    "description": "MINUS: flat and nested in one block",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "minus",
+          "pattern": {
+            "kind": "join",
+            "patterns": [
+              {
+                "kind": "traverse",
+                "from": "a0",
+                "to": "a1",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+              },
+              {
+                "kind": "traverse",
+                "from": "a0",
+                "to": "a2",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend"
+              },
+              {
+                "kind": "traverse",
+                "from": "a2",
+                "to": "a3",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+              }
+            ]
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  MINUS {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a1 .\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?a2 .\n    ?a2 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a3 .\n  }\n}"
+  },
+  {
+    "name": "minusSingleProperty",
+    "description": "MINUS: single property existence",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "minus",
+          "pattern": {
+            "kind": "traverse",
+            "from": "a0",
+            "to": "a1",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  MINUS {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a1 .\n  }\n}"
+  }
+]

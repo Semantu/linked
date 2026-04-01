@@ -1,0 +1,84 @@
+[
+  {
+    "name": "sortByAsc",
+    "description": "ORDER BY ASC on name",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "orderBy": [
+        {
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          },
+          "direction": "ASC"
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n}\nORDER BY ASC(?a0_name)"
+  },
+  {
+    "name": "sortByDesc",
+    "description": "ORDER BY DESC on name",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "orderBy": [
+        {
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          },
+          "direction": "DESC"
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n}\nORDER BY DESC(?a0_name)"
+  }
+]

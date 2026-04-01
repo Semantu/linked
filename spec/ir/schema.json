@@ -1,0 +1,552 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linked.md/spec/ir/schema.json",
+  "title": "Linked IR Schema",
+  "description": "JSON Schema for the Linked Intermediate Representation (IR). This is the canonical contract between language-specific query builders and backend compilers (SPARQL, SQL, etc.).",
+
+  "$defs": {
+    "IRAlias": {
+      "type": "string",
+      "description": "Alias identifier for a bound node (e.g. 'a0', 'a1')."
+    },
+
+    "IRValue": {
+      "oneOf": [
+        {"type": "string"},
+        {"type": "number"},
+        {"type": "boolean"},
+        {"type": "null"}
+      ],
+      "description": "Literal value: string, number, boolean, or null."
+    },
+
+    "IRDirection": {
+      "type": "string",
+      "enum": ["ASC", "DESC"]
+    },
+
+    "IRQuery": {
+      "oneOf": [
+        {"$ref": "#/$defs/IRSelectQuery"},
+        {"$ref": "#/$defs/IRCreateMutation"},
+        {"$ref": "#/$defs/IRUpdateMutation"},
+        {"$ref": "#/$defs/IRDeleteMutation"},
+        {"$ref": "#/$defs/IRDeleteAllMutation"},
+        {"$ref": "#/$defs/IRDeleteWhereMutation"},
+        {"$ref": "#/$defs/IRUpdateWhereMutation"}
+      ]
+    },
+
+    "IRSelectQuery": {
+      "type": "object",
+      "required": ["kind", "root", "patterns", "projection"],
+      "properties": {
+        "kind": {"const": "select"},
+        "root": {"$ref": "#/$defs/IRShapeScanPattern"},
+        "patterns": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRGraphPattern"}
+        },
+        "projection": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRProjectionItem"}
+        },
+        "where": {"$ref": "#/$defs/IRExpression"},
+        "orderBy": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IROrderByItem"}
+        },
+        "limit": {"type": "integer", "minimum": 0},
+        "offset": {"type": "integer", "minimum": 0},
+        "subjectId": {"type": "string"},
+        "subjectIds": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "singleResult": {"type": "boolean"},
+        "resultMap": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRResultMapEntry"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRProjectionItem": {
+      "type": "object",
+      "required": ["alias", "expression"],
+      "properties": {
+        "alias": {"$ref": "#/$defs/IRAlias"},
+        "expression": {"$ref": "#/$defs/IRExpression"}
+      },
+      "additionalProperties": false
+    },
+
+    "IROrderByItem": {
+      "type": "object",
+      "required": ["expression", "direction"],
+      "properties": {
+        "expression": {"$ref": "#/$defs/IRExpression"},
+        "direction": {"$ref": "#/$defs/IRDirection"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRResultMapEntry": {
+      "type": "object",
+      "required": ["key", "alias"],
+      "properties": {
+        "key": {"type": "string"},
+        "alias": {"$ref": "#/$defs/IRAlias"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRGraphPattern": {
+      "oneOf": [
+        {"$ref": "#/$defs/IRShapeScanPattern"},
+        {"$ref": "#/$defs/IRTraversePattern"},
+        {"$ref": "#/$defs/IRJoinPattern"},
+        {"$ref": "#/$defs/IROptionalPattern"},
+        {"$ref": "#/$defs/IRUnionPattern"},
+        {"$ref": "#/$defs/IRExistsPattern"},
+        {"$ref": "#/$defs/IRMinusPattern"}
+      ]
+    },
+
+    "IRShapeScanPattern": {
+      "type": "object",
+      "required": ["kind", "shape", "alias"],
+      "properties": {
+        "kind": {"const": "shape_scan"},
+        "shape": {"type": "string", "description": "Shape IRI"},
+        "alias": {"$ref": "#/$defs/IRAlias"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRTraversePattern": {
+      "type": "object",
+      "required": ["kind", "from", "to", "property"],
+      "properties": {
+        "kind": {"const": "traverse"},
+        "from": {"$ref": "#/$defs/IRAlias"},
+        "to": {"$ref": "#/$defs/IRAlias"},
+        "property": {"type": "string", "description": "Property IRI"},
+        "pathExpr": {"description": "Optional property path expression (language-specific)"},
+        "filter": {"$ref": "#/$defs/IRExpression"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRJoinPattern": {
+      "type": "object",
+      "required": ["kind", "patterns"],
+      "properties": {
+        "kind": {"const": "join"},
+        "patterns": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRGraphPattern"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IROptionalPattern": {
+      "type": "object",
+      "required": ["kind", "pattern"],
+      "properties": {
+        "kind": {"const": "optional"},
+        "pattern": {"$ref": "#/$defs/IRGraphPattern"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRUnionPattern": {
+      "type": "object",
+      "required": ["kind", "branches"],
+      "properties": {
+        "kind": {"const": "union"},
+        "branches": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRGraphPattern"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRExistsPattern": {
+      "type": "object",
+      "required": ["kind", "pattern"],
+      "properties": {
+        "kind": {"const": "exists"},
+        "pattern": {"$ref": "#/$defs/IRGraphPattern"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRMinusPattern": {
+      "type": "object",
+      "required": ["kind", "pattern"],
+      "properties": {
+        "kind": {"const": "minus"},
+        "pattern": {"$ref": "#/$defs/IRGraphPattern"},
+        "filter": {"$ref": "#/$defs/IRExpression"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRExpression": {
+      "oneOf": [
+        {"$ref": "#/$defs/IRLiteralExpression"},
+        {"$ref": "#/$defs/IRReferenceExpression"},
+        {"$ref": "#/$defs/IRAliasExpression"},
+        {"$ref": "#/$defs/IRPropertyExpression"},
+        {"$ref": "#/$defs/IRContextPropertyExpression"},
+        {"$ref": "#/$defs/IRBinaryExpression"},
+        {"$ref": "#/$defs/IRLogicalExpression"},
+        {"$ref": "#/$defs/IRNotExpression"},
+        {"$ref": "#/$defs/IRFunctionExpression"},
+        {"$ref": "#/$defs/IRAggregateExpression"},
+        {"$ref": "#/$defs/IRExistsExpression"}
+      ]
+    },
+
+    "IRLiteralExpression": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"const": "literal_expr"},
+        "value": {"$ref": "#/$defs/IRValue"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRReferenceExpression": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"const": "reference_expr"},
+        "value": {"type": "string", "description": "URI reference"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRAliasExpression": {
+      "type": "object",
+      "required": ["kind", "alias"],
+      "properties": {
+        "kind": {"const": "alias_expr"},
+        "alias": {"$ref": "#/$defs/IRAlias"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRPropertyExpression": {
+      "type": "object",
+      "required": ["kind", "sourceAlias", "property"],
+      "properties": {
+        "kind": {"const": "property_expr"},
+        "sourceAlias": {"$ref": "#/$defs/IRAlias"},
+        "property": {"type": "string", "description": "Property IRI"},
+        "pathExpr": {"description": "Optional property path expression"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRContextPropertyExpression": {
+      "type": "object",
+      "required": ["kind", "contextIri", "property"],
+      "properties": {
+        "kind": {"const": "context_property_expr"},
+        "contextIri": {"type": "string"},
+        "property": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRBinaryOperator": {
+      "type": "string",
+      "enum": ["=", "!=", ">", ">=", "<", "<=", "+", "-", "*", "/"]
+    },
+
+    "IRBinaryExpression": {
+      "type": "object",
+      "required": ["kind", "operator", "left", "right"],
+      "properties": {
+        "kind": {"const": "binary_expr"},
+        "operator": {"$ref": "#/$defs/IRBinaryOperator"},
+        "left": {"$ref": "#/$defs/IRExpression"},
+        "right": {"$ref": "#/$defs/IRExpression"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRLogicalOperator": {
+      "type": "string",
+      "enum": ["and", "or"]
+    },
+
+    "IRLogicalExpression": {
+      "type": "object",
+      "required": ["kind", "operator", "expressions"],
+      "properties": {
+        "kind": {"const": "logical_expr"},
+        "operator": {"$ref": "#/$defs/IRLogicalOperator"},
+        "expressions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRExpression"},
+          "minItems": 2
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRNotExpression": {
+      "type": "object",
+      "required": ["kind", "expression"],
+      "properties": {
+        "kind": {"const": "not_expr"},
+        "expression": {"$ref": "#/$defs/IRExpression"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRFunctionExpression": {
+      "type": "object",
+      "required": ["kind", "name", "args"],
+      "properties": {
+        "kind": {"const": "function_expr"},
+        "name": {"type": "string"},
+        "args": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRExpression"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRAggregateExpression": {
+      "type": "object",
+      "required": ["kind", "name", "args"],
+      "properties": {
+        "kind": {"const": "aggregate_expr"},
+        "name": {
+          "type": "string",
+          "enum": ["count", "sum", "avg", "min", "max"]
+        },
+        "args": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRExpression"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRExistsExpression": {
+      "type": "object",
+      "required": ["kind", "pattern"],
+      "properties": {
+        "kind": {"const": "exists_expr"},
+        "pattern": {"$ref": "#/$defs/IRGraphPattern"},
+        "filter": {"$ref": "#/$defs/IRExpression"}
+      },
+      "additionalProperties": false
+    },
+
+    "NodeReferenceValue": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRFieldUpdate": {
+      "type": "object",
+      "required": ["property", "value"],
+      "properties": {
+        "property": {"type": "string", "description": "Property IRI"},
+        "value": {"$ref": "#/$defs/IRFieldValue"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRFieldValue": {
+      "description": "A field value in a mutation: literal, reference, nested create, set modification, array, expression, or undefined/null.",
+      "oneOf": [
+        {"type": "string"},
+        {"type": "number"},
+        {"type": "boolean"},
+        {"type": "null"},
+        {"$ref": "#/$defs/NodeReferenceValue"},
+        {"$ref": "#/$defs/IRNodeData"},
+        {"$ref": "#/$defs/IRSetModificationValue"},
+        {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRFieldValue"}
+        },
+        {"$ref": "#/$defs/IRExpression"}
+      ]
+    },
+
+    "IRNodeData": {
+      "type": "object",
+      "required": ["shape", "fields"],
+      "properties": {
+        "shape": {"type": "string"},
+        "fields": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRFieldUpdate"}
+        },
+        "id": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRSetModificationValue": {
+      "type": "object",
+      "properties": {
+        "add": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRFieldValue"}
+        },
+        "remove": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/NodeReferenceValue"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRTraversalPattern": {
+      "type": "object",
+      "required": ["from", "property", "to"],
+      "properties": {
+        "from": {"type": "string"},
+        "property": {"type": "string"},
+        "to": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRCreateMutation": {
+      "type": "object",
+      "required": ["kind", "shape", "data"],
+      "properties": {
+        "kind": {"const": "create"},
+        "shape": {"type": "string"},
+        "data": {"$ref": "#/$defs/IRNodeData"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRUpdateMutation": {
+      "type": "object",
+      "required": ["kind", "shape", "id", "data"],
+      "properties": {
+        "kind": {"const": "update"},
+        "shape": {"type": "string"},
+        "id": {"type": "string"},
+        "data": {"$ref": "#/$defs/IRNodeData"},
+        "traversalPatterns": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRTraversalPattern"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRDeleteMutation": {
+      "type": "object",
+      "required": ["kind", "shape", "ids"],
+      "properties": {
+        "kind": {"const": "delete"},
+        "shape": {"type": "string"},
+        "ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/NodeReferenceValue"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRDeleteAllMutation": {
+      "type": "object",
+      "required": ["kind", "shape"],
+      "properties": {
+        "kind": {"const": "delete_all"},
+        "shape": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+
+    "IRDeleteWhereMutation": {
+      "type": "object",
+      "required": ["kind", "shape", "where", "wherePatterns"],
+      "properties": {
+        "kind": {"const": "delete_where"},
+        "shape": {"type": "string"},
+        "where": {"$ref": "#/$defs/IRExpression"},
+        "wherePatterns": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRGraphPattern"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "IRUpdateWhereMutation": {
+      "type": "object",
+      "required": ["kind", "shape", "data"],
+      "properties": {
+        "kind": {"const": "update_where"},
+        "shape": {"type": "string"},
+        "data": {"$ref": "#/$defs/IRNodeData"},
+        "where": {"$ref": "#/$defs/IRExpression"},
+        "wherePatterns": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRGraphPattern"}
+        },
+        "traversalPatterns": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/IRTraversalPattern"}
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "ConformanceFixture": {
+      "type": "object",
+      "required": ["name", "description", "ir"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique test case identifier"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of what this test covers"
+        },
+        "ir": {
+          "$ref": "#/$defs/IRQuery",
+          "description": "The canonical IR that all implementations must produce"
+        },
+        "expectedSparql": {
+          "type": "string",
+          "description": "The expected SPARQL output for SPARQL-targeting implementations"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "ConformanceFixtureFile": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/ConformanceFixture"},
+      "description": "A conformance fixture file is an array of test cases"
+    }
+  },
+
+  "$ref": "#/$defs/ConformanceFixtureFile"
+}

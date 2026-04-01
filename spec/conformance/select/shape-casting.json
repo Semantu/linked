@@ -1,0 +1,78 @@
+[
+  {
+    "name": "selectShapeSetAs",
+    "description": "Cast ShapeSet with .as(Dog)",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/pets"
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a1",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/dog/guardDogLevel"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/dog/guardDogLevel",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1_guardDogLevel ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/pets> ?a1 .\n  OPTIONAL {\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/dog/guardDogLevel> ?a1_guardDogLevel .\n  }\n}"
+  },
+  {
+    "name": "selectShapeAs",
+    "description": "Cast single shape with .as(Dog)",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/firstPet"
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a1",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/dog/guardDogLevel"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/dog/guardDogLevel",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1_guardDogLevel ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/firstPet> ?a1 .\n  OPTIONAL {\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/dog/guardDogLevel> ?a1_guardDogLevel .\n  }\n}"
+  }
+]

@@ -1,0 +1,349 @@
+[
+  {
+    "name": "selectName",
+    "description": "Select name property from Person",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n}"
+  },
+  {
+    "name": "selectFriends",
+    "description": "Select friends property from Person",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_friends\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a0_friends .\n  }\n}"
+  },
+  {
+    "name": "selectBirthDate",
+    "description": "Select birthDate property from Person",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/birthDate"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/birthDate",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_birthDate\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/birthDate> ?a0_birthDate .\n  }\n}"
+  },
+  {
+    "name": "selectIsRealPerson",
+    "description": "Select boolean isRealPerson from Person",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/isRealPerson"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/isRealPerson",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_isRealPerson\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/isRealPerson> ?a0_isRealPerson .\n  }\n}"
+  },
+  {
+    "name": "selectAll",
+    "description": "Select Person without specific properties (id only)",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [],
+      "singleResult": false,
+      "resultMap": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n}"
+  },
+  {
+    "name": "selectAllProperties",
+    "description": "Select all properties from Person",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        },
+        {
+          "alias": "a2",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+          }
+        },
+        {
+          "alias": "a3",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/nickNames"
+          }
+        },
+        {
+          "alias": "a4",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/birthDate"
+          }
+        },
+        {
+          "alias": "a5",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/isRealPerson"
+          }
+        },
+        {
+          "alias": "a6",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend"
+          }
+        },
+        {
+          "alias": "a7",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+          }
+        },
+        {
+          "alias": "a8",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/pets"
+          }
+        },
+        {
+          "alias": "a9",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/firstPet"
+          }
+        },
+        {
+          "alias": "a10",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/pluralTestProp"
+          }
+        },
+        {
+          "alias": "a11",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/lincd/shape/shape/label"
+          }
+        },
+        {
+          "alias": "a12",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/lincd/shape/shape/type"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/hobby",
+          "alias": "a2"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/nickNames",
+          "alias": "a3"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/birthDate",
+          "alias": "a4"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/isRealPerson",
+          "alias": "a5"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend",
+          "alias": "a6"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a7"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/pets",
+          "alias": "a8"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/firstPet",
+          "alias": "a9"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/pluralTestProp",
+          "alias": "a10"
+        },
+        {
+          "key": "https://data.lincd.org/module/lincd/shape/shape/label",
+          "alias": "a11"
+        },
+        {
+          "key": "https://data.lincd.org/module/lincd/shape/shape/type",
+          "alias": "a12"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name ?a0_hobby ?a0_nickNames ?a0_birthDate ?a0_isRealPerson ?a0_bestFriend ?a0_friends ?a0_pets ?a0_firstPet ?a0_pluralTestProp ?a0_label ?a0_type\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a0_hobby .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/nickNames> ?a0_nickNames .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/birthDate> ?a0_birthDate .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/isRealPerson> ?a0_isRealPerson .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?a0_bestFriend .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a0_friends .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/pets> ?a0_pets .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/firstPet> ?a0_firstPet .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/pluralTestProp> ?a0_pluralTestProp .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/lincd/shape/shape/label> ?a0_label .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/lincd/shape/shape/type> ?a0_type .\n  }\n}"
+  },
+  {
+    "name": "selectNonExistingMultiple",
+    "description": "Select multiple optional properties",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend"
+          }
+        },
+        {
+          "alias": "a2",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend",
+          "alias": "a1"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a2"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_bestFriend ?a0_friends\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?a0_bestFriend .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a0_friends .\n  }\n}"
+  }
+]

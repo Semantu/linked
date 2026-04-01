@@ -1,0 +1,368 @@
+[
+  {
+    "name": "selectWhereNameSemmy",
+    "description": "Outer where: name equals literal",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [],
+      "where": {
+        "kind": "binary_expr",
+        "operator": "=",
+        "left": {
+          "kind": "property_expr",
+          "sourceAlias": "a0",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+        },
+        "right": {
+          "kind": "literal_expr",
+          "value": "Semmy"
+        }
+      },
+      "singleResult": false,
+      "resultMap": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  FILTER(?a0_name = \"Semmy\")\n}"
+  },
+  {
+    "name": "whereBestFriendEquals",
+    "description": "Outer where: bestFriend equals reference",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [],
+      "where": {
+        "kind": "binary_expr",
+        "operator": "=",
+        "left": {
+          "kind": "property_expr",
+          "sourceAlias": "a0",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend"
+        },
+        "right": {
+          "kind": "reference_expr",
+          "value": "linked://tmp/entities/p3"
+        }
+      },
+      "singleResult": false,
+      "resultMap": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?a0_bestFriend .\n  }\n  FILTER(?a0_bestFriend = <linked://tmp/entities/p3>)\n}"
+  },
+  {
+    "name": "outerWhere",
+    "description": "Outer where with separate select",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+          }
+        }
+      ],
+      "where": {
+        "kind": "binary_expr",
+        "operator": "=",
+        "left": {
+          "kind": "property_expr",
+          "sourceAlias": "a0",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+        },
+        "right": {
+          "kind": "literal_expr",
+          "value": "Semmy"
+        }
+      },
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_friends\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a0_friends .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  FILTER(?a0_name = \"Semmy\")\n}"
+  },
+  {
+    "name": "outerWhereLimit",
+    "description": "Outer where with OR and LIMIT",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "where": {
+        "kind": "logical_expr",
+        "operator": "or",
+        "expressions": [
+          {
+            "kind": "binary_expr",
+            "operator": "=",
+            "left": {
+              "kind": "property_expr",
+              "sourceAlias": "a0",
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+            },
+            "right": {
+              "kind": "literal_expr",
+              "value": "Semmy"
+            }
+          },
+          {
+            "kind": "binary_expr",
+            "operator": "=",
+            "left": {
+              "kind": "property_expr",
+              "sourceAlias": "a0",
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+            },
+            "right": {
+              "kind": "literal_expr",
+              "value": "Moa"
+            }
+          }
+        ]
+      },
+      "limit": 1,
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  FILTER(?a0_name = \"Semmy\" || ?a0_name = \"Moa\")\n}\nLIMIT 1"
+  },
+  {
+    "name": "whereSomeImplicit",
+    "description": "Implicit some: friends.name.equals",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+        }
+      ],
+      "projection": [],
+      "where": {
+        "kind": "binary_expr",
+        "operator": "=",
+        "left": {
+          "kind": "property_expr",
+          "sourceAlias": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+        },
+        "right": {
+          "kind": "literal_expr",
+          "value": "Moa"
+        }
+      },
+      "singleResult": false,
+      "resultMap": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n  OPTIONAL {\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n  }\n  FILTER(?a1_name = \"Moa\")\n}"
+  },
+  {
+    "name": "whereSomeExplicit",
+    "description": "Explicit some(): EXISTS subquery",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [],
+      "where": {
+        "kind": "exists_expr",
+        "pattern": {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+        },
+        "filter": {
+          "kind": "binary_expr",
+          "operator": "=",
+          "left": {
+            "kind": "property_expr",
+            "sourceAlias": "a1",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          },
+          "right": {
+            "kind": "literal_expr",
+            "value": "Moa"
+          }
+        }
+      },
+      "singleResult": false,
+      "resultMap": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  FILTER(EXISTS {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n    FILTER(?a1_name = \"Moa\")\n  })\n}"
+  },
+  {
+    "name": "whereEvery",
+    "description": "Every(): NOT EXISTS(NOT ...) pattern",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [],
+      "where": {
+        "kind": "not_expr",
+        "expression": {
+          "kind": "exists_expr",
+          "pattern": {
+            "kind": "traverse",
+            "from": "a0",
+            "to": "a1",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+          },
+          "filter": {
+            "kind": "not_expr",
+            "expression": {
+              "kind": "logical_expr",
+              "operator": "or",
+              "expressions": [
+                {
+                  "kind": "binary_expr",
+                  "operator": "=",
+                  "left": {
+                    "kind": "property_expr",
+                    "sourceAlias": "a1",
+                    "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+                  },
+                  "right": {
+                    "kind": "literal_expr",
+                    "value": "Moa"
+                  }
+                },
+                {
+                  "kind": "binary_expr",
+                  "operator": "=",
+                  "left": {
+                    "kind": "property_expr",
+                    "sourceAlias": "a1",
+                    "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+                  },
+                  "right": {
+                    "kind": "literal_expr",
+                    "value": "Jinx"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "singleResult": false,
+      "resultMap": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  FILTER(!(EXISTS {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n    FILTER(!(?a1_name = \"Moa\" || ?a1_name = \"Jinx\"))\n  }))\n}"
+  },
+  {
+    "name": "whereSequences",
+    "description": "Chained some().and() sequence",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [],
+      "where": {
+        "kind": "logical_expr",
+        "operator": "and",
+        "expressions": [
+          {
+            "kind": "exists_expr",
+            "pattern": {
+              "kind": "traverse",
+              "from": "a0",
+              "to": "a1",
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+            },
+            "filter": {
+              "kind": "binary_expr",
+              "operator": "=",
+              "left": {
+                "kind": "property_expr",
+                "sourceAlias": "a1",
+                "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+              },
+              "right": {
+                "kind": "literal_expr",
+                "value": "Jinx"
+              }
+            }
+          },
+          {
+            "kind": "binary_expr",
+            "operator": "=",
+            "left": {
+              "kind": "property_expr",
+              "sourceAlias": "a0",
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+            },
+            "right": {
+              "kind": "literal_expr",
+              "value": "Semmy"
+            }
+          }
+        ]
+      },
+      "singleResult": false,
+      "resultMap": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  FILTER(EXISTS {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n    ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n    FILTER(?a1_name = \"Jinx\")\n  } && ?a0_name = \"Semmy\")\n}"
+  }
+]

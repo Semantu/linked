@@ -1,0 +1,415 @@
+[
+  {
+    "name": "whereFriendsNameEquals",
+    "description": "Inline where: friends filtered by name",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "filter": {
+            "kind": "binary_expr",
+            "operator": "=",
+            "left": {
+              "kind": "property_expr",
+              "sourceAlias": "a1",
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+            },
+            "right": {
+              "kind": "literal_expr",
+              "value": "Moa"
+            }
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "alias_expr",
+            "alias": "a1"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n    }\n    FILTER(?a1_name = \"Moa\")\n  }\n}"
+  },
+  {
+    "name": "whereHobbyEquals",
+    "description": "Inline where: hobby filtered by value",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby",
+          "filter": {
+            "kind": "binary_expr",
+            "operator": "=",
+            "left": {
+              "kind": "alias_expr",
+              "alias": "a1"
+            },
+            "right": {
+              "kind": "literal_expr",
+              "value": "Jogging"
+            }
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "alias_expr",
+            "alias": "a1"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/hobby",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a1 .\n    FILTER(?a1 = \"Jogging\")\n  }\n}"
+  },
+  {
+    "name": "whereAnd",
+    "description": "Inline where: AND condition on friends",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "filter": {
+            "kind": "logical_expr",
+            "operator": "and",
+            "expressions": [
+              {
+                "kind": "binary_expr",
+                "operator": "=",
+                "left": {
+                  "kind": "property_expr",
+                  "sourceAlias": "a1",
+                  "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+                },
+                "right": {
+                  "kind": "literal_expr",
+                  "value": "Moa"
+                }
+              },
+              {
+                "kind": "binary_expr",
+                "operator": "=",
+                "left": {
+                  "kind": "property_expr",
+                  "sourceAlias": "a1",
+                  "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+                },
+                "right": {
+                  "kind": "literal_expr",
+                  "value": "Jogging"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "alias_expr",
+            "alias": "a1"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n    }\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a1_hobby .\n    }\n    FILTER(?a1_name = \"Moa\" && ?a1_hobby = \"Jogging\")\n  }\n}"
+  },
+  {
+    "name": "whereOr",
+    "description": "Inline where: OR condition on friends",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "filter": {
+            "kind": "logical_expr",
+            "operator": "or",
+            "expressions": [
+              {
+                "kind": "binary_expr",
+                "operator": "=",
+                "left": {
+                  "kind": "property_expr",
+                  "sourceAlias": "a1",
+                  "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+                },
+                "right": {
+                  "kind": "literal_expr",
+                  "value": "Jinx"
+                }
+              },
+              {
+                "kind": "binary_expr",
+                "operator": "=",
+                "left": {
+                  "kind": "property_expr",
+                  "sourceAlias": "a1",
+                  "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+                },
+                "right": {
+                  "kind": "literal_expr",
+                  "value": "Jogging"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "alias_expr",
+            "alias": "a1"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n    }\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a1_hobby .\n    }\n    FILTER(?a1_name = \"Jinx\" || ?a1_hobby = \"Jogging\")\n  }\n}"
+  },
+  {
+    "name": "whereAndOrAnd",
+    "description": "Inline where: nested AND/OR/AND",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "filter": {
+            "kind": "logical_expr",
+            "operator": "and",
+            "expressions": [
+              {
+                "kind": "logical_expr",
+                "operator": "or",
+                "expressions": [
+                  {
+                    "kind": "binary_expr",
+                    "operator": "=",
+                    "left": {
+                      "kind": "property_expr",
+                      "sourceAlias": "a1",
+                      "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+                    },
+                    "right": {
+                      "kind": "literal_expr",
+                      "value": "Jinx"
+                    }
+                  },
+                  {
+                    "kind": "binary_expr",
+                    "operator": "=",
+                    "left": {
+                      "kind": "property_expr",
+                      "sourceAlias": "a1",
+                      "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+                    },
+                    "right": {
+                      "kind": "literal_expr",
+                      "value": "Jogging"
+                    }
+                  }
+                ]
+              },
+              {
+                "kind": "binary_expr",
+                "operator": "=",
+                "left": {
+                  "kind": "property_expr",
+                  "sourceAlias": "a1",
+                  "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+                },
+                "right": {
+                  "kind": "literal_expr",
+                  "value": "Moa"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "alias_expr",
+            "alias": "a1"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n    }\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a1_hobby .\n    }\n    FILTER((?a1_name = \"Jinx\" || ?a1_hobby = \"Jogging\") && ?a1_name = \"Moa\")\n  }\n}"
+  },
+  {
+    "name": "whereAndOrAndNested",
+    "description": "Inline where: deeply nested AND/OR/AND",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [
+        {
+          "kind": "traverse",
+          "from": "a0",
+          "to": "a1",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "filter": {
+            "kind": "logical_expr",
+            "operator": "or",
+            "expressions": [
+              {
+                "kind": "binary_expr",
+                "operator": "=",
+                "left": {
+                  "kind": "property_expr",
+                  "sourceAlias": "a1",
+                  "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+                },
+                "right": {
+                  "kind": "literal_expr",
+                  "value": "Jinx"
+                }
+              },
+              {
+                "kind": "logical_expr",
+                "operator": "and",
+                "expressions": [
+                  {
+                    "kind": "binary_expr",
+                    "operator": "=",
+                    "left": {
+                      "kind": "property_expr",
+                      "sourceAlias": "a1",
+                      "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+                    },
+                    "right": {
+                      "kind": "literal_expr",
+                      "value": "Jogging"
+                    }
+                  },
+                  {
+                    "kind": "binary_expr",
+                    "operator": "=",
+                    "left": {
+                      "kind": "property_expr",
+                      "sourceAlias": "a1",
+                      "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+                    },
+                    "right": {
+                      "kind": "literal_expr",
+                      "value": "Moa"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "alias_expr",
+            "alias": "a1"
+          }
+        }
+      ],
+      "singleResult": false,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a1\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?a1 .\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a1_name .\n    }\n    OPTIONAL {\n      ?a1 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a1_hobby .\n    }\n    FILTER(?a1_name = \"Jinx\" || ?a1_hobby = \"Jogging\" && ?a1_name = \"Moa\")\n  }\n}"
+  }
+]

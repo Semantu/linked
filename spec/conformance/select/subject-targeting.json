@@ -1,0 +1,186 @@
+[
+  {
+    "name": "selectById",
+    "description": "Select by subject ID (entity)",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "subjectId": "linked://tmp/entities/p1",
+      "singleResult": true,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  FILTER(?a0 = <linked://tmp/entities/p1>)\n}"
+  },
+  {
+    "name": "selectByIdReference",
+    "description": "Select by subject ID reference",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "subjectId": "linked://tmp/entities/p1",
+      "singleResult": true,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  FILTER(?a0 = <linked://tmp/entities/p1>)\n}"
+  },
+  {
+    "name": "selectNonExisting",
+    "description": "Select non-existing entity",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "subjectId": "https://does.not/exist",
+      "singleResult": true,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  FILTER(?a0 = <https://does.not/exist>)\n}"
+  },
+  {
+    "name": "selectUndefinedOnly",
+    "description": "Select undefined-only properties for entity",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+          }
+        },
+        {
+          "alias": "a2",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend"
+          }
+        }
+      ],
+      "subjectId": "linked://tmp/entities/p3",
+      "singleResult": true,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/hobby",
+          "alias": "a1"
+        },
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend",
+          "alias": "a2"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_hobby ?a0_bestFriend\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a0_hobby .\n  }\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?a0_bestFriend .\n  }\n  FILTER(?a0 = <linked://tmp/entities/p3>)\n}"
+  },
+  {
+    "name": "selectOne",
+    "description": "Select one with .one() / LIMIT 1",
+    "ir": {
+      "kind": "select",
+      "root": {
+        "kind": "shape_scan",
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "alias": "a0"
+      },
+      "patterns": [],
+      "projection": [
+        {
+          "alias": "a1",
+          "expression": {
+            "kind": "property_expr",
+            "sourceAlias": "a0",
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name"
+          }
+        }
+      ],
+      "where": {
+        "kind": "binary_expr",
+        "operator": "=",
+        "left": {
+          "kind": "alias_expr",
+          "alias": "a0"
+        },
+        "right": {
+          "kind": "reference_expr",
+          "value": "linked://tmp/entities/p1"
+        }
+      },
+      "limit": 1,
+      "singleResult": true,
+      "resultMap": [
+        {
+          "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          "alias": "a1"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nSELECT DISTINCT ?a0 ?a0_name\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/name> ?a0_name .\n  }\n  FILTER(?a0 = <linked://tmp/entities/p1>)\n}\nLIMIT 1"
+  }
+]

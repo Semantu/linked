@@ -1,0 +1,321 @@
+[
+  {
+    "name": "createSimple",
+    "description": "Create person with name and hobby",
+    "ir": {
+      "kind": "create",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+            "value": "Test Create"
+          },
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby",
+            "value": "Chess"
+          }
+        ]
+      }
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nINSERT DATA {\n  <http://example.org/data/person_01KN5CY6EB3DFVPNW4H9Q6VZKX> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  <http://example.org/data/person_01KN5CY6EB3DFVPNW4H9Q6VZKX> <https://data.lincd.org/module/-_linked-core/shape/person/name> \"Test Create\" .\n  <http://example.org/data/person_01KN5CY6EB3DFVPNW4H9Q6VZKX> <https://data.lincd.org/module/-_linked-core/shape/person/hobby> \"Chess\" .\n}"
+  },
+  {
+    "name": "createWithFriends",
+    "description": "Create person with friend references and nested create",
+    "ir": {
+      "kind": "create",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+            "value": "Test Create"
+          },
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+            "value": [
+              {
+                "id": "linked://tmp/entities/p2"
+              },
+              {
+                "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+                "fields": [
+                  {
+                    "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+                    "value": "New Friend"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nINSERT DATA {\n  <http://example.org/data/person_01KN5CY6EDXVY2H5JQGQD2Y9F8> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  <http://example.org/data/person_01KN5CY6EDXVY2H5JQGQD2Y9F8> <https://data.lincd.org/module/-_linked-core/shape/person/name> \"Test Create\" .\n  <http://example.org/data/person_01KN5CY6EDXVY2H5JQGQD2Y9F8> <https://data.lincd.org/module/-_linked-core/shape/person/friends> <linked://tmp/entities/p2> .\n  <http://example.org/data/person_01KN5CY6EDXVY2H5JQGQD2Y9F8> <https://data.lincd.org/module/-_linked-core/shape/person/friends> <http://example.org/data/person_01KN5CY6ED1R4M4SBA12SAS6SN> .\n  <http://example.org/data/person_01KN5CY6ED1R4M4SBA12SAS6SN> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  <http://example.org/data/person_01KN5CY6ED1R4M4SBA12SAS6SN> <https://data.lincd.org/module/-_linked-core/shape/person/name> \"New Friend\" .\n}"
+  },
+  {
+    "name": "updateSimple",
+    "description": "Update single field (hobby)",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby",
+            "value": "Chess"
+          }
+        ]
+      }
+    },
+    "expectedSparql": "DELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?old_hobby .\n}\nINSERT {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/hobby> \"Chess\" .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?old_hobby .\n  }\n}"
+  },
+  {
+    "name": "updateOverwriteSet",
+    "description": "Overwrite set (friends array)",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+            "value": [
+              {
+                "id": "linked://tmp/entities/p2"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "expectedSparql": "DELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?old_friends .\n}\nINSERT {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> <linked://tmp/entities/p2> .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?old_friends .\n  }\n}"
+  },
+  {
+    "name": "updateUnsetSingleUndefined",
+    "description": "Unset single field via undefined",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+          }
+        ]
+      }
+    },
+    "expectedSparql": "DELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?old_hobby .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?old_hobby .\n  }\n}"
+  },
+  {
+    "name": "updateUnsetSingleNull",
+    "description": "Unset single field via null",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+          }
+        ]
+      }
+    },
+    "expectedSparql": "DELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?old_hobby .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?old_hobby .\n  }\n}"
+  },
+  {
+    "name": "updateOverwriteNested",
+    "description": "Overwrite with nested create",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend",
+            "value": {
+              "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+              "fields": [
+                {
+                  "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+                  "value": "Bestie"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nDELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?old_bestFriend .\n}\nINSERT {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> <http://example.org/data/person_01KN5CY6EFK2MC16K4T4DGDS1Q> .\n  <http://example.org/data/person_01KN5CY6EFK2MC16K4T4DGDS1Q> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  <http://example.org/data/person_01KN5CY6EFK2MC16K4T4DGDS1Q> <https://data.lincd.org/module/-_linked-core/shape/person/name> \"Bestie\" .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?old_bestFriend .\n  }\n}"
+  },
+  {
+    "name": "updatePassIdReferences",
+    "description": "Update with ID reference",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend",
+            "value": {
+              "id": "linked://tmp/entities/p2"
+            }
+          }
+        ]
+      }
+    },
+    "expectedSparql": "DELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?old_bestFriend .\n}\nINSERT {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> <linked://tmp/entities/p2> .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/bestFriend> ?old_bestFriend .\n  }\n}"
+  },
+  {
+    "name": "updateAddRemoveMulti",
+    "description": "Add and remove from set",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+            "value": {
+              "add": [
+                {
+                  "id": "linked://tmp/entities/p2"
+                }
+              ],
+              "remove": [
+                {
+                  "id": "linked://tmp/entities/p3"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "expectedSparql": "DELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> <linked://tmp/entities/p3> .\n}\nINSERT {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> <linked://tmp/entities/p2> .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> <linked://tmp/entities/p3> .\n  }\n}"
+  },
+  {
+    "name": "updateRemoveMulti",
+    "description": "Remove from set",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends",
+            "value": {
+              "remove": [
+                {
+                  "id": "linked://tmp/entities/p2"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "expectedSparql": "DELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> <linked://tmp/entities/p2> .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> <linked://tmp/entities/p2> .\n  }\n}"
+  },
+  {
+    "name": "updateUnsetMultiUndefined",
+    "description": "Unset multi-value field",
+    "ir": {
+      "kind": "update",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "id": "linked://tmp/entities/p1",
+      "data": {
+        "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        "fields": [
+          {
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/friends"
+          }
+        ]
+      }
+    },
+    "expectedSparql": "DELETE {\n  <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?old_friends .\n}\nWHERE {\n  OPTIONAL {\n    <linked://tmp/entities/p1> <https://data.lincd.org/module/-_linked-core/shape/person/friends> ?old_friends .\n  }\n}"
+  },
+  {
+    "name": "deleteSingle",
+    "description": "Delete single entity",
+    "ir": {
+      "kind": "delete",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "ids": [
+        {
+          "id": "linked://tmp/entities/to-delete"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nDELETE {\n  <linked://tmp/entities/to-delete> ?p ?o .\n  ?s ?p2 <linked://tmp/entities/to-delete> .\n  <linked://tmp/entities/to-delete> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n}\nWHERE {\n  <linked://tmp/entities/to-delete> ?p ?o .\n  <linked://tmp/entities/to-delete> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?s ?p2 <linked://tmp/entities/to-delete> .\n  }\n}"
+  },
+  {
+    "name": "deleteMultiple",
+    "description": "Delete multiple entities",
+    "ir": {
+      "kind": "delete",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "ids": [
+        {
+          "id": "linked://tmp/entities/to-delete-1"
+        },
+        {
+          "id": "linked://tmp/entities/to-delete-2"
+        }
+      ]
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nDELETE {\n  <linked://tmp/entities/to-delete-1> ?p_0 ?o_0 .\n  ?s_0 ?p2_0 <linked://tmp/entities/to-delete-1> .\n  <linked://tmp/entities/to-delete-1> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  <linked://tmp/entities/to-delete-2> ?p_1 ?o_1 .\n  ?s_1 ?p2_1 <linked://tmp/entities/to-delete-2> .\n  <linked://tmp/entities/to-delete-2> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n}\nWHERE {\n  <linked://tmp/entities/to-delete-1> ?p_0 ?o_0 .\n  <linked://tmp/entities/to-delete-1> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  <linked://tmp/entities/to-delete-2> ?p_1 ?o_1 .\n  <linked://tmp/entities/to-delete-2> rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  OPTIONAL {\n    ?s_0 ?p2_0 <linked://tmp/entities/to-delete-1> .\n  }\n  OPTIONAL {\n    ?s_1 ?p2_1 <linked://tmp/entities/to-delete-2> .\n  }\n}"
+  },
+  {
+    "name": "deleteAll",
+    "description": "Delete all instances of shape",
+    "ir": {
+      "kind": "delete_all",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person"
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nDELETE {\n  ?a0 ?p ?o .\n}\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  ?a0 ?p ?o .\n}"
+  },
+  {
+    "name": "deleteWhere",
+    "description": "Delete where condition matches",
+    "ir": {
+      "kind": "delete_where",
+      "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+      "where": {
+        "kind": "binary_expr",
+        "operator": "=",
+        "left": {
+          "kind": "property_expr",
+          "sourceAlias": "a0",
+          "property": "https://data.lincd.org/module/-_linked-core/shape/person/hobby"
+        },
+        "right": {
+          "kind": "literal_expr",
+          "value": "Chess"
+        }
+      },
+      "wherePatterns": []
+    },
+    "expectedSparql": "PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>\nDELETE {\n  ?a0 ?p ?o .\n}\nWHERE {\n  ?a0 rdf:type <https://data.lincd.org/module/-_linked-core/shape/person> .\n  ?a0 ?p ?o .\n  ?a0 <https://data.lincd.org/module/-_linked-core/shape/person/hobby> ?a0_hobby .\n  FILTER(?a0_hobby = \"Chess\")\n}"
+  }
+]
