@@ -196,16 +196,17 @@ describe('Fuseki SELECT — basic', () => {
     expect(Array.isArray(result)).toBe(true);
     const rows = result as ResultRow[];
 
-    // selectFriends is a flat property_expr projection (no traversal).
-    // Each person appears once; friends is a URI reference or null.
     // All 4 persons returned (OPTIONAL on friends).
     expect(rows.length).toBe(4);
 
+    // p1 has friends [p2, p3] — should be an array of entity references
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
-    // p1.friends is a single entity reference (last binding wins in flat mode)
-    expect(p1!.friends).toBeDefined();
-    expect(p1!.friends).not.toBeNull();
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(2);
+    expect(p1Friends.some((f) => f.id.includes('p2'))).toBe(true);
+    expect(p1Friends.some((f) => f.id.includes('p3'))).toBe(true);
   });
 
   test('selectBirthDate — date coercion', async () => {
@@ -451,10 +452,22 @@ describe('Fuseki SELECT — nested traversals', () => {
     // p1→friends→[p2, p3]. p2→bestFriend→p3. p3→no bestFriend.
     // p2→friends→[p3, p4]. p3→no bestFriend. p4→no bestFriend.
     // Only p1 (via p2→p3) satisfies both JOINs.
-    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.length).toBe(1);
 
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
+
+    // friends array — only p2 survives INNER JOIN (p3 has no bestFriend)
+    const p1Friends = p1!.friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    expect(p1Friends.length).toBe(1);
+    expect(p1Friends[0].id).toContain('p2');
+
+    // bestFriend is maxCount: 1 → single ResultRow, not array
+    const bf = p1Friends[0].bestFriend as ResultRow;
+    expect(bf).toBeDefined();
+    expect(bf).not.toBeNull();
+    expect(bf.id).toContain('p3');
   });
 
   test('nestedObjectPropertySingle — same as nestedObjectProperty', async () => {
@@ -566,6 +579,20 @@ describe('Fuseki SELECT — sub-selects', () => {
     // Only p1 (via p2→p3) satisfies both joins.
     expect(rows.length).toBe(1);
     expect(rows[0].id).toContain('p1');
+
+    // Validate nested structure: friends[].bestFriend.name
+    const p1Friends = rows[0].friends as ResultRow[];
+    expect(Array.isArray(p1Friends)).toBe(true);
+    // Only p2 has a bestFriend (INNER JOIN filters out p3)
+    expect(p1Friends.length).toBe(1);
+    expect(p1Friends[0].id).toContain('p2');
+
+    // bestFriend is maxCount: 1 → unwrapped to single ResultRow
+    const bf = p1Friends[0].bestFriend as ResultRow;
+    expect(bf).toBeDefined();
+    expect(bf).not.toBeNull();
+    expect(bf.id).toContain('p3');
+    expect(bf.name).toBe('Jinx');
   });
 
   test('subSelectAllPrimitives — bestFriend.[name, birthDate, isRealPerson]', async () => {
