@@ -423,10 +423,9 @@ describe('Fuseki SELECT — nested traversals', () => {
     expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
-    const bestFriend = p2!.bestFriend as ResultRow[];
-    expect(Array.isArray(bestFriend)).toBe(true);
-    expect(bestFriend.length).toBe(1);
-    expect(bestFriend[0].name).toBe('Jinx');
+    const bestFriend = p2!.bestFriend as ResultRow;
+    expect(bestFriend).toBeDefined();
+    expect(bestFriend.name).toBe('Jinx');
   });
 
   test('selectDeepNested — friends.bestFriend.bestFriend.name', async () => {
@@ -498,10 +497,9 @@ describe('Fuseki SELECT — sub-selects', () => {
     expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
-    const bestFriend = p2!.bestFriend as ResultRow[];
-    expect(Array.isArray(bestFriend)).toBe(true);
-    expect(bestFriend.length).toBe(1);
-    expect(bestFriend[0].name).toBe('Jinx');
+    const bestFriend = p2!.bestFriend as ResultRow;
+    expect(bestFriend).toBeDefined();
+    expect(bestFriend.name).toBe('Jinx');
   });
 
   test('subSelectPluralCustom — friends.select(name, hobby)', async () => {
@@ -581,13 +579,12 @@ describe('Fuseki SELECT — sub-selects', () => {
     expect(rows.length).toBe(1);
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
-    const bestFriend = p2!.bestFriend as ResultRow[];
-    expect(Array.isArray(bestFriend)).toBe(true);
-    expect(bestFriend.length).toBe(1);
-    expect(bestFriend[0].name).toBe('Jinx');
-    expect(bestFriend[0].isRealPerson).toBe(true);
+    const bestFriend = p2!.bestFriend as ResultRow;
+    expect(bestFriend).toBeDefined();
+    expect(bestFriend.name).toBe('Jinx');
+    expect(bestFriend.isRealPerson).toBe(true);
     // p3 has no birthDate
-    expect(bestFriend[0].birthDate).toBeNull();
+    expect(bestFriend.birthDate).toBeNull();
   });
 
   test('subSelectArray — friends.select([name, hobby])', async () => {
