@@ -184,6 +184,7 @@ export const queryFactories = {
   selectMultiplePaths: () =>
     Person.select((p) => [p.name, p.friends, p.bestFriend.name]),
   selectBestFriendName: () => Person.select((p) => p.bestFriend.name),
+  selectBestFriendOnly: () => Person.select((p) => p.bestFriend),
   selectDeepNested: () =>
     Person.select((p) => p.friends.bestFriend.bestFriend.name),
   whereFriendsNameEquals: () =>

@@ -197,6 +197,11 @@ const nestedCases: SelectCase[] = [
     minPatterns: 1,
   },
   {
+    name: "selectBestFriendOnly",
+    run: () => queryFactories.selectBestFriendOnly(),
+    exactProjection: 1,
+  },
+  {
     name: "selectDeepNested",
     run: () => queryFactories.selectDeepNested(),
     minProjection: 1,
@@ -548,6 +553,54 @@ describe("select canonical IR golden fixtures", () => {
               "kind": "property_expr",
               "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
               "sourceAlias": "a2",
+            },
+          },
+        ],
+        "resultMap": [
+          {
+            "alias": "a1",
+            "key": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+          },
+        ],
+        "root": {
+          "alias": "a0",
+          "kind": "shape_scan",
+          "shape": "https://data.lincd.org/module/-_linked-core/shape/person",
+        },
+        "singleResult": false,
+      }
+    `);
+  });
+
+  test("single-value bestFriend traversal carries maxCount", async () => {
+    const actual = await captureIR(() =>
+      queryFactories.selectBestFriendName()
+    );
+    // The bestFriend traverse pattern must carry maxCount: 1
+    const traversePattern = actual.patterns.find(
+      (p: any) => p.kind === "traverse"
+    );
+    expect(traversePattern).toBeDefined();
+    expect((traversePattern as any).maxCount).toBe(1);
+    expect(actual).toMatchInlineSnapshot(`
+      {
+        "kind": "select",
+        "patterns": [
+          {
+            "from": "a0",
+            "kind": "traverse",
+            "maxCount": 1,
+            "property": "https://data.lincd.org/module/-_linked-core/shape/person/bestFriend",
+            "to": "a1",
+          },
+        ],
+        "projection": [
+          {
+            "alias": "a1",
+            "expression": {
+              "kind": "property_expr",
+              "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
+              "sourceAlias": "a1",
             },
           },
         ],
