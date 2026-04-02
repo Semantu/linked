@@ -71,7 +71,7 @@ class LoweringContext {
     return `a${this.counter++}`;
   }
 
-  getOrCreateTraversal(fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr): string {
+  getOrCreateTraversal(fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr, maxCount?: number): string {
     const key = `${fromAlias}:${propertyShapeId}`;
     const existing = this.traverseMap.get(key);
     if (existing) return existing;
@@ -85,6 +85,9 @@ class LoweringContext {
     };
     if (pathExpr) {
       pattern.pathExpr = pathExpr;
+    }
+    if (typeof maxCount === 'number') {
+      pattern.maxCount = maxCount;
     }
     this.patterns.push(pattern);
     this.traverseMap.set(key, toAlias);
@@ -120,7 +123,7 @@ type AliasGenerator = {
 
 type PathLoweringOptions = {
   rootAlias: string;
-  resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr) => string;
+  resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr, maxCount?: number) => string;
 };
 
 const isShapeRef = (value: unknown): value is ShapeReferenceValue =>
@@ -277,8 +280,8 @@ export const lowerSelectQuery = (
   const ctx = new LoweringContext();
   const pathOptions: PathLoweringOptions = {
     rootAlias: ctx.rootAlias,
-    resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr) =>
-      ctx.getOrCreateTraversal(fromAlias, propertyShapeId, pathExpr),
+    resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr, maxCount?: number) =>
+      ctx.getOrCreateTraversal(fromAlias, propertyShapeId, pathExpr, maxCount),
   };
 
   const root: IRShapeScanPattern = {
@@ -291,7 +294,7 @@ export const lowerSelectQuery = (
     let currentAlias = pathOptions.rootAlias;
     for (const step of steps) {
       if (step.kind === 'property_step') {
-        currentAlias = pathOptions.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr);
+        currentAlias = pathOptions.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr, step.maxCount);
       }
     }
     return currentAlias;

@@ -15,7 +15,7 @@ export type InlineFilterCallback = (
 
 export type ProjectionPathLoweringOptions = {
   rootAlias: string;
-  resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr) => string;
+  resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr, maxCount?: number) => string;
 };
 
 export type CanonicalProjectionResult = {
@@ -67,7 +67,7 @@ export const lowerSelectionPathExpression = (
     if (step.kind === 'property_step') {
       if (step.where && onInlineFilter) {
         // Force traversal creation for step with inline where
-        currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr);
+        currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr, step.maxCount);
         onInlineFilter(currentAlias, step.where);
         if (isLast) {
           return {kind: 'alias_expr', alias: currentAlias};
@@ -87,7 +87,7 @@ export const lowerSelectionPathExpression = (
         return expr;
       }
 
-      currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr);
+      currentAlias = options.resolveTraversal(currentAlias, step.propertyShapeId, step.pathExpr, step.maxCount);
       continue;
     }
 

@@ -67,6 +67,7 @@ export type IRTraversePattern = {
   property: string;
   pathExpr?: PathExpr;
   filter?: IRExpression;
+  maxCount?: number;
 };
 
 export type IRJoinPattern = {
