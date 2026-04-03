@@ -662,6 +662,37 @@ WHERE {
 }`);
   });
 
+  test('whereNeq — != operator', async () => {
+    const sparql = await goldenSelect(queryFactories.whereNeq);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  FILTER(?a0_name != "Alice")
+}`);
+  });
+
+  test('whereExprNot — Expr.not() wrapping compound condition', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprNot);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  OPTIONAL {
+    ?a0 <${P}/hobby> ?a0_hobby .
+  }
+  FILTER(!(?a0_name = "Alice" && ?a0_hobby = "Chess"))
+}`);
+  });
+
   test('whereSequences', async () => {
     const sparql = await goldenSelect(queryFactories.whereSequences);
     expect(sparql).toBe(

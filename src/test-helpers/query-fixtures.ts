@@ -1,6 +1,7 @@
 import {linkedShape} from '../package';
 import {literalProperty, objectProperty} from '../shapes/SHACL';
 import {Shape} from '../shapes/Shape';
+import {Expr} from '../expressions/Expr';
 import {xsd} from '../ontologies/xsd';
 import {ShapeSet} from '../collections/ShapeSet';
 import {getQueryContext} from '../queries/QueryContext';
@@ -241,6 +242,12 @@ export const queryFactories = {
   whereNoneAndEquals: () =>
     Person.select((p) => p.name).where((p) =>
       p.friends.none((f) => f.hobby.equals('Chess')).and(p.name.equals('Bob')),
+    ),
+  whereNeq: () =>
+    Person.select((p) => p.name).where(((p: any) => p.name.neq('Alice')) as any),
+  whereExprNot: () =>
+    Person.select((p) => p.name).where((p) =>
+      Expr.not(p.name.equals('Alice').and((p as any).hobby.equals('Chess'))),
     ),
   whereSequences: () =>
     Person.select().where((p) =>
