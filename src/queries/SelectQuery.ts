@@ -276,7 +276,7 @@ export type QueryResponseToResultType<
     ? GetNestedQueryResultType<Response, Source>
     : T extends Array<infer Type>
       ? UnionToIntersection<QueryResponseToResultType<Type>>
-      : T extends {readonly ir: {kind: string}; readonly _refs: ReadonlyMap<string, any>}
+      : T extends ExpressionNode
         ? boolean
         : T extends Object
           ? QResult<QShapeType, Prettify<ObjectToPlainResult<T>>>
