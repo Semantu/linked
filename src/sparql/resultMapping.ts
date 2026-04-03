@@ -143,6 +143,7 @@ type FieldDescriptor = {
   key: string;
   sparqlVar: string;
   expression: IRExpression;
+  maxCount?: number;
 };
 
 type NestedGroup = {
@@ -267,6 +268,9 @@ function buildNestingDescriptor(query: IRSelectQuery): NestingDescriptor {
     }
 
     const field: FieldDescriptor = {key: resultKey, sparqlVar, expression};
+    if (expression.kind === 'property_expr' && typeof expression.maxCount === 'number') {
+      field.maxCount = expression.maxCount;
+    }
 
     if (sourceAlias === rootAlias) {
       descriptor.flatFields.push(field);
@@ -341,40 +345,97 @@ export function mapSparqlSelectResult(
 }
 
 /**
+ * Checks whether a flat field is multi-value (no maxCount or maxCount > 1).
+ */
+function isMultiValueField(field: FieldDescriptor): boolean {
+  return typeof field.maxCount !== 'number' || field.maxCount > 1;
+}
+
+/**
+ * Extracts a single field value from a SPARQL binding.
+ */
+function extractFieldValue(
+  field: FieldDescriptor,
+  binding: SparqlBinding,
+): ResultFieldValue {
+  const val = binding[field.sparqlVar];
+  if (!val) return null;
+  if (isUriExpression(field.expression) && val.type === 'uri') {
+    return {id: val.value} as ResultRow;
+  }
+  if (val.type === 'uri') {
+    return {id: val.value} as ResultRow;
+  }
+  return coerceValue(val);
+}
+
+/**
+ * Collects multi-value flat fields from all bindings for a given root entity,
+ * producing deduplicated arrays for multi-value fields and single values
+ * for single-value fields.
+ */
+function populateFlatFields(
+  row: ResultRow,
+  fields: FieldDescriptor[],
+  groupBindings: SparqlBinding[],
+): void {
+  const multiValueFields = fields.filter(isMultiValueField);
+  const singleValueFields = fields.filter((f) => !isMultiValueField(f));
+
+  // Single-value fields: take first binding
+  for (const field of singleValueFields) {
+    row[field.key] = extractFieldValue(field, groupBindings[0]);
+  }
+
+  // Multi-value fields: collect distinct values across all bindings
+  for (const field of multiValueFields) {
+    const seenValues = new Set<string>();
+    const values: ResultRow[] = [];
+    for (const binding of groupBindings) {
+      const val = binding[field.sparqlVar];
+      if (!val) continue;
+      // Deduplicate by raw value
+      if (seenValues.has(val.value)) continue;
+      seenValues.add(val.value);
+      const extracted = extractFieldValue(field, binding);
+      if (extracted && typeof extracted === 'object' && 'id' in extracted) {
+        values.push(extracted as ResultRow);
+      }
+    }
+    row[field.key] = values;
+  }
+}
+
+/**
  * Maps flat (non-nested) result rows — no traversals involved.
+ * Groups bindings by root ID to collect multi-value flat fields into arrays.
  */
 function mapFlatRows(
   bindings: SparqlBinding[],
   descriptor: NestingDescriptor,
   query: IRSelectQuery,
 ): SelectResult {
-  const rows: ResultRow[] = [];
-  const seenIds = new Set<string>();
+  // Group bindings by root entity id
+  const rootGroups = new Map<string, SparqlBinding[]>();
 
   for (const binding of bindings) {
     const rootBinding = binding[descriptor.rootVar];
     if (!rootBinding) continue;
     const id = rootBinding.value;
 
-    // Deduplicate by root id
-    if (seenIds.has(id)) continue;
-    seenIds.add(id);
-
-    const row: ResultRow = {id};
-    for (const field of descriptor.flatFields) {
-      const val = binding[field.sparqlVar];
-      if (!val) {
-        row[field.key] = null;
-      } else if (isUriExpression(field.expression) && val.type === 'uri') {
-        // An alias_expr that resolved to a URI → wrap as nested entity ref
-        row[field.key] = {id: val.value} as ResultRow;
-      } else if (val.type === 'uri') {
-        // A property_expr that returned a URI → entity reference
-        row[field.key] = {id: val.value} as ResultRow;
-      } else {
-        row[field.key] = coerceValue(val);
-      }
+    let group = rootGroups.get(id);
+    if (!group) {
+      group = [];
+      rootGroups.set(id, group);
     }
+    group.push(binding);
+  }
+
+  const rows: ResultRow[] = [];
+
+  for (const [rootId, groupBindings] of rootGroups) {
+    const row: ResultRow = {id: rootId};
+    populateFlatFields(row, descriptor.flatFields, groupBindings);
     rows.push(row);
   }
 
@@ -547,8 +608,8 @@ function mapNestedRows(
   for (const [rootId, groupBindings] of rootGroups) {
     const row: ResultRow = {id: rootId};
 
-    // Flat fields from the first binding (they're the same across all grouped rows)
-    populateFields(row, descriptor.flatFields, groupBindings[0]);
+    // Flat fields — single-value from first binding, multi-value collected across all
+    populateFlatFields(row, descriptor.flatFields, groupBindings);
 
     // Nested groups — recursively collect traversed entities (or literal values)
     for (const nestedGroup of descriptor.nestedGroups) {

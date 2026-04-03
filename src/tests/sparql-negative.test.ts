@@ -123,7 +123,7 @@ describe('resultMapping — type coercion edge cases', () => {
       projection: [
         {
           alias: 'a1',
-          expression: {kind: 'property_expr', sourceAlias: 'a0', property},
+          expression: {kind: 'property_expr', sourceAlias: 'a0', property, maxCount: 1},
         },
       ],
       resultMap: [{key: property, alias: 'a1'}],

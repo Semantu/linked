@@ -129,6 +129,7 @@ export type IRPropertyExpression = {
   sourceAlias: IRAlias;
   property: string;
   pathExpr?: import('../paths/PropertyPathExpr.js').PathExpr;
+  maxCount?: number;
 };
 
 export type IRContextPropertyExpression = {

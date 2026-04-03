@@ -84,6 +84,9 @@ export const lowerSelectionPathExpression = (
         if (step.pathExpr) {
           (expr as import('./IntermediateRepresentation.js').IRPropertyExpression).pathExpr = step.pathExpr;
         }
+        if (typeof step.maxCount === 'number') {
+          (expr as import('./IntermediateRepresentation.js').IRPropertyExpression).maxCount = step.maxCount;
+        }
         return expr;
       }
 
