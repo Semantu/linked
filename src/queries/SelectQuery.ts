@@ -904,10 +904,33 @@ const EXPRESSION_METHODS = new Set([
  * Returns null if the object cannot be converted (e.g. root shape with no property path).
  */
 function toExpressionNode(qbo: QueryBuilderObject): ExpressionNode | null {
+  // Check if this is a query context reference — produce context_property_expr
+  const contextId = findContextId(qbo);
+  if (contextId) {
+    const segments = FieldSet.collectPropertySegments(qbo);
+    const lastSegment = segments.length > 0 ? segments[segments.length - 1].id : undefined;
+    if (lastSegment) {
+      const ir = {kind: 'context_property_expr' as const, contextIri: contextId, property: lastSegment};
+      return new ExpressionNode(ir);
+    }
+  }
+
   const segments = FieldSet.collectPropertySegments(qbo);
   if (segments.length === 0) return null;
   const segmentIds = segments.map((s) => s.id);
   return tracedPropertyExpression(segmentIds);
+}
+
+/** Walk up the QueryBuilderObject chain to find a query context ID. */
+function findContextId(qbo: QueryBuilderObject): string | undefined {
+  let current: QueryBuilderObject | undefined = qbo;
+  while (current) {
+    if (current instanceof QueryShape && (current.originalValue as any)?.__queryContextId) {
+      return (current.originalValue as any).__queryContextId;
+    }
+    current = current.subject as QueryBuilderObject | undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -1590,6 +1613,12 @@ export class SetSize<Source = null> extends QueryPrimitive<number, Source> {
     public label?: string,
   ) {
     super();
+  }
+
+  // SetSize carries count semantics in getPropertyPath() via SizeStep.
+  // Must use the old Evaluation path to preserve count/GROUP BY/HAVING in SPARQL.
+  equals(otherValue: any): ExpressionNode {
+    return new Evaluation(this, WhereMethods.EQUALS, [otherValue]) as any;
   }
 
   as(label: string) {
