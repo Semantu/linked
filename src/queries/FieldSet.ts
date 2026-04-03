@@ -32,14 +32,6 @@ const isSetSize = (obj: any): boolean =>
   // SetSize has a 'countable' field (may be undefined) and 'label' field
   'label' in obj;
 
-// Evaluation: has .method (WhereMethods), .value (QueryBuilderObject), .getWherePath()
-const isEvaluation = (obj: any): boolean =>
-  obj !== null &&
-  typeof obj === 'object' &&
-  'method' in obj &&
-  'value' in obj &&
-  typeof obj.getWherePath === 'function';
-
 // BoundComponent: has .source (QueryBuilderObject) and .originalValue (component-like)
 const isBoundComponent = (obj: any): boolean =>
   obj !== null &&
@@ -62,7 +54,6 @@ export type FieldSetEntry = {
   subSelect?: FieldSet;
   aggregation?: 'count';
   customKey?: string;
-  evaluation?: {method: string; wherePath: any};
   /** Component preload composition — the FieldSet comes from a linked component's own query,
    *  merged in via `preloadFor()`. Distinct from subSelect which is a user-authored nested query. */
   preloadSubSelect?: FieldSet;
@@ -91,7 +82,6 @@ export type FieldSetFieldJSON = {
   subSelect?: FieldSetJSON;
   aggregation?: string;
   customKey?: string;
-  evaluation?: {method: string; wherePath: any};
 };
 
 /** JSON representation of a FieldSet. */
@@ -374,9 +364,6 @@ export class FieldSet<R = any, Source = any> {
         if (entry.customKey) {
           field.customKey = entry.customKey;
         }
-        if (entry.evaluation) {
-          field.evaluation = entry.evaluation;
-        }
         return field;
       }),
     };
@@ -401,9 +388,6 @@ export class FieldSet<R = any, Source = any> {
       }
       if (field.customKey) {
         entry.customKey = field.customKey;
-      }
-      if (field.evaluation) {
-        entry.evaluation = field.evaluation;
       }
       return entry;
     });
@@ -524,10 +508,6 @@ export class FieldSet<R = any, Source = any> {
     if (isSetSize(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
     }
-    // Single Evaluation (e.g. p.bestFriend.equals(...))
-    if (isEvaluation(result)) {
-      return [FieldSet.convertTraceResult(nodeShape, result)];
-    }
     // Single BoundComponent (e.g. p.bestFriend.preloadFor(comp))
     if (isBoundComponent(result)) {
       return [FieldSet.convertTraceResult(nodeShape, result)];
@@ -569,16 +549,6 @@ export class FieldSet<R = any, Source = any> {
       return {
         path: new PropertyPath(rootShape, obj.parentSegments),
         subSelect: subSelect as FieldSet | undefined,
-      };
-    }
-
-    // Evaluation → where-as-selection (e.g. p.bestFriend.equals(...) used as select)
-    // The Evaluation's .value is the QueryBuilderObject chain leading to the comparison.
-    if (isEvaluation(obj)) {
-      const segments = FieldSet.collectPropertySegments(obj.value);
-      return {
-        path: new PropertyPath(rootShape, segments),
-        evaluation: {method: obj.method, wherePath: obj.getWherePath()},
       };
     }
 
@@ -722,10 +692,6 @@ export class FieldSet<R = any, Source = any> {
     }
     // Single SetSize
     if (isSetSize(traceResponse)) {
-      return [FieldSet.convertTraceResult(rootShape, traceResponse)];
-    }
-    // Single Evaluation
-    if (isEvaluation(traceResponse)) {
       return [FieldSet.convertTraceResult(rootShape, traceResponse)];
     }
     // Single ExpressionNode

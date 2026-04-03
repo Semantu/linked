@@ -1,19 +1,14 @@
 import {
-  ArgPath,
-  isWhereEvaluationPath,
-  JSNonNullPrimitive,
   PropertyQueryStep,
   QueryPropertyPath,
   QueryStep,
   SizeStep,
   SortByPath,
-  WhereAndOr,
-  WhereMethods,
   WherePath,
 } from './SelectQuery.js';
 import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
 import type {FieldSetEntry} from './FieldSet.js';
-import {ExpressionNode, ExistsCondition, isExistsCondition} from '../expressions/ExpressionNode.js';
+import {ExpressionNode, ExistsCondition} from '../expressions/ExpressionNode.js';
 import type {PropertyShape} from '../shapes/SHACL.js';
 import type {PathExpr} from '../paths/PropertyPathExpr.js';
 import {isComplexPathExpr} from '../paths/PropertyPathExpr.js';
@@ -110,19 +105,6 @@ export type DesugaredSelection =
   | DesugaredExpressionSelect
   | DesugaredMultiSelection;
 
-export type DesugaredWhereComparison = {
-  kind: 'where_comparison';
-  operator: WhereMethods;
-  left: DesugaredSelectionPath;
-  right: DesugaredWhereArg[];
-};
-
-export type DesugaredWhereBoolean = {
-  kind: 'where_boolean';
-  first: DesugaredWhereComparison;
-  andOr: Array<{and?: DesugaredWhere; or?: DesugaredWhere}>;
-};
-
 export type DesugaredExpressionWhere = {
   kind: 'where_expression';
   expressionNode: ExpressionNode;
@@ -133,23 +115,12 @@ export type DesugaredExistsWhere = {
   existsCondition: ExistsCondition;
 };
 
-export type DesugaredWhere = DesugaredWhereComparison | DesugaredWhereBoolean | DesugaredExpressionWhere | DesugaredExistsWhere;
+export type DesugaredWhere = DesugaredExpressionWhere | DesugaredExistsWhere;
 
 export type DesugaredSortBy = {
   direction: 'ASC' | 'DESC';
   paths: DesugaredSelectionPath[];
 };
-
-export type DesugaredWhereArg =
-  | JSNonNullPrimitive
-  | NodeReferenceValue
-  | ShapeReferenceValue
-  | {
-      kind: 'arg_path';
-      subject?: ShapeReferenceValue;
-      path: DesugaredSelectionPath;
-    }
-  | DesugaredWhere;
 
 /** A desugared MINUS entry. */
 export type DesugaredMinusEntry = {
@@ -204,14 +175,6 @@ const desugarEntry = (entry: FieldSetEntry): DesugaredSelection => {
     return {
       kind: 'expression_select',
       expressionNode: entry.expressionNode,
-    };
-  }
-
-  // Evaluation → where-as-selection (e.g. p.bestFriend.equals(...) used as select)
-  if (entry.evaluation) {
-    return {
-      kind: 'evaluation_select',
-      where: toWhere(entry.evaluation.wherePath),
     };
   }
 
@@ -361,51 +324,6 @@ const toSelectionPath = (path: QueryPropertyPath): DesugaredSelectionPath => ({
   }),
 });
 
-const isArgPath = (arg: unknown): arg is ArgPath =>
-  !!arg && typeof arg === 'object' && 'path' in arg && 'subject' in arg;
-
-const toWhereArg = (arg: unknown): DesugaredWhereArg => {
-  if (
-    typeof arg === 'string' ||
-    typeof arg === 'number' ||
-    typeof arg === 'boolean' ||
-    arg instanceof Date
-  ) {
-    return arg;
-  }
-  if (isShapeRef(arg)) {
-    return arg;
-  }
-  if (isNodeRef(arg)) {
-    return arg;
-  }
-  if (arg && typeof arg === 'object') {
-    if (isWhereEvaluationPath(arg as WherePath) || 'firstPath' in (arg as object)) {
-      return toWhere(arg as WherePath);
-    }
-    if (isArgPath(arg)) {
-      return {
-        kind: 'arg_path',
-        subject: arg.subject,
-        path: toSelectionPath(arg.path),
-      };
-    }
-  }
-  throw new Error('Unsupported where argument in desugar pass');
-};
-
-const toWhereComparison = (path: WherePath): DesugaredWhereComparison => {
-  if (!isWhereEvaluationPath(path)) {
-    throw new Error('Expected where evaluation path');
-  }
-  return {
-    kind: 'where_comparison',
-    operator: path.method,
-    left: toSelectionPath(path.path),
-    right: (path.args || []).map(toWhereArg),
-  };
-};
-
 export const toWhere = (path: WherePath): DesugaredWhere => {
   // ExistsCondition-based WHERE (from .some()/.every()/.none()) — passthrough to lowering
   if ('existsCondition' in path) {
@@ -421,18 +339,7 @@ export const toWhere = (path: WherePath): DesugaredWhere => {
       expressionNode: (path as {expressionNode: ExpressionNode}).expressionNode,
     };
   }
-  if ((path as WhereAndOr).firstPath) {
-    const grouped = path as WhereAndOr;
-    return {
-      kind: 'where_boolean',
-      first: toWhereComparison(grouped.firstPath),
-      andOr: grouped.andOr.map((token) => ({
-        and: token.and ? toWhere(token.and) : undefined,
-        or: token.or ? toWhere(token.or) : undefined,
-      })),
-    };
-  }
-  return toWhereComparison(path);
+  throw new Error('Unknown WherePath kind in desugar');
 };
 
 

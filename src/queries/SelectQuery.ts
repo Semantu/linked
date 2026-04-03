@@ -50,10 +50,9 @@ export type AccessorReturnValue =
   | NodeReferenceValue;
 
 export type WhereClause<S extends Shape | AccessorReturnValue> =
-  | Evaluation
   | ExpressionNode
   | ExistsCondition
-  | ((s: ToQueryBuilderObject<S>) => Evaluation | ExpressionNode | ExistsCondition);
+  | ((s: ToQueryBuilderObject<S>) => ExpressionNode | ExistsCondition);
 
 export type QueryBuildFn<T extends Shape, ResponseType> = (
   p: ToQueryBuilderObject<T>,
@@ -87,19 +86,6 @@ export type SizeStep = {
 export type PropertyQueryStep = {
   property: PropertyShape;
   where?: WherePath;
-};
-
-export type WhereAndOr = {
-  firstPath: WherePath;
-  andOr: AndOrQueryToken[];
-};
-
-/**
- * A WhereQuery is a (sub)query that is used to filter down the results of its parent query.
- */
-export type AndOrQueryToken = {
-  and?: WherePath;
-  or?: WherePath;
 };
 
 export enum WhereMethods {
@@ -207,18 +193,12 @@ export type WhereExistsPath = {
   existsCondition: ExistsCondition;
 };
 
-export type WherePath = WhereEvaluationPath | WhereAndOr | WhereExpressionPath | WhereExistsPath;
+export type WherePath = WhereExpressionPath | WhereExistsPath;
 
-export type WhereEvaluationPath = {
-  path: QueryPropertyPath;
-  method: WhereMethods;
-  args: QueryArg[];
-};
-
-// WherePath can also be an and/or wrapper; use this guard to safely access args.
+/** @deprecated — Evaluation-based WHERE paths are no longer produced. Kept for backward compatibility with tests. */
 export const isWhereEvaluationPath = (
-  value: WherePath,
-): value is WhereEvaluationPath => {
+  value: any,
+): boolean => {
   return !!value && 'args' in value;
 };
 
@@ -309,11 +289,9 @@ export type QueryResponseToResultType<
     ? GetNestedQueryResultType<Response, Source>
     : T extends Array<infer Type>
       ? UnionToIntersection<QueryResponseToResultType<Type>>
-      : T extends ExpressionNode
+      : T extends {readonly ir: {kind: string}; readonly _refs: ReadonlyMap<string, any>}
         ? boolean
-        : T extends Evaluation
-          ? boolean
-          : T extends Object
+        : T extends Object
           ? QResult<QShapeType, Prettify<ObjectToPlainResult<T>>>
           : never & {__error: 'QueryResponseToResultType: unmatched query response type'};
 
@@ -870,13 +848,13 @@ export const processWhereClause = (
     if (isExistsCondition(result)) {
       return {existsCondition: result};
     }
-    return result.getWherePath();
+    throw new Error('WHERE callback must return ExpressionNode or ExistsCondition');
   } else if (isExpressionNode(validation)) {
     return {expressionNode: validation};
   } else if (isExistsCondition(validation)) {
     return {existsCondition: validation};
   } else {
-    return (validation as Evaluation).getWherePath();
+    throw new Error('WHERE clause must be ExpressionNode, ExistsCondition, or a callback');
   }
 };
 
@@ -1434,77 +1412,8 @@ export class QueryShape<
   // }
 }
 
-export class Evaluation {
-  private _andOr: AndOrQueryToken[] = [];
-
-  constructor(
-    public value: QueryBuilderObject | QueryPrimitiveSet,
-    public method: WhereMethods,
-    public args: QueryArg[],
-  ) {}
-
-  getPropertyPath() {
-    return this.getWherePath();
-  }
-
-  processArgs(): QueryArg[] {
-    //if the args are not an array, then we convert them to an array
-    if (!this.args || !Array.isArray(this.args)) {
-      return [];
-    }
-    //convert each arg to a QueryBuilderObject
-    return this.args.map((arg) => {
-      if (arg instanceof QueryBuilderObject) {
-        let path = arg.getPropertyPath();
-        let subject;
-        if (path[0] && (path[0] as ShapeReferenceValue).id) {
-          subject = path.shift();
-        }
-        if ((!path || path.length === 0) && subject) {
-          return subject as ShapeReferenceValue;
-        }
-        return {
-          path,
-          subject,
-        } as ArgPath;
-      } else {
-        return arg;
-      }
-    });
-  }
-
-  getWherePath(): WherePath {
-    let evalPath: WhereEvaluationPath = {
-      path: this.value.getPropertyPath(),
-      method: this.method,
-      args: this.processArgs(),
-    };
-
-    if (this._andOr.length > 0) {
-      return {
-        firstPath: evalPath,
-        andOr: this._andOr,
-      };
-    }
-    return evalPath;
-  }
-
-  and(subQuery: WhereClause<any>) {
-    this._andOr.push({
-      and: processWhereClause(subQuery),
-    });
-    return this;
-  }
-
-  or(subQuery: WhereClause<any>) {
-    this._andOr.push({
-      or: processWhereClause(subQuery),
-    });
-    return this;
-  }
-}
-
-class SetEvaluation extends Evaluation {}
+/** @deprecated — Evaluation has been replaced by ExpressionNode. Kept as type export only for backward compat. */
+export class Evaluation {}
 
 /**
  * Concrete query wrapper for JS primitive values (string, number, boolean, Date).

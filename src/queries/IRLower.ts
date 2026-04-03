@@ -1,10 +1,6 @@
 import {
   CanonicalDesugaredSelectQuery,
-  CanonicalWhereComparison,
-  CanonicalWhereExists,
   CanonicalWhereExpression,
-  CanonicalWhereLogical,
-  CanonicalWhereNot,
 } from './IRCanonicalize.js';
 import {
   DesugaredExpressionSelect,
@@ -14,7 +10,6 @@ import {
   DesugaredSelectionPath,
   DesugaredStep,
   DesugaredWhere,
-  DesugaredWhereArg,
 } from './IRDesugar.js';
 import {resolveExpressionRefs, ExistsCondition} from '../expressions/ExpressionNode.js';
 import {
@@ -30,7 +25,6 @@ import {
 import {canonicalizeWhere} from './IRCanonicalize.js';
 import {lowerSelectionPathExpression, projectionKeyFromPath} from './IRProjection.js';
 import {IRAliasScope} from './IRAliasScope.js';
-import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
 import type {PathExpr} from '../paths/PropertyPathExpr.js';
 
 /**
@@ -124,53 +118,10 @@ type PathLoweringOptions = {
   resolveTraversal: (fromAlias: string, propertyShapeId: string, pathExpr?: PathExpr) => string;
 };
 
-const isShapeRef = (value: unknown): value is ShapeReferenceValue =>
-  !!value && typeof value === 'object' && 'id' in value && 'shape' in value;
-
-const isNodeRef = (value: unknown): value is NodeReferenceValue =>
-  typeof value === 'object' && value !== null && 'id' in value;
-
 const lowerPath = (
   path: DesugaredSelectionPath,
   options: PathLoweringOptions,
 ): IRExpression => lowerSelectionPathExpression(path, options);
-
-const lowerWhereArg = (
-  arg: DesugaredWhereArg,
-  ctx: AliasGenerator,
-  options: PathLoweringOptions,
-): IRExpression => {
-  if (typeof arg === 'string' || typeof arg === 'number' || typeof arg === 'boolean') {
-    return {kind: 'literal_expr', value: arg};
-  }
-  if (arg instanceof Date) {
-    return {kind: 'literal_expr', value: arg.toISOString()};
-  }
-  if (arg && typeof arg === 'object') {
-    if ('kind' in arg && arg.kind === 'arg_path') {
-      const argPath = arg as {kind: 'arg_path'; subject?: ShapeReferenceValue; path: DesugaredSelectionPath};
-      if (argPath.subject && argPath.subject.id) {
-        // Context entity path — resolve property relative to the context IRI
-        const lastStep = argPath.path.steps[argPath.path.steps.length - 1];
-        if (lastStep && lastStep.kind === 'property_step') {
-          return {
-            kind: 'context_property_expr',
-            contextIri: argPath.subject.id,
-            property: lastStep.propertyShapeId,
-          };
-        }
-      }
-      return lowerPath(argPath.path, options);
-    }
-    if (isShapeRef(arg)) {
-      return {kind: 'reference_expr', value: arg.id};
-    }
-    if (isNodeRef(arg)) {
-      return {kind: 'reference_expr', value: (arg as NodeReferenceValue).id};
-    }
-  }
-  return {kind: 'literal_expr', value: null};
-};
 
 const lowerWhere = (
   where: CanonicalWhereExpression,
@@ -178,59 +129,6 @@ const lowerWhere = (
   options: PathLoweringOptions,
 ): IRExpression => {
   switch (where.kind) {
-    case 'where_binary': {
-      const comp = where as CanonicalWhereComparison;
-      return {
-        kind: 'binary_expr',
-        operator: comp.operator as '=' | '!=' | '>' | '>=' | '<' | '<=',
-        left: lowerPath(comp.left, options),
-        right: comp.right.length > 0
-          ? lowerWhereArg(comp.right[0], ctx, options)
-          : {kind: 'literal_expr', value: null},
-      };
-    }
-    case 'where_logical': {
-      const logical = where as CanonicalWhereLogical;
-      return {
-        kind: 'logical_expr',
-        operator: logical.operator,
-        expressions: logical.expressions.map((expr) => lowerWhere(expr, ctx, options)),
-      };
-    }
-    case 'where_exists': {
-      const exists = where as CanonicalWhereExists;
-      const {resolve: existsResolveTraversal, patterns: traversals} = createTraversalResolver(
-        () => ctx.generateAlias(),
-        (from, to, property): IRTraversePattern => ({kind: 'traverse', from, to, property}),
-      );
-
-      let existsRootAlias = options.rootAlias;
-      for (const step of exists.path.steps) {
-        if (step.kind === 'property_step') {
-          existsRootAlias = existsResolveTraversal(existsRootAlias, step.propertyShapeId);
-        }
-      }
-
-      const filter = lowerWhere(exists.predicate, ctx, {
-        rootAlias: existsRootAlias,
-        resolveTraversal: existsResolveTraversal,
-      });
-
-      return {
-        kind: 'exists_expr',
-        pattern: traversals.length === 1
-          ? traversals[0]
-          : {kind: 'join', patterns: traversals},
-        filter,
-      };
-    }
-    case 'where_not': {
-      const not = where as CanonicalWhereNot;
-      return {
-        kind: 'not_expr',
-        expression: lowerWhere(not.expression, ctx, options),
-      };
-    }
     case 'where_expression': {
       // ExpressionNode-based WHERE — resolve refs and return IRExpression directly
       const exprWhere = where as DesugaredExpressionWhere;
