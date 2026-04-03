@@ -388,23 +388,23 @@ function populateFlatFields(
     row[field.key] = extractFieldValue(field, groupBindings[0]);
   }
 
-  // Multi-value fields (no maxCount): collect distinct entity references across
-  // all bindings. Only URI-typed values are collected — flat multi-value fields
-  // are always object properties (e.g. friends) whose SPARQL bindings are URIs.
+  // Multi-value fields (no maxCount): collect all distinct values across bindings.
+  // URI bindings produce ResultRow[] (entity references like friends),
+  // literal bindings produce string[]/number[]/etc (like nickNames).
   for (const field of multiValueFields) {
     const seenValues = new Set<string>();
-    const values: ResultRow[] = [];
+    const values: ResultFieldValue[] = [];
     for (const binding of groupBindings) {
       const val = binding[field.sparqlVar];
       if (!val) continue;
       if (seenValues.has(val.value)) continue;
       seenValues.add(val.value);
       const extracted = extractFieldValue(field, binding);
-      if (extracted && typeof extracted === 'object' && 'id' in extracted) {
-        values.push(extracted as ResultRow);
+      if (extracted !== null) {
+        values.push(extracted);
       }
     }
-    row[field.key] = values;
+    row[field.key] = values as ResultFieldValue;
   }
 }
 

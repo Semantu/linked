@@ -287,7 +287,11 @@ export type ResultFieldValue =
   | null
   | undefined
   | ResultRow
-  | ResultRow[];
+  | ResultRow[]
+  | string[]
+  | number[]
+  | boolean[]
+  | Date[];
 
 /**
  * What `selectQuery` should return.

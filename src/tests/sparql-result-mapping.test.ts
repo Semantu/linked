@@ -35,6 +35,7 @@ const PROP_BIRTH_DATE = 'linked://tmp/props/birthDate';
 const PROP_BEST_FRIEND = 'linked://tmp/props/bestFriend';
 const PROP_HAS_FRIEND = 'linked://tmp/props/hasFriend';
 const PROP_GUARD_DOG_LEVEL = 'linked://tmp/props/guardDogLevel';
+const PROP_NICK_NAME = 'linked://tmp/props/nickName';
 
 const E = (suffix: string) => `linked://tmp/entities/${suffix}`;
 
@@ -789,6 +790,134 @@ describe('mapSparqlSelectResult — flat multi-value fields', () => {
     const bf = result[0].bestFriend as ResultRow;
     expect(bf).toBeDefined();
     expect(bf.name).toBe('Jinx');
+  });
+});
+
+describe('mapSparqlSelectResult — flat multi-value literal fields', () => {
+  test('multi-value literal strings collected into array', () => {
+    // Person.select(p => p.nickNames) — nickNames has no maxCount, literal type
+    const query = flatSelectQuery([
+      {key: PROP_NICK_NAME, property: PROP_NICK_NAME},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_nickName']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_nickName: {type: 'literal', value: 'Sem1'},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_nickName: {type: 'literal', value: 'Sem'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const nickNames = result[0].nickName as string[];
+    expect(Array.isArray(nickNames)).toBe(true);
+    expect(nickNames.length).toBe(2);
+    expect(nickNames).toContain('Sem1');
+    expect(nickNames).toContain('Sem');
+  });
+
+  test('mixed URI and literal multi-value fields in same query', () => {
+    // Person.select(p => [p.friends, p.nickNames])
+    const query = flatSelectQuery([
+      {key: PROP_HAS_FRIEND, property: PROP_HAS_FRIEND},
+      {key: PROP_NICK_NAME, property: PROP_NICK_NAME},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_hasFriend', 'a0_nickName']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_hasFriend: {type: 'uri', value: E('p2')},
+            a0_nickName: {type: 'literal', value: 'Sem1'},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_hasFriend: {type: 'uri', value: E('p3')},
+            a0_nickName: {type: 'literal', value: 'Sem'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+
+    // URI multi-value → ResultRow[]
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(2);
+    expect(friends[0].id).toBe(E('p2'));
+    expect(friends[1].id).toBe(E('p3'));
+
+    // Literal multi-value → string[]
+    const nickNames = result[0].nickName as string[];
+    expect(Array.isArray(nickNames)).toBe(true);
+    expect(nickNames.length).toBe(2);
+    expect(nickNames).toContain('Sem1');
+    expect(nickNames).toContain('Sem');
+  });
+
+  test('absent multi-value literal field returns empty array', () => {
+    const query = flatSelectQuery([
+      {key: PROP_NICK_NAME, property: PROP_NICK_NAME},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_nickName']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            // a0_nickName absent
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const nickNames = result[0].nickName as string[];
+    expect(Array.isArray(nickNames)).toBe(true);
+    expect(nickNames.length).toBe(0);
+  });
+
+  test('multi-value literal deduplicates by value', () => {
+    const query = flatSelectQuery([
+      {key: PROP_NICK_NAME, property: PROP_NICK_NAME},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_nickName']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_nickName: {type: 'literal', value: 'Sem'},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_nickName: {type: 'literal', value: 'Sem'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const nickNames = result[0].nickName as string[];
+    expect(nickNames.length).toBe(1);
+    expect(nickNames[0]).toBe('Sem');
   });
 });
 
