@@ -1155,6 +1155,15 @@ describe('Fuseki SELECT — quantifiers and aggregates', () => {
 // =========================================================================
 
 describe('Fuseki SELECT — aggregation', () => {
+  /** Find the first numeric-valued key on a row (the aggregate count). */
+  function findCountValue(row: ResultRow): number | undefined {
+    for (const key of Object.keys(row)) {
+      if (key === 'id') continue;
+      if (typeof row[key] === 'number') return row[key] as number;
+    }
+    return undefined;
+  }
+
   test('countFriends — count per person', async () => {
     if (!fusekiAvailable) return;
 
@@ -1163,23 +1172,20 @@ describe('Fuseki SELECT — aggregation', () => {
     expect(Array.isArray(mapped)).toBe(true);
     const rows = mapped as ResultRow[];
 
-    // All 4 persons appear (GROUP BY)
+    // All 4 persons appear (GROUP BY with OPTIONAL friends)
     expect(rows.length).toBe(4);
 
     for (const row of rows) {
-      const countKey = Object.keys(row).find((k) => k !== 'id')!;
-      expect(typeof row[countKey] === 'number').toBe(true);
+      expect(typeof findCountValue(row)).toBe('number');
     }
 
     const p1 = findRowById(rows, 'p1');
     expect(p1).toBeDefined();
-    const p1CountKey = Object.keys(p1!).find((k) => k !== 'id')!;
-    expect(p1![p1CountKey]).toBe(2);
+    expect(findCountValue(p1!)).toBe(2);
 
     const p2 = findRowById(rows, 'p2');
     expect(p2).toBeDefined();
-    const p2CountKey = Object.keys(p2!).find((k) => k !== 'id')!;
-    expect(p2![p2CountKey]).toBe(2);
+    expect(findCountValue(p2!)).toBe(2);
   });
 
   test('countNestedFriends — count(friends.friends)', async () => {
@@ -1192,16 +1198,17 @@ describe('Fuseki SELECT — aggregation', () => {
 
     // SPARQL: SELECT ?a0 (count(?a1_friends) AS ?a1_agg) ... GROUP BY ?a0
     // INNER JOIN on friends — only p1 and p2 have friends
-    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows.length).toBe(2);
 
-    // Each row should have an id and a numeric count field
-    for (const row of rows) {
-      expect(row.id).toBeDefined();
-      const countKey = Object.keys(row).find((k) => k !== 'id');
-      if (countKey) {
-        expect(typeof row[countKey]).toBe('number');
-      }
-    }
+    // p1→friends [p2, p3]. p2 has friends [p3, p4] → count = 2. p3 has none.
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+    expect(findCountValue(p1!)).toBe(2);
+
+    // p2→friends [p3, p4]. Neither has friends → count = 0.
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    expect(findCountValue(p2!)).toBe(0);
   });
 
   test('countLabel — friends.select(numFriends: friends.size())', async () => {
@@ -1212,16 +1219,16 @@ describe('Fuseki SELECT — aggregation', () => {
     expect(Array.isArray(mapped)).toBe(true);
     const rows = mapped as ResultRow[];
 
-    // Same SPARQL as countNestedFriends — GROUP BY root
-    expect(rows.length).toBeGreaterThanOrEqual(2);
+    // Same SPARQL as countNestedFriends
+    expect(rows.length).toBe(2);
 
-    for (const row of rows) {
-      expect(row.id).toBeDefined();
-      const countKey = Object.keys(row).find((k) => k !== 'id');
-      if (countKey) {
-        expect(typeof row[countKey]).toBe('number');
-      }
-    }
+    const p1 = findRowById(rows, 'p1');
+    expect(p1).toBeDefined();
+    expect(findCountValue(p1!)).toBe(2);
+
+    const p2 = findRowById(rows, 'p2');
+    expect(p2).toBeDefined();
+    expect(findCountValue(p2!)).toBe(0);
   });
 
   test('customResultNumFriends — {numFriends: friends.size()}', async () => {
