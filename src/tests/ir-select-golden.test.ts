@@ -504,6 +504,7 @@ describe("select canonical IR golden fixtures", () => {
             "alias": "a1",
             "expression": {
               "kind": "property_expr",
+              "maxCount": 1,
               "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
               "sourceAlias": "a0",
             },
@@ -551,6 +552,7 @@ describe("select canonical IR golden fixtures", () => {
             "alias": "a1",
             "expression": {
               "kind": "property_expr",
+              "maxCount": 1,
               "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
               "sourceAlias": "a2",
             },
@@ -573,9 +575,7 @@ describe("select canonical IR golden fixtures", () => {
   });
 
   test("single-value bestFriend traversal carries maxCount", async () => {
-    const actual = await captureIR(() =>
-      queryFactories.selectBestFriendName()
-    );
+    const actual = await captureIR(() => queryFactories.selectBestFriendName());
     // The bestFriend traverse pattern must carry maxCount: 1
     const traversePattern = actual.patterns.find(
       (p: any) => p.kind === "traverse"
@@ -599,6 +599,7 @@ describe("select canonical IR golden fixtures", () => {
             "alias": "a1",
             "expression": {
               "kind": "property_expr",
+              "maxCount": 1,
               "property": "https://data.lincd.org/module/-_linked-core/shape/person/name",
               "sourceAlias": "a1",
             },
@@ -717,9 +718,7 @@ describe("IR pipeline behavior", () => {
     expect(ir.projection.length).toBeGreaterThanOrEqual(3);
     expect(
       ir.patterns.some(
-        (p) =>
-          p.kind === "traverse" &&
-          p.property.endsWith("/pluralTestProp")
+        (p) => p.kind === "traverse" && p.property.endsWith("/pluralTestProp")
       )
     ).toBe(true);
     expect(
@@ -730,9 +729,15 @@ describe("IR pipeline behavior", () => {
 
     const projectedProperties = ir.projection
       .filter(
-        (item): item is {
+        (
+          item
+        ): item is {
           alias: string;
-          expression: {kind: "property_expr"; sourceAlias: string; property: string};
+          expression: {
+            kind: "property_expr";
+            sourceAlias: string;
+            property: string;
+          };
         } => item.expression.kind === "property_expr"
       )
       .map((item) => item.expression.property);
