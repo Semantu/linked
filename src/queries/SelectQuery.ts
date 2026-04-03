@@ -88,12 +88,6 @@ export type PropertyQueryStep = {
   where?: WherePath;
 };
 
-export enum WhereMethods {
-  EQUALS = '=',
-  SOME = 'some',
-  EVERY = 'every',
-}
-
 /**
  * Maps all the return types of get/set methods of a Shape and maps their return types to QueryBuilderObjects
  */
@@ -194,13 +188,6 @@ export type WhereExistsPath = {
 };
 
 export type WherePath = WhereExpressionPath | WhereExistsPath;
-
-/** @deprecated — Evaluation-based WHERE paths are no longer produced. Kept for backward compatibility with tests. */
-export const isWhereEvaluationPath = (
-  value: any,
-): boolean => {
-  return !!value && 'args' in value;
-};
 
 /**
  * An argument can be a direct reference to a node, a js primitive (boolean,number), a path to resolve (like from a query context variables)
@@ -1412,8 +1399,6 @@ export class QueryShape<
   // }
 }
 
-/** @deprecated — Evaluation has been replaced by ExpressionNode. Kept as type export only for backward compat. */
-export class Evaluation {}
 
 /**
  * Concrete query wrapper for JS primitive values (string, number, boolean, Date).

@@ -226,6 +226,10 @@ export const queryFactories = {
     Person.select().where((p) =>
       p.friends.every((f) => f.name.equals('Moa').or(f.name.equals('Jinx'))),
     ),
+  whereNone: () =>
+    Person.select((p) => p.name).where((p) =>
+      p.friends.none((f) => f.hobby.equals('Chess')),
+    ),
   whereSequences: () =>
     Person.select().where((p) =>
       p.friends

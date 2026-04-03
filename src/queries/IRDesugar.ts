@@ -82,11 +82,6 @@ export type DesugaredCustomObjectEntry = {
   value: DesugaredSelection;
 };
 
-export type DesugaredEvaluationSelect = {
-  kind: 'evaluation_select';
-  where: DesugaredWhere;
-};
-
 export type DesugaredExpressionSelect = {
   kind: 'expression_select';
   expressionNode: import('../expressions/ExpressionNode.js').ExpressionNode;
@@ -101,7 +96,6 @@ export type DesugaredSelection =
   | DesugaredSelectionPath
   | DesugaredSubSelect
   | DesugaredCustomObjectSelect
-  | DesugaredEvaluationSelect
   | DesugaredExpressionSelect
   | DesugaredMultiSelection;
 

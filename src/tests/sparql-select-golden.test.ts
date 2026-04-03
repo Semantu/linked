@@ -594,6 +594,24 @@ WHERE {
 }`);
   });
 
+  test('whereNone', async () => {
+    const sparql = await goldenSelect(queryFactories.whereNone);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  FILTER(!(EXISTS {
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/hobby> ?a1_hobby .
+    FILTER(?a1_hobby = "Chess")
+  }))
+}`);
+  });
+
   test('whereSequences', async () => {
     const sparql = await goldenSelect(queryFactories.whereSequences);
     expect(sparql).toBe(

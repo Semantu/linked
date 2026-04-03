@@ -40,17 +40,6 @@ export function toIRExpression(input: ExpressionInput): IRExpression {
   throw new Error(`Invalid expression input: ${input}`);
 }
 
-/** Collect property refs from an ExpressionInput (only ExpressionNode has refs). */
-function collectRefs(...inputs: ExpressionInput[]): Map<string, readonly string[]> {
-  const merged = new Map<string, readonly string[]>();
-  for (const input of inputs) {
-    if (input instanceof ExpressionNode) {
-      for (const [k, v] of input._refs) merged.set(k, v);
-    }
-  }
-  return merged;
-}
-
 function binary(
   op: IRBinaryOperator,
   left: IRExpression,

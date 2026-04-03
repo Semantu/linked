@@ -302,17 +302,7 @@ export const lowerSelectQuery = (
       );
     }
 
-    if (selection.kind === 'evaluation_select') {
-      const canonicalWhere = canonicalizeWhere(selection.where);
-      return [{
-        kind: 'expression',
-        key: key || 'value',
-        expression: lowerWhere(canonicalWhere, ctx, {
-          rootAlias: aliasAfterPath(parentPath),
-          resolveTraversal: pathOptions.resolveTraversal,
-        }),
-      }];
-    }
+
 
     if (selection.kind === 'expression_select') {
       const exprSelect = selection as DesugaredExpressionSelect;

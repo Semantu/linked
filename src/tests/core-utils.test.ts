@@ -13,7 +13,6 @@ import {
 } from '../utils/ShapeClass';
 import {LinkedStorage} from '../utils/LinkedStorage';
 import {getQueryDispatch} from '../queries/queryDispatch';
-import {isWhereEvaluationPath} from '../queries/SelectQuery';
 import {getQueryContext, setQueryContext, PendingQueryContext} from '../queries/QueryContext';
 import {NodeReferenceValue} from '../utils/NodeReference';
 

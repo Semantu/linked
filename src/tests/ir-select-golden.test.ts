@@ -279,6 +279,13 @@ const filteringCases: SelectCase[] = [
     exactProjection: 0,
   },
   {
+    name: "whereNone",
+    run: () => queryFactories.whereNone(),
+    hasWhere: true,
+    whereKind: "not_expr",
+    minProjection: 1,
+  },
+  {
     name: "whereSequences",
     run: () => queryFactories.whereSequences(),
     hasWhere: true,

@@ -7,7 +7,6 @@ import {
   DesugaredSelectionPath,
   DesugaredSubSelect,
   DesugaredCustomObjectSelect,
-  DesugaredEvaluationSelect,
   DesugaredMultiSelection,
 } from '../queries/IRDesugar';
 import {Person} from '../test-helpers/query-fixtures';
@@ -29,11 +28,6 @@ const asSubSelect = (s: unknown): DesugaredSubSelect => {
 const asCustomObject = (s: unknown): DesugaredCustomObjectSelect => {
   expect((s as any).kind).toBe('custom_object_select');
   return s as DesugaredCustomObjectSelect;
-};
-
-const asEvaluation = (s: unknown): DesugaredEvaluationSelect => {
-  expect((s as any).kind).toBe('evaluation_select');
-  return s as DesugaredEvaluationSelect;
 };
 
 const asMultiSelection = (s: unknown): DesugaredMultiSelection => {
