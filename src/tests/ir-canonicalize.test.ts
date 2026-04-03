@@ -1,9 +1,8 @@
 import {describe, expect, test} from '@jest/globals';
 import {queryFactories} from '../test-helpers/query-fixtures';
 import {captureRawQuery} from '../test-helpers/query-capture-store';
-import {DesugaredWhereBoolean, desugarSelectQuery} from '../queries/IRDesugar';
+import {desugarSelectQuery} from '../queries/IRDesugar';
 import {canonicalizeDesugaredSelectQuery} from '../queries/IRCanonicalize';
-import {WhereMethods} from '../queries/SelectQuery';
 
 const capture = (runner: () => Promise<unknown>) => captureRawQuery(runner);
 
@@ -37,7 +36,6 @@ describe('IR canonicalization (Phase 4)', () => {
     const query = await capture(() => queryFactories.whereSomeExplicit());
     const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
 
-    // .some() now produces ExistsCondition → where_exists_condition (passthrough)
     expect(canonical.where?.kind).toBe('where_exists_condition');
   });
 
@@ -45,27 +43,16 @@ describe('IR canonicalization (Phase 4)', () => {
     const query = await capture(() => queryFactories.whereEvery());
     const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
 
-    // .every() produces ExistsCondition with negated predicate → where_exists_condition
     expect(canonical.where?.kind).toBe('where_exists_condition');
   });
 
-  // Verify the old WhereMethods-based canonicalization still works for any remaining usage
-  test('legacy: WhereMethods.SOME still canonicalizes to where_exists', async () => {
-    const query = await capture(() => queryFactories.selectWhereNameSemmy());
-    const desugared = desugarSelectQuery(query);
-    // Skip if desugared where is expression-based (no left/right to borrow)
-    if (desugared.where?.kind !== 'where_comparison') return;
-    const nested = desugared.where as any;
-    const canonical = canonicalizeDesugaredSelectQuery({
-      ...desugared,
-      where: {
-        kind: 'where_comparison',
-        operator: WhereMethods.SOME,
-        left: nested.left,
-        right: [nested],
-      },
-    });
+  test('all where types pass through canonicalization', async () => {
+    const query1 = await capture(() => queryFactories.selectWhereNameSemmy());
+    const canonical1 = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query1));
+    expect(canonical1.where?.kind).toBe('where_expression');
 
-    expect(canonical.where?.kind).toBe('where_exists');
+    const query2 = await capture(() => queryFactories.whereSomeExplicit());
+    const canonical2 = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query2));
+    expect(canonical2.where?.kind).toBe('where_exists_condition');
   });
 });
