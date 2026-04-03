@@ -51,3 +51,7 @@ Each layer adds an optional `maxCount?: number` field and passes it downstream. 
 ## Known gap
 
 `createTraversalResolver()` in `IRLower.ts` (used by `lowerWhere` for EXISTS/MINUS patterns) does not propagate `maxCount`. This is correct because WHERE-clause traversals do not produce result nesting — they only generate SPARQL graph patterns for filtering. However, if `createTraversalResolver` is ever reused for projection-related traversals, `maxCount` support would need to be added there.
+
+## Follow-on: flat multi-value projection fix
+
+This fix addressed traversal-based properties but revealed a second bug: flat multi-value property projections (e.g., `Person.select(p => p.friends)`) returned a single entity reference instead of an array. See report 013 for the fix that extended `maxCount` propagation to `IRPropertyExpression` and refactored the flat result mapping code.

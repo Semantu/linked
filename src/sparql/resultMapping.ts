@@ -143,6 +143,7 @@ type FieldDescriptor = {
   key: string;
   sparqlVar: string;
   expression: IRExpression;
+  /** Maximum cardinality from PropertyShape. Absent → multi-value (collected into array). */
   maxCount?: number;
 };
 
@@ -353,6 +354,9 @@ function isMultiValueField(field: FieldDescriptor): boolean {
 
 /**
  * Extracts a single field value from a SPARQL binding.
+ * URI bindings are wrapped as entity references ({id: ...}), regardless of
+ * whether the expression is an alias_expr or property_expr — any URI-typed
+ * SPARQL value represents an entity reference in the result.
  */
 function extractFieldValue(
   field: FieldDescriptor,
@@ -360,9 +364,6 @@ function extractFieldValue(
 ): ResultFieldValue {
   const val = binding[field.sparqlVar];
   if (!val) return null;
-  if (isUriExpression(field.expression) && val.type === 'uri') {
-    return {id: val.value} as ResultRow;
-  }
   if (val.type === 'uri') {
     return {id: val.value} as ResultRow;
   }
@@ -387,14 +388,15 @@ function populateFlatFields(
     row[field.key] = extractFieldValue(field, groupBindings[0]);
   }
 
-  // Multi-value fields: collect distinct values across all bindings
+  // Multi-value fields (no maxCount): collect distinct entity references across
+  // all bindings. Only URI-typed values are collected — flat multi-value fields
+  // are always object properties (e.g. friends) whose SPARQL bindings are URIs.
   for (const field of multiValueFields) {
     const seenValues = new Set<string>();
     const values: ResultRow[] = [];
     for (const binding of groupBindings) {
       const val = binding[field.sparqlVar];
       if (!val) continue;
-      // Deduplicate by raw value
       if (seenValues.has(val.value)) continue;
       seenValues.add(val.value);
       const extracted = extractFieldValue(field, binding);
@@ -447,20 +449,11 @@ function mapFlatRows(
 
 /**
  * Populates fields on a ResultRow from a single SPARQL binding.
- * Handles URI expressions (entity references) and literal coercion.
+ * Used inside nested groups where each entity is populated once per binding.
  */
 function populateFields(row: ResultRow, fields: FieldDescriptor[], binding: SparqlBinding): void {
   for (const field of fields) {
-    const val = binding[field.sparqlVar];
-    if (!val) {
-      row[field.key] = null;
-    } else if (isUriExpression(field.expression) && val.type === 'uri') {
-      row[field.key] = {id: val.value} as ResultRow;
-    } else if (val.type === 'uri') {
-      row[field.key] = {id: val.value} as ResultRow;
-    } else {
-      row[field.key] = coerceValue(val);
-    }
+    row[field.key] = extractFieldValue(field, binding);
   }
 }
 
