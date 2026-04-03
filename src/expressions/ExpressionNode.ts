@@ -386,6 +386,23 @@ export function tracedPropertyExpression(
 }
 
 /**
+ * Create a traced expression that resolves to an alias reference (the entity itself,
+ * not a property on it). Used for root shape comparisons like `p.equals(entity)`.
+ * The traversalSegmentIds are walked to resolve the alias, then the result is alias_expr.
+ */
+export function tracedAliasExpression(
+  traversalSegmentIds: readonly string[],
+): ExpressionNode {
+  const placeholder = `__alias_ref_${_refCounter++}__`;
+  const ir: IRExpression = {
+    kind: 'alias_expr',
+    alias: placeholder,
+  };
+  const refs = new Map<string, readonly string[]>([[placeholder, traversalSegmentIds]]);
+  return new ExpressionNode(ir, refs);
+}
+
+/**
  * Resolve unresolved property references in an IRExpression tree.
  * Walks the tree and replaces placeholder sourceAlias values with
  * real aliases resolved via pathOptions.
@@ -414,6 +431,16 @@ export function resolveExpressionRefs(
           property: segments[segments.length - 1],
         };
       }
+      case 'alias_expr': {
+        const segments = refs.get(e.alias);
+        if (!segments) return e;
+        // Resolve all segments as traversals, return alias_expr for the final alias
+        let currentAlias = rootAlias;
+        for (const seg of segments) {
+          currentAlias = resolveTraversal(currentAlias, seg);
+        }
+        return {kind: 'alias_expr', alias: currentAlias};
+      }
       case 'binary_expr':
         return {
           ...e,
@@ -421,6 +448,8 @@ export function resolveExpressionRefs(
           right: resolve(e.right),
         };
       case 'function_expr':
+        return {...e, args: e.args.map(resolve)};
+      case 'aggregate_expr':
         return {...e, args: e.args.map(resolve)};
       case 'logical_expr':
         return {...e, expressions: e.expressions.map(resolve)};

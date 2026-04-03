@@ -12,7 +12,7 @@ import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 import {FieldSet} from './FieldSet.js';
 import {PropertyPath} from './PropertyPath.js';
 import type {QueryBuilder} from './QueryBuilder.js';
-import {ExpressionNode, ExistsCondition, isExpressionNode, isExistsCondition, tracedPropertyExpression} from '../expressions/ExpressionNode.js';
+import {ExpressionNode, ExistsCondition, isExpressionNode, isExistsCondition, tracedPropertyExpression, tracedAliasExpression} from '../expressions/ExpressionNode.js';
 
 /**
  * The canonical SelectQuery type — an IR AST node representing a select query.
@@ -904,19 +904,26 @@ const EXPRESSION_METHODS = new Set([
  * Returns null if the object cannot be converted (e.g. root shape with no property path).
  */
 function toExpressionNode(qbo: QueryBuilderObject): ExpressionNode | null {
-  // Check if this is a query context reference — produce context_property_expr
+  // Check if this is a query context reference
   const contextId = findContextId(qbo);
   if (contextId) {
     const segments = FieldSet.collectPropertySegments(qbo);
-    const lastSegment = segments.length > 0 ? segments[segments.length - 1].id : undefined;
-    if (lastSegment) {
+    if (segments.length > 0) {
+      // Context property access (e.g. getQueryContext('user').name) → context_property_expr
+      const lastSegment = segments[segments.length - 1].id;
       const ir = {kind: 'context_property_expr' as const, contextIri: contextId, property: lastSegment};
       return new ExpressionNode(ir);
     }
+    // Context root reference (e.g. getQueryContext('user')) → reference_expr with the context IRI
+    const ir = {kind: 'reference_expr' as const, value: contextId};
+    return new ExpressionNode(ir);
   }
 
   const segments = FieldSet.collectPropertySegments(qbo);
-  if (segments.length === 0) return null;
+  if (segments.length === 0) {
+    // Root shape or entity reference — produce alias expression (the entity itself)
+    return tracedAliasExpression([]);
+  }
   const segmentIds = segments.map((s) => s.id);
   return tracedPropertyExpression(segmentIds);
 }
@@ -931,6 +938,24 @@ function findContextId(qbo: QueryBuilderObject): string | undefined {
     current = current.subject as QueryBuilderObject | undefined;
   }
   return undefined;
+}
+
+/**
+ * A wrapper for inline `.where()` on primitives that produces alias-based expressions.
+ * When `p.hobby.where(h => h.equals('Jogging'))` is called, `h` should reference
+ * the hobby variable itself (alias), not traverse to a sub-property.
+ */
+class InlineWhereProxy extends QueryBuilderObject {
+  constructor(public readonly source: QueryPrimitive<any>) {
+    super(source.property, source.subject);
+  }
+
+  equals(otherValue: any): ExpressionNode {
+    // Empty traversal = "the current alias" — resolved by lowering
+    // against the property's own alias scope
+    const self = tracedAliasExpression([]);
+    return self.eq(otherValue);
+  }
 }
 
 /**
@@ -1367,12 +1392,8 @@ export class QueryShape<
 
   equals(otherValue: NodeReferenceValue | QShape<any>): ExpressionNode {
     const self = toExpressionNode(this);
-    if (!self) {
-      // Root shape or unresolvable path — use old Evaluation path
-      return new Evaluation(this, WhereMethods.EQUALS, [otherValue]) as any;
-    }
     const arg = otherValue instanceof QueryBuilderObject
-      ? (toExpressionNode(otherValue) ?? otherValue)
+      ? toExpressionNode(otherValue)
       : otherValue;
     return self.eq(arg as any);
   }
@@ -1507,19 +1528,18 @@ export class QueryPrimitive<
 
   equals(otherValue: JSPrimitive | QueryBuilderObject): ExpressionNode {
     const self = toExpressionNode(this);
-    if (!self) {
-      // Inline where value or unresolvable path — use old Evaluation path
-      return new Evaluation(this, WhereMethods.EQUALS, [otherValue as any]) as any;
-    }
     const arg = otherValue instanceof QueryBuilderObject
-      ? (toExpressionNode(otherValue) ?? otherValue)
+      ? toExpressionNode(otherValue)
       : otherValue;
     return self.eq(arg as any);
   }
 
   where(validation: WhereClause<string>): this {
-    // let nodeShape = this.subject.getOriginalValue().nodeShape;
-    this.wherePath = processWhereClause(validation, new QueryPrimitive(''));
+    // For inline where on a primitive (p.hobby.where(h => h.equals(...))),
+    // pass a clone that produces alias expressions (the bound value itself)
+    // rather than property traversals
+    const selfAsAlias = new InlineWhereProxy(this);
+    this.wherePath = processWhereClause(validation, selfAsAlias as any);
     //return this because after Shape.friends.where() we can call other methods of Shape.friends
     return this as any;
   }
@@ -1561,11 +1581,7 @@ export class QueryPrimitiveSet<
   //TODO: see if we can merge these methods of QueryPrimitive and QueryPrimitiveSet
   // so that they're only defined once
   equals(other): ExpressionNode {
-    const self = toExpressionNode(this);
-    if (!self) {
-      return new Evaluation(this, WhereMethods.EQUALS, [other]) as any;
-    }
-    return self.eq(other);
+    return toExpressionNode(this).eq(other);
   }
 
   getPropertyStep(): QueryStep {
@@ -1615,10 +1631,18 @@ export class SetSize<Source = null> extends QueryPrimitive<number, Source> {
     super();
   }
 
-  // SetSize carries count semantics in getPropertyPath() via SizeStep.
-  // Must use the old Evaluation path to preserve count/GROUP BY/HAVING in SPARQL.
+  // Build an aggregate_expr(count, ...) ExpressionNode for the counted property
   equals(otherValue: any): ExpressionNode {
-    return new Evaluation(this, WhereMethods.EQUALS, [otherValue]) as any;
+    const countedSegments = FieldSet.collectPropertySegments(this.subject);
+    const countedIds = countedSegments.map(s => s.id);
+    const countedNode = tracedPropertyExpression(countedIds);
+    // Wrap in aggregate_expr(count)
+    const countExpr = new ExpressionNode({
+      kind: 'aggregate_expr',
+      name: 'count',
+      args: [countedNode.ir],
+    } as any, countedNode._refs);
+    return countExpr.eq(otherValue);
   }
 
   as(label: string) {
