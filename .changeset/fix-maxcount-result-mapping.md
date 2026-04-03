@@ -1,5 +1,5 @@
 ---
-"@_linked/core": patch
+"@_linked/core": minor
 ---
 
 Fix maxCount-aware result mapping for single-value and multi-value properties

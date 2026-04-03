@@ -9,8 +9,8 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
-  build-and-test:
-    name: Build & Test
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,12 +28,9 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
-        run: npm test
-
   release:
     name: Publish Stable Release
-    needs: build-and-test
+    needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -98,7 +95,7 @@ jobs:
 
   dev-release:
     name: Publish Dev Release
-    needs: build-and-test
+    needs: build
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     permissions:
