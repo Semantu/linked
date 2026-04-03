@@ -12,7 +12,7 @@ import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 import {FieldSet} from './FieldSet.js';
 import {PropertyPath} from './PropertyPath.js';
 import type {QueryBuilder} from './QueryBuilder.js';
-import {ExpressionNode, isExpressionNode, tracedPropertyExpression} from '../expressions/ExpressionNode.js';
+import {ExpressionNode, ExistsCondition, isExpressionNode, isExistsCondition, tracedPropertyExpression} from '../expressions/ExpressionNode.js';
 
 /**
  * The canonical SelectQuery type — an IR AST node representing a select query.
@@ -52,7 +52,8 @@ export type AccessorReturnValue =
 export type WhereClause<S extends Shape | AccessorReturnValue> =
   | Evaluation
   | ExpressionNode
-  | ((s: ToQueryBuilderObject<S>) => Evaluation | ExpressionNode);
+  | ExistsCondition
+  | ((s: ToQueryBuilderObject<S>) => Evaluation | ExpressionNode | ExistsCondition);
 
 export type QueryBuildFn<T extends Shape, ResponseType> = (
   p: ToQueryBuilderObject<T>,
@@ -202,7 +203,11 @@ export type WhereExpressionPath = {
   expressionNode: ExpressionNode;
 };
 
-export type WherePath = WhereEvaluationPath | WhereAndOr | WhereExpressionPath;
+export type WhereExistsPath = {
+  existsCondition: ExistsCondition;
+};
+
+export type WherePath = WhereEvaluationPath | WhereAndOr | WhereExpressionPath | WhereExistsPath;
 
 export type WhereEvaluationPath = {
   path: QueryPropertyPath;
@@ -304,9 +309,11 @@ export type QueryResponseToResultType<
     ? GetNestedQueryResultType<Response, Source>
     : T extends Array<infer Type>
       ? UnionToIntersection<QueryResponseToResultType<Type>>
-      : T extends Evaluation
+      : T extends ExpressionNode
         ? boolean
-        : T extends Object
+        : T extends Evaluation
+          ? boolean
+          : T extends Object
           ? QResult<QShapeType, Prettify<ObjectToPlainResult<T>>>
           : never & {__error: 'QueryResponseToResultType: unmatched query response type'};
 
@@ -860,9 +867,14 @@ export const processWhereClause = (
     if (isExpressionNode(result)) {
       return {expressionNode: result};
     }
+    if (isExistsCondition(result)) {
+      return {existsCondition: result};
+    }
     return result.getWherePath();
   } else if (isExpressionNode(validation)) {
     return {expressionNode: validation};
+  } else if (isExistsCondition(validation)) {
+    return {existsCondition: validation};
   } else {
     return (validation as Evaluation).getWherePath();
   }
@@ -874,7 +886,7 @@ export const processWhereClause = (
 
 const EXPRESSION_METHODS = new Set([
   'plus', 'minus', 'times', 'divide', 'abs', 'round', 'ceil', 'floor', 'power',
-  'eq', 'neq', 'notEquals', 'gt', 'greaterThan', 'gte', 'greaterThanOrEqual',
+  'equals', 'eq', 'neq', 'notEquals', 'gt', 'greaterThan', 'gte', 'greaterThanOrEqual',
   'lt', 'lessThan', 'lte', 'lessThanOrEqual',
   'concat', 'contains', 'startsWith', 'endsWith', 'substr', 'before', 'after',
   'replace', 'ucase', 'lcase', 'strlen', 'encodeForUri', 'matches',
@@ -886,22 +898,38 @@ const EXPRESSION_METHODS = new Set([
 ]);
 
 /**
+ * Convert a QueryBuilderObject to a traced ExpressionNode by extracting its
+ * property path segments and creating a property expression reference.
+ * This is the bridge between the query proxy world and the expression IR world.
+ */
+function toExpressionNode(qbo: QueryBuilderObject): ExpressionNode {
+  const segments = FieldSet.collectPropertySegments(qbo);
+  const segmentIds = segments.map((s) => s.id);
+  return tracedPropertyExpression(segmentIds);
+}
+
+/**
  * Wrap a QueryPrimitive in a Proxy that intercepts expression method calls.
- * When an expression method (e.g., `.plus()`, `.gt()`) is accessed, creates a
- * traced ExpressionNode based on the QueryPrimitive's property path.
- *
- * Note: `.equals()` is intentionally excluded — it's an existing QueryPrimitive
- * method that returns an Evaluation (for WHERE clauses). Use `.eq()` for the
- * expression form.
+ * When an expression method (e.g., `.plus()`, `.gt()`, `.equals()`) is accessed,
+ * creates a traced ExpressionNode based on the QueryPrimitive's property path.
  */
 function wrapWithExpressionProxy<T>(qp: QueryPrimitive<T>): QueryPrimitive<T> {
   return new Proxy(qp, {
     get(target, key, receiver) {
       if (typeof key === 'string' && EXPRESSION_METHODS.has(key)) {
         const segments = FieldSet.collectPropertySegments(target);
-        const segmentIds = segments.map((s) => s.id);
-        const baseNode = tracedPropertyExpression(segmentIds);
-        return (...args: any[]) => (baseNode as any)[key](...args);
+        // Only intercept if we have valid property segments to trace
+        if (segments.length > 0) {
+          const segmentIds = segments.map((s) => s.id);
+          const baseNode = tracedPropertyExpression(segmentIds);
+          return (...args: any[]) => {
+            // Convert QueryBuilderObject arguments to ExpressionNode
+            const convertedArgs = args.map((arg) =>
+              arg instanceof QueryBuilderObject ? toExpressionNode(arg) : arg,
+            );
+            return (baseNode as any)[key](...convertedArgs);
+          };
+        }
       }
       return Reflect.get(target, key, receiver);
     },
@@ -1184,20 +1212,40 @@ export class QueryShapeSet<
     );
   }
 
-  some(validation: WhereClause<S>): SetEvaluation {
-    return this.someOrEvery(validation, WhereMethods.SOME);
+  some(validation: WhereClause<S>): ExistsCondition {
+    const predicate = this.buildPredicateExpression(validation);
+    const pathSegmentIds = FieldSet.collectPropertySegments(this).map(s => s.id);
+    return new ExistsCondition(pathSegmentIds, predicate, false);
   }
 
-  every(validation: WhereClause<S>): SetEvaluation {
-    return this.someOrEvery(validation, WhereMethods.EVERY);
+  every(validation: WhereClause<S>): ExistsCondition {
+    // every(fn) = NOT EXISTS(path WHERE NOT(fn))
+    const predicate = this.buildPredicateExpression(validation);
+    const pathSegmentIds = FieldSet.collectPropertySegments(this).map(s => s.id);
+    return new ExistsCondition(pathSegmentIds, predicate.not(), true);
   }
 
-  private someOrEvery(validation: WhereClause<S>, method: WhereMethods) {
-    let leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
-    //do we need to store this here? or are we accessing the evaluation and then going backwards?
-    //in that case just pass it to the evaluation and don't use this.wherePath
-    let wherePath = processWhereClause(validation, leastSpecificShape);
-    return new SetEvaluation(this, method, [wherePath]);
+  none(validation: WhereClause<S>): ExistsCondition {
+    // none(fn) = NOT EXISTS(path WHERE fn) = some(fn).not()
+    const predicate = this.buildPredicateExpression(validation);
+    const pathSegmentIds = FieldSet.collectPropertySegments(this).map(s => s.id);
+    return new ExistsCondition(pathSegmentIds, predicate, true);
+  }
+
+  private buildPredicateExpression(validation: WhereClause<S>): ExpressionNode {
+    const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
+    if (validation instanceof Function) {
+      const proxy = createProxiedPathBuilder(leastSpecificShape) as any;
+      const result = validation(proxy);
+      if (isExpressionNode(result)) {
+        return result;
+      }
+      throw new Error('Validation callback must return an ExpressionNode');
+    }
+    if (isExpressionNode(validation)) {
+      return validation;
+    }
+    throw new Error('Expected a callback or ExpressionNode for some/every/none');
   }
 }
 
@@ -1292,8 +1340,11 @@ export class QueryShape<
     return this as any as QShape<InstanceType<ShapeClass>, Source, Property>;
   }
 
-  equals(otherValue: NodeReferenceValue | QShape<any>) {
-    return new Evaluation(this, WhereMethods.EQUALS, [otherValue]);
+  equals(otherValue: NodeReferenceValue | QShape<any>): ExpressionNode {
+    const arg = otherValue instanceof QueryBuilderObject
+      ? toExpressionNode(otherValue)
+      : otherValue;
+    return toExpressionNode(this).eq(arg as any);
   }
 
   select<QF = unknown>(
@@ -1424,9 +1475,18 @@ export class QueryPrimitive<
     super(property, subject);
   }
 
-  equals(otherValue: JSPrimitive | QueryBuilderObject) {
-    //TODO: review types, this is working but currently QueryBuilderObject is not accepted as a type of args
-    return new Evaluation(this, WhereMethods.EQUALS, [otherValue as any]);
+  equals(otherValue: JSPrimitive | QueryBuilderObject): ExpressionNode {
+    // If this primitive has no property segments (e.g. inline where callback value),
+    // use the old Evaluation path which resolves the path from outer context.
+    // This only runs when the proxy doesn't intercept (empty segment primitives).
+    const segments = FieldSet.collectPropertySegments(this);
+    if (segments.length === 0) {
+      return new Evaluation(this, WhereMethods.EQUALS, [otherValue as any]) as any;
+    }
+    const arg = otherValue instanceof QueryBuilderObject
+      ? toExpressionNode(otherValue)
+      : otherValue;
+    return toExpressionNode(this).eq(arg as any);
   }
 
   where(validation: WhereClause<string>): this {
@@ -1472,8 +1532,8 @@ export class QueryPrimitiveSet<
 
   //TODO: see if we can merge these methods of QueryPrimitive and QueryPrimitiveSet
   // so that they're only defined once
-  equals(other) {
-    return new Evaluation(this, WhereMethods.EQUALS, [other]);
+  equals(other): ExpressionNode {
+    return toExpressionNode(this).eq(other);
   }
 
   getPropertyStep(): QueryStep {

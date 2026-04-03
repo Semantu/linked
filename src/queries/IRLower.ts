@@ -9,13 +9,14 @@ import {
 import {
   DesugaredExpressionSelect,
   DesugaredExpressionWhere,
+  DesugaredExistsWhere,
   DesugaredSelection,
   DesugaredSelectionPath,
   DesugaredStep,
   DesugaredWhere,
   DesugaredWhereArg,
 } from './IRDesugar.js';
-import {resolveExpressionRefs} from '../expressions/ExpressionNode.js';
+import {resolveExpressionRefs, ExistsCondition} from '../expressions/ExpressionNode.js';
 import {
   IRExpression,
   IRGraphPattern,
@@ -240,10 +241,83 @@ const lowerWhere = (
         options.resolveTraversal,
       );
     }
+    case 'where_exists_condition': {
+      // ExistsCondition-based WHERE (from .some()/.every()/.none())
+      const existsWhere = where as DesugaredExistsWhere;
+      return lowerExistsCondition(existsWhere.existsCondition, ctx, options);
+    }
     default:
       const _exhaustive: never = where;
       throw new Error(`Unknown canonical where kind: ${(_exhaustive as {kind: string}).kind}`);
   }
+};
+
+/**
+ * Lower an ExistsCondition to IRExistsExpression with proper traversal patterns.
+ */
+const lowerExistsCondition = (
+  condition: ExistsCondition,
+  ctx: AliasGenerator,
+  options: PathLoweringOptions,
+): IRExpression => {
+  // Build traversal patterns for the collection path
+  const {resolve: existsResolve, patterns: traversals} = createTraversalResolver(
+    () => ctx.generateAlias(),
+    (from, to, property): IRTraversePattern => ({kind: 'traverse', from, to, property}),
+  );
+
+  // Walk the path segments to create traversal patterns
+  let currentAlias = options.rootAlias;
+  for (const segmentId of condition.pathSegmentIds) {
+    currentAlias = existsResolve(currentAlias, segmentId);
+  }
+
+  // Resolve the inner predicate's property refs against the EXISTS scope
+  const filter = resolveExpressionRefs(
+    condition.predicate.ir,
+    condition.predicate._refs,
+    currentAlias,
+    existsResolve,
+  );
+
+  let existsExpr: IRExpression = {
+    kind: 'exists_expr',
+    pattern: traversals.length === 1
+      ? traversals[0]
+      : {kind: 'join', patterns: traversals},
+    filter,
+  };
+
+  // Wrap in NOT if negated (.none() or outer NOT of .every())
+  if (condition.negated) {
+    existsExpr = {kind: 'not_expr', expression: existsExpr};
+  }
+
+  // Handle .and()/.or() chaining
+  if (condition.chain.length > 0) {
+    let result: IRExpression = existsExpr;
+    for (const link of condition.chain) {
+      let rightExpr: IRExpression;
+      if (link.condition instanceof ExistsCondition) {
+        rightExpr = lowerExistsCondition(link.condition, ctx, options);
+      } else {
+        rightExpr = resolveExpressionRefs(
+          link.condition.ir,
+          link.condition._refs,
+          options.rootAlias,
+          options.resolveTraversal,
+        );
+      }
+      result = {
+        kind: 'logical_expr',
+        operator: link.op,
+        expressions: [result, rightExpr],
+      };
+    }
+    return result;
+  }
+
+  return existsExpr;
 };
 
 type ProjectionSeed =

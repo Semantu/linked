@@ -13,7 +13,7 @@ import {
 } from './SelectQuery.js';
 import {NodeReferenceValue, ShapeReferenceValue} from './QueryFactory.js';
 import type {FieldSetEntry} from './FieldSet.js';
-import {ExpressionNode} from '../expressions/ExpressionNode.js';
+import {ExpressionNode, ExistsCondition, isExistsCondition} from '../expressions/ExpressionNode.js';
 import type {PropertyShape} from '../shapes/SHACL.js';
 import type {PathExpr} from '../paths/PropertyPathExpr.js';
 import {isComplexPathExpr} from '../paths/PropertyPathExpr.js';
@@ -128,7 +128,12 @@ export type DesugaredExpressionWhere = {
   expressionNode: ExpressionNode;
 };
 
-export type DesugaredWhere = DesugaredWhereComparison | DesugaredWhereBoolean | DesugaredExpressionWhere;
+export type DesugaredExistsWhere = {
+  kind: 'where_exists_condition';
+  existsCondition: ExistsCondition;
+};
+
+export type DesugaredWhere = DesugaredWhereComparison | DesugaredWhereBoolean | DesugaredExpressionWhere | DesugaredExistsWhere;
 
 export type DesugaredSortBy = {
   direction: 'ASC' | 'DESC';
@@ -402,6 +407,13 @@ const toWhereComparison = (path: WherePath): DesugaredWhereComparison => {
 };
 
 export const toWhere = (path: WherePath): DesugaredWhere => {
+  // ExistsCondition-based WHERE (from .some()/.every()/.none()) — passthrough to lowering
+  if ('existsCondition' in path) {
+    return {
+      kind: 'where_exists_condition',
+      existsCondition: (path as {existsCondition: ExistsCondition}).existsCondition,
+    };
+  }
   // ExpressionNode-based WHERE — passthrough to lowering
   if ('expressionNode' in path) {
     return {

@@ -35,6 +35,8 @@ export function toIRExpression(input: ExpressionInput): IRExpression {
     return {kind: 'literal_expr', value: input};
   if (input instanceof Date)
     return {kind: 'literal_expr', value: input.toISOString()};
+  if (typeof input === 'object' && input !== null && 'id' in input)
+    return {kind: 'reference_expr', value: (input as {id: string}).id};
   throw new Error(`Invalid expression input: ${input}`);
 }
 
@@ -430,6 +432,53 @@ export function resolveExpressionRefs(
   };
 
   return resolve(expr);
+}
+
+/**
+ * Represents an EXISTS quantifier condition over a collection path.
+ * Used by .some(), .every(), .none() on QueryShapeSet.
+ * Supports .and() / .or() / .not() chaining to compose with other conditions.
+ *
+ * The desugar/lower pipeline recognizes this via isExistsCondition() and builds
+ * IRExistsExpression with proper traversal patterns and aliases.
+ */
+export class ExistsCondition {
+  constructor(
+    /** PropertyShape IDs forming the path from root to the collection. */
+    public readonly pathSegmentIds: readonly string[],
+    /** The inner predicate ExpressionNode. */
+    public readonly predicate: ExpressionNode,
+    /** Whether the EXISTS is negated (NOT EXISTS). */
+    public readonly negated: boolean = false,
+    /** Optional chained and/or conditions. */
+    private readonly _chain: Array<{op: 'and' | 'or'; condition: ExpressionNode | ExistsCondition}> = [],
+  ) {}
+
+  not(): ExistsCondition {
+    return new ExistsCondition(this.pathSegmentIds, this.predicate, !this.negated, this._chain);
+  }
+
+  and(other: ExpressionInput | ExistsCondition): ExistsCondition {
+    return new ExistsCondition(this.pathSegmentIds, this.predicate, this.negated, [
+      ...this._chain,
+      {op: 'and', condition: other instanceof ExistsCondition ? other : other instanceof ExpressionNode ? other : new ExpressionNode(toIRExpression(other))},
+    ]);
+  }
+
+  or(other: ExpressionInput | ExistsCondition): ExistsCondition {
+    return new ExistsCondition(this.pathSegmentIds, this.predicate, this.negated, [
+      ...this._chain,
+      {op: 'or', condition: other instanceof ExistsCondition ? other : other instanceof ExpressionNode ? other : new ExpressionNode(toIRExpression(other))},
+    ]);
+  }
+
+  get chain(): ReadonlyArray<{op: 'and' | 'or'; condition: ExpressionNode | ExistsCondition}> {
+    return this._chain;
+  }
+}
+
+export function isExistsCondition(value: unknown): value is ExistsCondition {
+  return value instanceof ExistsCondition;
 }
 
 /** Check if a value is an ExpressionNode. */

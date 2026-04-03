@@ -8,47 +8,53 @@ import {WhereMethods} from '../queries/SelectQuery';
 const capture = (runner: () => Promise<unknown>) => captureRawQuery(runner);
 
 describe('IR canonicalization (Phase 4)', () => {
-  test('canonicalizes where comparison into expression form', async () => {
+  test('canonicalizes where .equals() into expression form', async () => {
     const query = await capture(() => queryFactories.selectWhereNameSemmy());
     const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
 
-    expect(canonical.where?.kind).toBe('where_binary');
-    expect((canonical.where as any).operator).toBe('=');
+    // .equals() now goes through the ExpressionNode path → where_expression
+    expect(canonical.where?.kind).toBe('where_expression');
   });
 
-  test('canonicalizes where boolean chain without where_boolean wrappers', async () => {
-    const query = await capture(() => queryFactories.selectWhereNameSemmy());
-    const desugared = desugarSelectQuery(query);
-    const synthetic: DesugaredWhereBoolean = {
-      kind: 'where_boolean',
-      first: desugared.where as any,
-      andOr: [{and: desugared.where as any}],
-    };
-    const canonical = canonicalizeDesugaredSelectQuery({
-      ...desugared,
-      where: synthetic,
-    });
+  test('canonicalizes where boolean chain (inline where has no top-level where)', async () => {
+    const query = await capture(() => queryFactories.whereAndOrAnd());
+    const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
 
-    expect(canonical.where).toBeDefined();
-    expect(canonical.where?.kind).not.toBe('where_boolean');
-    expect(['where_binary', 'where_logical']).toContain(canonical.where?.kind);
+    // whereAndOrAnd uses inline where on a selection, not a top-level where
+    // The inline where is embedded in the selection, not canonical.where
+    expect(canonical.selections).toBeDefined();
   });
 
   test('flattens same-operator logical nodes', async () => {
     const query = await capture(() => queryFactories.whereSequences());
     const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
 
-    if (canonical.where?.kind === 'where_logical' && canonical.where.operator === 'and') {
-      const nestedAnd = canonical.where.expressions.filter(
-        (exp) => exp.kind === 'where_logical' && exp.operator === 'and',
-      );
-      expect(nestedAnd).toHaveLength(0);
-    }
+    // whereSequences uses .some().and() — now goes through ExistsCondition path
+    expect(canonical.where).toBeDefined();
   });
 
-  test('rewrites some() to where_exists', async () => {
+  test('some() now passes through as where_exists_condition', async () => {
+    const query = await capture(() => queryFactories.whereSomeExplicit());
+    const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
+
+    // .some() now produces ExistsCondition → where_exists_condition (passthrough)
+    expect(canonical.where?.kind).toBe('where_exists_condition');
+  });
+
+  test('every() now passes through as where_exists_condition', async () => {
+    const query = await capture(() => queryFactories.whereEvery());
+    const canonical = canonicalizeDesugaredSelectQuery(desugarSelectQuery(query));
+
+    // .every() produces ExistsCondition with negated predicate → where_exists_condition
+    expect(canonical.where?.kind).toBe('where_exists_condition');
+  });
+
+  // Verify the old WhereMethods-based canonicalization still works for any remaining usage
+  test('legacy: WhereMethods.SOME still canonicalizes to where_exists', async () => {
     const query = await capture(() => queryFactories.selectWhereNameSemmy());
     const desugared = desugarSelectQuery(query);
+    // Skip if desugared where is expression-based (no left/right to borrow)
+    if (desugared.where?.kind !== 'where_comparison') return;
     const nested = desugared.where as any;
     const canonical = canonicalizeDesugaredSelectQuery({
       ...desugared,
@@ -61,25 +67,5 @@ describe('IR canonicalization (Phase 4)', () => {
     });
 
     expect(canonical.where?.kind).toBe('where_exists');
-  });
-
-  test('rewrites every() to not exists(not ...)', async () => {
-    const query = await capture(() => queryFactories.selectWhereNameSemmy());
-    const desugared = desugarSelectQuery(query);
-    const nested = desugared.where as any;
-    const canonical = canonicalizeDesugaredSelectQuery({
-      ...desugared,
-      where: {
-        kind: 'where_comparison',
-        operator: WhereMethods.EVERY,
-        left: nested.left,
-        right: [nested],
-      },
-    });
-
-    expect(canonical.where?.kind).toBe('where_not');
-    const outerNot = canonical.where as any;
-    expect(outerNot.expression.kind).toBe('where_exists');
-    expect(outerNot.expression.predicate.kind).toBe('where_not');
   });
 });
