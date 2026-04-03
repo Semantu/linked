@@ -901,9 +901,11 @@ const EXPRESSION_METHODS = new Set([
  * Convert a QueryBuilderObject to a traced ExpressionNode by extracting its
  * property path segments and creating a property expression reference.
  * This is the bridge between the query proxy world and the expression IR world.
+ * Returns null if the object cannot be converted (e.g. root shape with no property path).
  */
-function toExpressionNode(qbo: QueryBuilderObject): ExpressionNode {
+function toExpressionNode(qbo: QueryBuilderObject): ExpressionNode | null {
   const segments = FieldSet.collectPropertySegments(qbo);
+  if (segments.length === 0) return null;
   const segmentIds = segments.map((s) => s.id);
   return tracedPropertyExpression(segmentIds);
 }
@@ -925,7 +927,7 @@ function wrapWithExpressionProxy<T>(qp: QueryPrimitive<T>): QueryPrimitive<T> {
           return (...args: any[]) => {
             // Convert QueryBuilderObject arguments to ExpressionNode
             const convertedArgs = args.map((arg) =>
-              arg instanceof QueryBuilderObject ? toExpressionNode(arg) : arg,
+              arg instanceof QueryBuilderObject ? (toExpressionNode(arg) ?? arg) : arg,
             );
             return (baseNode as any)[key](...convertedArgs);
           };
@@ -1341,10 +1343,15 @@ export class QueryShape<
   }
 
   equals(otherValue: NodeReferenceValue | QShape<any>): ExpressionNode {
+    const self = toExpressionNode(this);
+    if (!self) {
+      // Root shape or unresolvable path — use old Evaluation path
+      return new Evaluation(this, WhereMethods.EQUALS, [otherValue]) as any;
+    }
     const arg = otherValue instanceof QueryBuilderObject
-      ? toExpressionNode(otherValue)
+      ? (toExpressionNode(otherValue) ?? otherValue)
       : otherValue;
-    return toExpressionNode(this).eq(arg as any);
+    return self.eq(arg as any);
   }
 
   select<QF = unknown>(
@@ -1476,17 +1483,15 @@ export class QueryPrimitive<
   }
 
   equals(otherValue: JSPrimitive | QueryBuilderObject): ExpressionNode {
-    // If this primitive has no property segments (e.g. inline where callback value),
-    // use the old Evaluation path which resolves the path from outer context.
-    // This only runs when the proxy doesn't intercept (empty segment primitives).
-    const segments = FieldSet.collectPropertySegments(this);
-    if (segments.length === 0) {
+    const self = toExpressionNode(this);
+    if (!self) {
+      // Inline where value or unresolvable path — use old Evaluation path
       return new Evaluation(this, WhereMethods.EQUALS, [otherValue as any]) as any;
     }
     const arg = otherValue instanceof QueryBuilderObject
-      ? toExpressionNode(otherValue)
+      ? (toExpressionNode(otherValue) ?? otherValue)
       : otherValue;
-    return toExpressionNode(this).eq(arg as any);
+    return self.eq(arg as any);
   }
 
   where(validation: WhereClause<string>): this {
@@ -1533,7 +1538,11 @@ export class QueryPrimitiveSet<
   //TODO: see if we can merge these methods of QueryPrimitive and QueryPrimitiveSet
   // so that they're only defined once
   equals(other): ExpressionNode {
-    return toExpressionNode(this).eq(other);
+    const self = toExpressionNode(this);
+    if (!self) {
+      return new Evaluation(this, WhereMethods.EQUALS, [other]) as any;
+    }
+    return self.eq(other);
   }
 
   getPropertyStep(): QueryStep {
