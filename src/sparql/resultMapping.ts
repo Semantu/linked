@@ -269,8 +269,15 @@ function buildNestingDescriptor(query: IRSelectQuery): NestingDescriptor {
     }
 
     const field: FieldDescriptor = {key: resultKey, sparqlVar, expression};
-    if (expression.kind === 'property_expr' && typeof expression.maxCount === 'number') {
-      field.maxCount = expression.maxCount;
+    if (expression.kind === 'property_expr') {
+      // property_expr carries maxCount from PropertyShape — absent means multi-value
+      if (typeof expression.maxCount === 'number') {
+        field.maxCount = expression.maxCount;
+      }
+    } else {
+      // All other expressions (aggregate_expr, binary_expr, function_expr, etc.)
+      // produce a single scalar value per entity/group — always single-value
+      field.maxCount = 1;
     }
 
     if (sourceAlias === rootAlias) {
