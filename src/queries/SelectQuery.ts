@@ -866,9 +866,8 @@ const EXPRESSION_METHODS = new Set([
  * Convert a QueryBuilderObject to a traced ExpressionNode by extracting its
  * property path segments and creating a property expression reference.
  * This is the bridge between the query proxy world and the expression IR world.
- * Returns null if the object cannot be converted (e.g. root shape with no property path).
  */
-function toExpressionNode(qbo: QueryBuilderObject): ExpressionNode | null {
+function toExpressionNode(qbo: QueryBuilderObject): ExpressionNode {
   // Check if this is a query context reference
   const contextId = findContextId(qbo);
   if (contextId) {
@@ -1255,7 +1254,7 @@ export class QueryShapeSet<
       if (isExpressionNode(result)) {
         return result;
       }
-      throw new Error('Validation callback must return an ExpressionNode');
+      throw new Error('Validation callback must return an ExpressionNode or ExistsCondition');
     }
     if (isExpressionNode(validation)) {
       return validation;

@@ -56,7 +56,7 @@ WhereClause callback → ExpressionNode detected → WhereExpressionPath
   → lowerWhere() resolves refs → IRExpression (FILTER)
 ```
 
-Standard `Evaluation`-based WHERE continues to work unchanged. Mixed `Evaluation.and(ExpressionNode)` chaining works because `processWhereClause` detects ExpressionNode results at the funnel point, and recursive `toWhere()` handles `WhereExpressionPath` in `andOr` entries.
+**Note:** The `Evaluation` class referenced here was later retired in the 022-negation implementation. All WHERE conditions now use `ExpressionNode` or `ExistsCondition`. See `docs/reports/013-negation-and-evaluation-retirement.md`.
 
 ### Mutation expression pipeline
 
@@ -191,7 +191,7 @@ await Person.update({lastSeen: Expr.now()}).for(entity);
 
 ## Known limitations
 
-- Expression proxy methods are runtime-only on `QueryPrimitive`. Static types for WHERE callbacks return `Evaluation | ExpressionNode`, but the specific expression methods (`.strlen()`, `.plus()`) are not statically typed on `QueryPrimitive`. They work at runtime via Proxy.
+- Expression proxy methods are runtime-only on `QueryPrimitive`. Static types for WHERE callbacks return `ExpressionNode | ExistsCondition` (previously `Evaluation | ExpressionNode` before the 022-negation retirement), but the specific expression methods (`.strlen()`, `.plus()`) are not statically typed on `QueryPrimitive`. They work at runtime via Proxy.
 - Update expression proxy (`ExpressionUpdateProxy<S>`) IS fully typed — `.plus()` only appears on `number` properties, `.strlen()` only on `string`, etc.
 - `power(n)` is limited to positive integer exponents ≤ 20 (emits repeated multiplication).
 - Regex flags limited to `i`, `m`, `s`.
