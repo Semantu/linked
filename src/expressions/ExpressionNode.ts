@@ -35,18 +35,9 @@ export function toIRExpression(input: ExpressionInput): IRExpression {
     return {kind: 'literal_expr', value: input};
   if (input instanceof Date)
     return {kind: 'literal_expr', value: input.toISOString()};
+  if (typeof input === 'object' && input !== null && 'id' in input)
+    return {kind: 'reference_expr', value: (input as {id: string}).id};
   throw new Error(`Invalid expression input: ${input}`);
-}
-
-/** Collect property refs from an ExpressionInput (only ExpressionNode has refs). */
-function collectRefs(...inputs: ExpressionInput[]): Map<string, readonly string[]> {
-  const merged = new Map<string, readonly string[]>();
-  for (const input of inputs) {
-    if (input instanceof ExpressionNode) {
-      for (const [k, v] of input._refs) merged.set(k, v);
-    }
-  }
-  return merged;
 }
 
 function binary(
@@ -384,6 +375,23 @@ export function tracedPropertyExpression(
 }
 
 /**
+ * Create a traced expression that resolves to an alias reference (the entity itself,
+ * not a property on it). Used for root shape comparisons like `p.equals(entity)`.
+ * The traversalSegmentIds are walked to resolve the alias, then the result is alias_expr.
+ */
+export function tracedAliasExpression(
+  traversalSegmentIds: readonly string[],
+): ExpressionNode {
+  const placeholder = `__alias_ref_${_refCounter++}__`;
+  const ir: IRExpression = {
+    kind: 'alias_expr',
+    alias: placeholder,
+  };
+  const refs = new Map<string, readonly string[]>([[placeholder, traversalSegmentIds]]);
+  return new ExpressionNode(ir, refs);
+}
+
+/**
  * Resolve unresolved property references in an IRExpression tree.
  * Walks the tree and replaces placeholder sourceAlias values with
  * real aliases resolved via pathOptions.
@@ -412,6 +420,16 @@ export function resolveExpressionRefs(
           property: segments[segments.length - 1],
         };
       }
+      case 'alias_expr': {
+        const segments = refs.get(e.alias);
+        if (!segments) return e;
+        // Resolve all segments as traversals, return alias_expr for the final alias
+        let currentAlias = rootAlias;
+        for (const seg of segments) {
+          currentAlias = resolveTraversal(currentAlias, seg);
+        }
+        return {kind: 'alias_expr', alias: currentAlias};
+      }
       case 'binary_expr':
         return {
           ...e,
@@ -419,6 +437,8 @@ export function resolveExpressionRefs(
           right: resolve(e.right),
         };
       case 'function_expr':
+        return {...e, args: e.args.map(resolve)};
+      case 'aggregate_expr':
         return {...e, args: e.args.map(resolve)};
       case 'logical_expr':
         return {...e, expressions: e.expressions.map(resolve)};
@@ -430,6 +450,53 @@ export function resolveExpressionRefs(
   };
 
   return resolve(expr);
+}
+
+/**
+ * Represents an EXISTS quantifier condition over a collection path.
+ * Used by .some(), .every(), .none() on QueryShapeSet.
+ * Supports .and() / .or() / .not() chaining to compose with other conditions.
+ *
+ * The desugar/lower pipeline recognizes this via isExistsCondition() and builds
+ * IRExistsExpression with proper traversal patterns and aliases.
+ */
+export class ExistsCondition {
+  constructor(
+    /** PropertyShape IDs forming the path from root to the collection. */
+    public readonly pathSegmentIds: readonly string[],
+    /** The inner predicate ExpressionNode. */
+    public readonly predicate: ExpressionNode,
+    /** Whether the EXISTS is negated (NOT EXISTS). */
+    public readonly negated: boolean = false,
+    /** Optional chained and/or conditions. */
+    private readonly _chain: Array<{op: 'and' | 'or'; condition: ExpressionNode | ExistsCondition}> = [],
+  ) {}
+
+  not(): ExistsCondition {
+    return new ExistsCondition(this.pathSegmentIds, this.predicate, !this.negated, this._chain);
+  }
+
+  and(other: ExpressionInput | ExistsCondition): ExistsCondition {
+    return new ExistsCondition(this.pathSegmentIds, this.predicate, this.negated, [
+      ...this._chain,
+      {op: 'and', condition: other instanceof ExistsCondition ? other : other instanceof ExpressionNode ? other : new ExpressionNode(toIRExpression(other))},
+    ]);
+  }
+
+  or(other: ExpressionInput | ExistsCondition): ExistsCondition {
+    return new ExistsCondition(this.pathSegmentIds, this.predicate, this.negated, [
+      ...this._chain,
+      {op: 'or', condition: other instanceof ExistsCondition ? other : other instanceof ExpressionNode ? other : new ExpressionNode(toIRExpression(other))},
+    ]);
+  }
+
+  get chain(): ReadonlyArray<{op: 'and' | 'or'; condition: ExpressionNode | ExistsCondition}> {
+    return this._chain;
+  }
+}
+
+export function isExistsCondition(value: unknown): value is ExistsCondition {
+  return value instanceof ExistsCondition;
 }
 
 /** Check if a value is an ExpressionNode. */

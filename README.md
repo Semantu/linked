@@ -1,7 +1,8 @@
 # @_linked/core
-Core Linked package for the query DSL, SHACL shape decorators/metadata, and package registration.
 
-Linked core gives you a type-safe, schema-parameterized query language and SHACL-driven Shape classes for linked data. It compiles queries into a normalized [Intermediate Representation (IR)](./documentation/intermediate-representation.md) that can be executed by any store.
+A type-safe graph query builder and OGM for linked data — like Drizzle or Prisma, but for RDF and SPARQL.
+
+Linked gives you a schema-parameterized query language and SHACL-driven Shape classes for graph data. It compiles queries into a normalized [Intermediate Representation (IR)](./documentation/intermediate-representation.md) that can be executed by any store — SPARQL endpoints, in-memory RDF stores, or custom backends.
 
 ## Linked core offers
 
@@ -9,7 +10,7 @@ Linked core gives you a type-safe, schema-parameterized query language and SHACL
 - **Fully Inferred Result Types**: The TypeScript return type of every query is automatically inferred from the selected paths — no manual type annotations needed. Select `p.name` and get `{id: string; name: string}[]`. Select `p.friends.name` and get nested result types. This works for all operations: select, create, update, and delete.
 - **Dynamic Query Building**: Build queries programmatically with `QueryBuilder`, compose field selections with `FieldSet`, and serialize/deserialize queries as JSON — for CMS dashboards, dynamic forms, and API-driven query construction.
 - **Shape Classes (SHACL)**: TypeScript classes that generate SHACL shape metadata.
-- **Object-Oriented Data Operations**: Query, create, update, and delete data using the same Shape-based API.
+- **Full CRUD Operations**: Query, create, update, and delete data using the same Shape-based API — including expression-based updates, conditional mutations, and bulk operations.
 - **Storage Routing**: `LinkedStorage` routes query objects to your configured store(s) that implement `IQuadStore`.
 - **Automatic Data Validation**: SHACL shapes can be synced to your store for schema-level validation, and enforced at runtime by stores that support it.
 
@@ -28,10 +29,7 @@ npm install
 npm run setup
 ```
 
-`npm run setup` syncs `docs/agents` into local folders for agent tooling:
-
-- `.claude/agents`
-- `.agents/agents`
+`npm run setup` installs agent skills and syncs tooling configuration.
 
 ## Related packages
 
