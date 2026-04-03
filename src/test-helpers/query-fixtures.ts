@@ -230,6 +230,18 @@ export const queryFactories = {
     Person.select((p) => p.name).where((p) =>
       p.friends.none((f) => f.hobby.equals('Chess')),
     ),
+  whereSomeNot: () =>
+    Person.select((p) => p.name).where((p) =>
+      p.friends.some((f) => f.hobby.equals('Chess')).not(),
+    ),
+  whereEqualsNot: () =>
+    Person.select((p) => p.name).where((p) =>
+      p.name.equals('Alice').not(),
+    ),
+  whereNoneAndEquals: () =>
+    Person.select((p) => p.name).where((p) =>
+      p.friends.none((f) => f.hobby.equals('Chess')).and(p.name.equals('Bob')),
+    ),
   whereSequences: () =>
     Person.select().where((p) =>
       p.friends

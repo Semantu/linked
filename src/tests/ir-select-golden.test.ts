@@ -286,6 +286,27 @@ const filteringCases: SelectCase[] = [
     minProjection: 1,
   },
   {
+    name: "whereSomeNot",
+    run: () => queryFactories.whereSomeNot(),
+    hasWhere: true,
+    whereKind: "not_expr",
+    minProjection: 1,
+  },
+  {
+    name: "whereEqualsNot",
+    run: () => queryFactories.whereEqualsNot(),
+    hasWhere: true,
+    whereKind: "not_expr",
+    minProjection: 1,
+  },
+  {
+    name: "whereNoneAndEquals",
+    run: () => queryFactories.whereNoneAndEquals(),
+    hasWhere: true,
+    whereKind: "logical_expr",
+    minProjection: 1,
+  },
+  {
     name: "whereSequences",
     run: () => queryFactories.whereSequences(),
     hasWhere: true,
