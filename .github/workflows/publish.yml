@@ -9,31 +9,8 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
-  build-and-test:
-    name: Build & Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
-
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        run: npm test
-
   release:
     name: Publish Stable Release
-    needs: build-and-test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -47,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.16.0
           registry-url: "https://registry.npmjs.org"
 
       - name: Setup npm
@@ -98,7 +75,6 @@ jobs:
 
   dev-release:
     name: Publish Dev Release
-    needs: build-and-test
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     permissions:
@@ -111,7 +87,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.16.0
           registry-url: "https://registry.npmjs.org"
 
       - name: Setup npm

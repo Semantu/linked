@@ -51,6 +51,7 @@ export type DesugaredPropertyStep = {
   propertyShapeId: string;
   pathExpr?: PathExpr;
   where?: DesugaredWhere;
+  maxCount?: number;
 };
 
 export type DesugaredCountStep = {
@@ -185,6 +186,9 @@ const segmentsToSteps = (segments: PropertyShape[]): DesugaredPropertyStep[] =>
     if (seg.path && isComplexPathExpr(seg.path)) {
       step.pathExpr = seg.path;
     }
+    if (typeof seg.maxCount === 'number') {
+      step.maxCount = seg.maxCount;
+    }
     return step;
   });
 
@@ -244,6 +248,9 @@ const desugarEntry = (entry: FieldSetEntry): DesugaredSelection => {
     };
     if (segment.path && isComplexPathExpr(segment.path)) {
       step.pathExpr = segment.path;
+    }
+    if (typeof segment.maxCount === 'number') {
+      step.maxCount = segment.maxCount;
     }
     if (entry.scopedFilter && i === filterIndex) {
       step.where = toWhere(entry.scopedFilter);

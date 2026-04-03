@@ -35,6 +35,7 @@ const PROP_BIRTH_DATE = 'linked://tmp/props/birthDate';
 const PROP_BEST_FRIEND = 'linked://tmp/props/bestFriend';
 const PROP_HAS_FRIEND = 'linked://tmp/props/hasFriend';
 const PROP_GUARD_DOG_LEVEL = 'linked://tmp/props/guardDogLevel';
+const PROP_NICK_NAME = 'linked://tmp/props/nickName';
 
 const E = (suffix: string) => `linked://tmp/entities/${suffix}`;
 
@@ -46,21 +47,24 @@ const E = (suffix: string) => `linked://tmp/entities/${suffix}`;
  * Creates a minimal IRSelectQuery for flat property projections from the root.
  */
 function flatSelectQuery(
-  fields: Array<{key: string; property: string}>,
+  fields: Array<{key: string; property: string; maxCount?: number}>,
   opts?: {singleResult?: boolean; subjectId?: string},
 ): IRSelectQuery {
   return {
     kind: 'select',
     root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
     patterns: [],
-    projection: fields.map((f, i) => ({
-      alias: `a${i + 1}`,
-      expression: {
+    projection: fields.map((f, i) => {
+      const expr: any = {
         kind: 'property_expr' as const,
         sourceAlias: 'a0',
         property: f.property,
-      },
-    })),
+      };
+      if (typeof f.maxCount === 'number') {
+        expr.maxCount = f.maxCount;
+      }
+      return {alias: `a${i + 1}`, expression: expr};
+    }),
     resultMap: fields.map((f, i) => ({
       key: f.key,
       alias: `a${i + 1}`,
@@ -76,7 +80,7 @@ function flatSelectQuery(
  */
 function nestedSelectQuery(
   traverseProperty: string,
-  fields: Array<{key: string; property: string}>,
+  fields: Array<{key: string; property: string; maxCount?: number}>,
   opts?: {singleResult?: boolean},
 ): IRSelectQuery {
   return {
@@ -90,14 +94,17 @@ function nestedSelectQuery(
         property: traverseProperty,
       },
     ],
-    projection: fields.map((f, i) => ({
-      alias: `a${i + 2}`,
-      expression: {
+    projection: fields.map((f, i) => {
+      const expr: any = {
         kind: 'property_expr' as const,
         sourceAlias: 'a1',
         property: f.property,
-      },
-    })),
+      };
+      if (typeof f.maxCount === 'number') {
+        expr.maxCount = f.maxCount;
+      }
+      return {alias: `a${i + 2}`, expression: expr};
+    }),
     resultMap: fields.map((f, i) => ({
       key: f.key,
       alias: `a${i + 2}`,
@@ -112,7 +119,7 @@ function nestedSelectQuery(
 
 describe('mapSparqlSelectResult', () => {
   test('flat literal result — selectName', () => {
-    const query = flatSelectQuery([{key: PROP_NAME, property: PROP_NAME}]);
+    const query = flatSelectQuery([{key: PROP_NAME, property: PROP_NAME, maxCount: 1}]);
 
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a0_name']},
@@ -155,7 +162,7 @@ describe('mapSparqlSelectResult', () => {
   test('nested object result — selectFriendsName', () => {
     const query = nestedSelectQuery(
       PROP_HAS_FRIEND,
-      [{key: PROP_NAME, property: PROP_NAME}],
+      [{key: PROP_NAME, property: PROP_NAME, maxCount: 1}],
     );
 
     const json: SparqlJsonResults = {
@@ -213,7 +220,7 @@ describe('mapSparqlSelectResult', () => {
   });
 
   test('boolean coercion — "true" string', () => {
-    const query = flatSelectQuery([{key: PROP_IS_REAL, property: PROP_IS_REAL}]);
+    const query = flatSelectQuery([{key: PROP_IS_REAL, property: PROP_IS_REAL, maxCount: 1}]);
 
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a0_isRealPerson']},
@@ -237,7 +244,7 @@ describe('mapSparqlSelectResult', () => {
   });
 
   test('boolean coercion — "1" string', () => {
-    const query = flatSelectQuery([{key: PROP_IS_REAL, property: PROP_IS_REAL}]);
+    const query = flatSelectQuery([{key: PROP_IS_REAL, property: PROP_IS_REAL, maxCount: 1}]);
 
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a0_isRealPerson']},
@@ -261,7 +268,7 @@ describe('mapSparqlSelectResult', () => {
   });
 
   test('boolean coercion — "false" string', () => {
-    const query = flatSelectQuery([{key: PROP_IS_REAL, property: PROP_IS_REAL}]);
+    const query = flatSelectQuery([{key: PROP_IS_REAL, property: PROP_IS_REAL, maxCount: 1}]);
 
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a0_isRealPerson']},
@@ -285,7 +292,7 @@ describe('mapSparqlSelectResult', () => {
   });
 
   test('boolean coercion — "0" string', () => {
-    const query = flatSelectQuery([{key: PROP_IS_REAL, property: PROP_IS_REAL}]);
+    const query = flatSelectQuery([{key: PROP_IS_REAL, property: PROP_IS_REAL, maxCount: 1}]);
 
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a0_isRealPerson']},
@@ -310,7 +317,7 @@ describe('mapSparqlSelectResult', () => {
 
   test('integer coercion', () => {
     const query = flatSelectQuery([
-      {key: PROP_GUARD_DOG_LEVEL, property: PROP_GUARD_DOG_LEVEL},
+      {key: PROP_GUARD_DOG_LEVEL, property: PROP_GUARD_DOG_LEVEL, maxCount: 1},
     ]);
 
     const json: SparqlJsonResults = {
@@ -336,7 +343,7 @@ describe('mapSparqlSelectResult', () => {
 
   test('double coercion', () => {
     const query = flatSelectQuery([
-      {key: 'linked://tmp/props/score', property: 'linked://tmp/props/score'},
+      {key: 'linked://tmp/props/score', property: 'linked://tmp/props/score', maxCount: 1},
     ]);
 
     const json: SparqlJsonResults = {
@@ -362,7 +369,7 @@ describe('mapSparqlSelectResult', () => {
 
   test('dateTime coercion', () => {
     const query = flatSelectQuery([
-      {key: PROP_BIRTH_DATE, property: PROP_BIRTH_DATE},
+      {key: PROP_BIRTH_DATE, property: PROP_BIRTH_DATE, maxCount: 1},
     ]);
 
     const json: SparqlJsonResults = {
@@ -391,7 +398,7 @@ describe('mapSparqlSelectResult', () => {
 
   test('missing binding → null', () => {
     const query = flatSelectQuery([
-      {key: PROP_HOBBY, property: PROP_HOBBY},
+      {key: PROP_HOBBY, property: PROP_HOBBY, maxCount: 1},
     ]);
 
     const json: SparqlJsonResults = {
@@ -414,7 +421,7 @@ describe('mapSparqlSelectResult', () => {
 
   test('URI field → id string (entity reference)', () => {
     const query = flatSelectQuery([
-      {key: PROP_BEST_FRIEND, property: PROP_BEST_FRIEND},
+      {key: PROP_BEST_FRIEND, property: PROP_BEST_FRIEND, maxCount: 1},
     ]);
 
     const json: SparqlJsonResults = {
@@ -438,7 +445,7 @@ describe('mapSparqlSelectResult', () => {
 
   test('singleResult — one match → single ResultRow', () => {
     const query = flatSelectQuery(
-      [{key: PROP_NAME, property: PROP_NAME}],
+      [{key: PROP_NAME, property: PROP_NAME, maxCount: 1}],
       {singleResult: true},
     );
 
@@ -465,7 +472,7 @@ describe('mapSparqlSelectResult', () => {
 
   test('singleResult — no match → null', () => {
     const query = flatSelectQuery(
-      [{key: PROP_NAME, property: PROP_NAME}],
+      [{key: PROP_NAME, property: PROP_NAME, maxCount: 1}],
       {singleResult: true},
     );
 
@@ -481,7 +488,7 @@ describe('mapSparqlSelectResult', () => {
   });
 
   test('untyped literal → string', () => {
-    const query = flatSelectQuery([{key: PROP_NAME, property: PROP_NAME}]);
+    const query = flatSelectQuery([{key: PROP_NAME, property: PROP_NAME, maxCount: 1}]);
 
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a0_name']},
@@ -501,7 +508,7 @@ describe('mapSparqlSelectResult', () => {
   });
 
   test('xsd:string typed literal → string', () => {
-    const query = flatSelectQuery([{key: PROP_NAME, property: PROP_NAME}]);
+    const query = flatSelectQuery([{key: PROP_NAME, property: PROP_NAME, maxCount: 1}]);
 
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a0_name']},
@@ -552,9 +559,9 @@ describe('mapSparqlSelectResult', () => {
 
   test('multiple flat fields', () => {
     const query = flatSelectQuery([
-      {key: PROP_NAME, property: PROP_NAME},
-      {key: PROP_HOBBY, property: PROP_HOBBY},
-      {key: PROP_IS_REAL, property: PROP_IS_REAL},
+      {key: PROP_NAME, property: PROP_NAME, maxCount: 1},
+      {key: PROP_HOBBY, property: PROP_HOBBY, maxCount: 1},
+      {key: PROP_IS_REAL, property: PROP_IS_REAL, maxCount: 1},
     ]);
 
     const json: SparqlJsonResults = {
@@ -583,7 +590,7 @@ describe('mapSparqlSelectResult', () => {
   });
 
   test('deduplicates rows by root entity id', () => {
-    const query = flatSelectQuery([{key: PROP_NAME, property: PROP_NAME}]);
+    const query = flatSelectQuery([{key: PROP_NAME, property: PROP_NAME, maxCount: 1}]);
 
     // Same entity appears twice (e.g. due to OPTIONAL patterns producing duplicates)
     const json: SparqlJsonResults = {
@@ -608,9 +615,315 @@ describe('mapSparqlSelectResult', () => {
   });
 });
 
+describe('mapSparqlSelectResult — flat multi-value fields', () => {
+  test('multi-value flat field collects into array', () => {
+    // Person.select(p => p.friends) — friends has no maxCount → multi-value
+    const query = flatSelectQuery([
+      {key: PROP_HAS_FRIEND, property: PROP_HAS_FRIEND},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_hasFriend']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_hasFriend: {type: 'uri', value: E('p2')},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_hasFriend: {type: 'uri', value: E('p3')},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(2);
+    expect(friends.some((f) => f.id === E('p2'))).toBe(true);
+    expect(friends.some((f) => f.id === E('p3'))).toBe(true);
+  });
+
+  test('multi-value flat field deduplicates by value', () => {
+    const query = flatSelectQuery([
+      {key: PROP_HAS_FRIEND, property: PROP_HAS_FRIEND},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_hasFriend']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_hasFriend: {type: 'uri', value: E('p2')},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_hasFriend: {type: 'uri', value: E('p2')},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(friends.length).toBe(1);
+    expect(friends[0].id).toBe(E('p2'));
+  });
+
+  test('absent multi-value flat field returns empty array', () => {
+    const query = flatSelectQuery([
+      {key: PROP_HAS_FRIEND, property: PROP_HAS_FRIEND},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_hasFriend']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            // a0_hasFriend absent
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(0);
+  });
+
+  test('mixed single-value and multi-value flat fields', () => {
+    // Person.select(p => [p.name, p.friends]) — name has maxCount:1, friends has none
+    const query = flatSelectQuery([
+      {key: PROP_NAME, property: PROP_NAME, maxCount: 1},
+      {key: PROP_HAS_FRIEND, property: PROP_HAS_FRIEND},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_name', 'a0_hasFriend']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_name: {type: 'literal', value: 'Semmy'},
+            a0_hasFriend: {type: 'uri', value: E('p2')},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_name: {type: 'literal', value: 'Semmy'},
+            a0_hasFriend: {type: 'uri', value: E('p3')},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    // name is single-value → scalar
+    expect(result[0].name).toBe('Semmy');
+    // friends is multi-value → array
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(2);
+    expect(friends.some((f) => f.id === E('p2'))).toBe(true);
+    expect(friends.some((f) => f.id === E('p3'))).toBe(true);
+  });
+
+  test('multi-value flat field in nested mode (with traversal)', () => {
+    // Person.select(p => [p.friends, p.bestFriend.name])
+    // friends is flat multi-value, bestFriend.name is a traversal
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_BEST_FRIEND, maxCount: 1},
+      ],
+      projection: [
+        {alias: 'a2', expression: {kind: 'property_expr', sourceAlias: 'a0', property: PROP_HAS_FRIEND}},
+        {alias: 'a3', expression: {kind: 'property_expr', sourceAlias: 'a1', property: PROP_NAME, maxCount: 1}},
+      ],
+      resultMap: [
+        {key: PROP_HAS_FRIEND, alias: 'a2'},
+        {key: PROP_NAME, alias: 'a3'},
+      ],
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_hasFriend', 'a1', 'a1_name']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p2')},
+            a0_hasFriend: {type: 'uri', value: E('p3')},
+            a1: {type: 'uri', value: E('p3')},
+            a1_name: {type: 'literal', value: 'Jinx'},
+          },
+          {
+            a0: {type: 'uri', value: E('p2')},
+            a0_hasFriend: {type: 'uri', value: E('p4')},
+            a1: {type: 'uri', value: E('p3')},
+            a1_name: {type: 'literal', value: 'Jinx'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    expect(result[0].id).toBe(E('p2'));
+
+    // friends is multi-value flat → array
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(2);
+    expect(friends.some((f) => f.id === E('p3'))).toBe(true);
+    expect(friends.some((f) => f.id === E('p4'))).toBe(true);
+
+    // bestFriend is maxCount:1 traversal → unwrapped single row
+    const bf = result[0].bestFriend as ResultRow;
+    expect(bf).toBeDefined();
+    expect(bf.name).toBe('Jinx');
+  });
+});
+
+describe('mapSparqlSelectResult — flat multi-value literal fields', () => {
+  test('multi-value literal strings collected into array', () => {
+    // Person.select(p => p.nickNames) — nickNames has no maxCount, literal type
+    const query = flatSelectQuery([
+      {key: PROP_NICK_NAME, property: PROP_NICK_NAME},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_nickName']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_nickName: {type: 'literal', value: 'Sem1'},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_nickName: {type: 'literal', value: 'Sem'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const nickNames = result[0].nickName as string[];
+    expect(Array.isArray(nickNames)).toBe(true);
+    expect(nickNames.length).toBe(2);
+    expect(nickNames).toContain('Sem1');
+    expect(nickNames).toContain('Sem');
+  });
+
+  test('mixed URI and literal multi-value fields in same query', () => {
+    // Person.select(p => [p.friends, p.nickNames])
+    const query = flatSelectQuery([
+      {key: PROP_HAS_FRIEND, property: PROP_HAS_FRIEND},
+      {key: PROP_NICK_NAME, property: PROP_NICK_NAME},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_hasFriend', 'a0_nickName']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_hasFriend: {type: 'uri', value: E('p2')},
+            a0_nickName: {type: 'literal', value: 'Sem1'},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_hasFriend: {type: 'uri', value: E('p3')},
+            a0_nickName: {type: 'literal', value: 'Sem'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+
+    // URI multi-value → ResultRow[]
+    const friends = result[0].hasFriend as ResultRow[];
+    expect(Array.isArray(friends)).toBe(true);
+    expect(friends.length).toBe(2);
+    expect(friends[0].id).toBe(E('p2'));
+    expect(friends[1].id).toBe(E('p3'));
+
+    // Literal multi-value → string[]
+    const nickNames = result[0].nickName as string[];
+    expect(Array.isArray(nickNames)).toBe(true);
+    expect(nickNames.length).toBe(2);
+    expect(nickNames).toContain('Sem1');
+    expect(nickNames).toContain('Sem');
+  });
+
+  test('absent multi-value literal field returns empty array', () => {
+    const query = flatSelectQuery([
+      {key: PROP_NICK_NAME, property: PROP_NICK_NAME},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_nickName']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            // a0_nickName absent
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const nickNames = result[0].nickName as string[];
+    expect(Array.isArray(nickNames)).toBe(true);
+    expect(nickNames.length).toBe(0);
+  });
+
+  test('multi-value literal deduplicates by value', () => {
+    const query = flatSelectQuery([
+      {key: PROP_NICK_NAME, property: PROP_NICK_NAME},
+    ]);
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a0_nickName']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_nickName: {type: 'literal', value: 'Sem'},
+          },
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a0_nickName: {type: 'literal', value: 'Sem'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const nickNames = result[0].nickName as string[];
+    expect(nickNames.length).toBe(1);
+    expect(nickNames[0]).toBe('Sem');
+  });
+});
+
 describe('mapSparqlSelectResult — 3-level nesting', () => {
   // Query: Person.select(p => p.friends.select(f => f.bestFriend.select(bf => bf.name)))
-  // root: a0, traverse a0→a1 (hasFriend), traverse a1→a2 (bestFriend)
+  // root: a0, traverse a0→a1 (hasFriend), traverse a1→a2 (bestFriend, maxCount: 1)
   // projection: a3 = a2.name
 
   function deepNestedQuery(): IRSelectQuery {
@@ -619,7 +932,7 @@ describe('mapSparqlSelectResult — 3-level nesting', () => {
       root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
       patterns: [
         {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_HAS_FRIEND},
-        {kind: 'traverse', from: 'a1', to: 'a2', property: PROP_BEST_FRIEND},
+        {kind: 'traverse', from: 'a1', to: 'a2', property: PROP_BEST_FRIEND, maxCount: 1},
       ],
       projection: [
         {alias: 'a3', expression: {kind: 'property_expr', sourceAlias: 'a2', property: PROP_NAME}},
@@ -656,31 +969,29 @@ describe('mapSparqlSelectResult — 3-level nesting', () => {
     expect(result.length).toBe(1);
     expect(result[0].id).toBe(E('p1'));
 
-    // Level 1: friends
+    // Level 1: friends (multi-value, still an array)
     const friends = result[0].hasFriend as ResultRow[];
     expect(Array.isArray(friends)).toBe(true);
     expect(friends.length).toBe(2);
 
-    // p2's bestFriend chain
+    // p2's bestFriend (single-value, maxCount: 1 → unwrapped)
     const friendP2 = friends.find((f) => f.id === E('p2'))!;
     expect(friendP2).toBeDefined();
-    const p2Best = friendP2.bestFriend as ResultRow[];
-    expect(Array.isArray(p2Best)).toBe(true);
-    expect(p2Best.length).toBe(1);
-    expect(p2Best[0].id).toBe(E('p3'));
-    expect(p2Best[0].name).toBe('Jinx');
+    const p2Best = friendP2.bestFriend as ResultRow;
+    expect(Array.isArray(p2Best)).toBe(false);
+    expect(p2Best.id).toBe(E('p3'));
+    expect(p2Best.name).toBe('Jinx');
 
-    // p3's bestFriend chain
+    // p3's bestFriend (single-value, maxCount: 1 → unwrapped)
     const friendP3 = friends.find((f) => f.id === E('p3'))!;
     expect(friendP3).toBeDefined();
-    const p3Best = friendP3.bestFriend as ResultRow[];
-    expect(Array.isArray(p3Best)).toBe(true);
-    expect(p3Best.length).toBe(1);
-    expect(p3Best[0].id).toBe(E('p1'));
-    expect(p3Best[0].name).toBe('Semmy');
+    const p3Best = friendP3.bestFriend as ResultRow;
+    expect(Array.isArray(p3Best)).toBe(false);
+    expect(p3Best.id).toBe(E('p1'));
+    expect(p3Best.name).toBe('Semmy');
   });
 
-  test('entity with missing deep binding has empty nested array', () => {
+  test('entity with missing deep binding has null for single-value property', () => {
     const json: SparqlJsonResults = {
       head: {vars: ['a0', 'a1', 'a2', 'a2_name']},
       results: {
@@ -708,9 +1019,152 @@ describe('mapSparqlSelectResult — 3-level nesting', () => {
 
     const friendP4 = friends.find((f) => f.id === E('p4'))!;
     expect(friendP4).toBeDefined();
-    const p4Best = friendP4.bestFriend as ResultRow[];
-    expect(Array.isArray(p4Best)).toBe(true);
-    expect(p4Best.length).toBe(0);
+    // Single-value property with no match → null (not empty array)
+    expect(friendP4.bestFriend).toBeNull();
+  });
+});
+
+describe('mapSparqlSelectResult — single-value property (maxCount: 1)', () => {
+  test('single-value object property returns single ResultRow, not array', () => {
+    // Simulates: Person.select(p => p.bestFriend) where bestFriend has maxCount: 1
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_BEST_FRIEND, maxCount: 1},
+      ],
+      projection: [
+        {alias: 'p0', expression: {kind: 'alias_expr', alias: 'a1'}},
+      ],
+      resultMap: [{key: PROP_BEST_FRIEND, alias: 'p0'}],
+      singleResult: false,
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p3')},
+          },
+          {
+            a0: {type: 'uri', value: E('p2')},
+            a1: {type: 'uri', value: E('p4')},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(2);
+
+    // bestFriend should be a single ResultRow, NOT an array
+    const p1Best = result[0].bestFriend as ResultRow;
+    expect(Array.isArray(p1Best)).toBe(false);
+    expect(p1Best).not.toBeNull();
+    expect(p1Best.id).toBe(E('p3'));
+
+    const p2Best = result[1].bestFriend as ResultRow;
+    expect(Array.isArray(p2Best)).toBe(false);
+    expect(p2Best).not.toBeNull();
+    expect(p2Best.id).toBe(E('p4'));
+  });
+
+  test('single-value object property with no match returns null', () => {
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_BEST_FRIEND, maxCount: 1},
+      ],
+      projection: [
+        {alias: 'p0', expression: {kind: 'alias_expr', alias: 'a1'}},
+      ],
+      resultMap: [{key: PROP_BEST_FRIEND, alias: 'p0'}],
+      singleResult: false,
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            // a1 missing — no bestFriend
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    expect(result[0].bestFriend).toBeNull();
+  });
+
+  test('single-value property with nested select returns unwrapped ResultRow', () => {
+    // Simulates: Person.select(p => p.bestFriend.select(bf => bf.name))
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_BEST_FRIEND, maxCount: 1},
+      ],
+      projection: [
+        {alias: 'a2', expression: {kind: 'property_expr', sourceAlias: 'a1', property: PROP_NAME}},
+      ],
+      resultMap: [{key: PROP_NAME, alias: 'a2'}],
+      singleResult: false,
+    };
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1', 'a1_name']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p3')},
+            a1_name: {type: 'literal', value: 'Jinx'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+
+    // bestFriend should be a single ResultRow with name, not an array
+    const bestFriend = result[0].bestFriend as ResultRow;
+    expect(Array.isArray(bestFriend)).toBe(false);
+    expect(bestFriend).not.toBeNull();
+    expect(bestFriend.id).toBe(E('p3'));
+    expect(bestFriend.name).toBe('Jinx');
+  });
+
+  test('multi-value property without maxCount still returns array', () => {
+    // hasFriend has no maxCount → should remain as array
+    const query = nestedSelectQuery(
+      PROP_HAS_FRIEND,
+      [{key: PROP_NAME, property: PROP_NAME, maxCount: 1}],
+    );
+
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1', 'a1_name']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1: {type: 'uri', value: E('p2')},
+            a1_name: {type: 'literal', value: 'Moa'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(1);
+    const friends = result[0].hasFriend;
+    expect(Array.isArray(friends)).toBe(true);
   });
 });
 
@@ -947,5 +1401,66 @@ describe('mapSparqlUpdateResult', () => {
     expect(result.id).toBe(E('p1'));
     expect(result.birthDate).toBeInstanceOf(Date);
     expect((result.birthDate as Date).getFullYear()).toBe(2020);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Aggregate result mapping with traversal (GROUP BY)
+// ---------------------------------------------------------------------------
+
+describe('mapSparqlSelectResult — aggregate with traversal', () => {
+  test('renamed aggregate alias (a1 → a1_agg) produces correct count', () => {
+    // Simulates: Person.select(p => p.friends.friends.size())
+    // irToAlgebra renames aggregate alias a1 → a1_agg because a1 collides
+    // with the traverse alias. It updates resultMap but NOT projection.
+    // The result mapping must handle the missing projection entry.
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_HAS_FRIEND},
+      ],
+      projection: [
+        // Projection still has alias 'a1' (not renamed)
+        {
+          alias: 'a1',
+          expression: {
+            kind: 'aggregate_expr',
+            name: 'count',
+            args: [{kind: 'property_expr', sourceAlias: 'a1', property: PROP_HAS_FRIEND}],
+          },
+        },
+      ],
+      // resultMap was updated by irToAlgebra to use 'a1_agg'
+      resultMap: [{key: 'friends', alias: 'a1_agg'}],
+    };
+
+    // Fuseki GROUP BY result uses the renamed variable a1_agg
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1_agg']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1_agg: {type: 'typed-literal', value: '2', datatype: 'http://www.w3.org/2001/XMLSchema#integer'},
+          },
+          {
+            a0: {type: 'uri', value: E('p2')},
+            a1_agg: {type: 'typed-literal', value: '0', datatype: 'http://www.w3.org/2001/XMLSchema#integer'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(2);
+
+    const p1 = result.find((r) => r.id === E('p1'));
+    expect(p1).toBeDefined();
+    expect(p1!.friends).toBe(2);
+
+    const p2 = result.find((r) => r.id === E('p2'));
+    expect(p2).toBeDefined();
+    expect(p2!.friends).toBe(0);
   });
 });

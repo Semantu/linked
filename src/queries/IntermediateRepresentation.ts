@@ -67,6 +67,7 @@ export type IRTraversePattern = {
   property: string;
   pathExpr?: PathExpr;
   filter?: IRExpression;
+  maxCount?: number;
 };
 
 export type IRJoinPattern = {
@@ -128,6 +129,7 @@ export type IRPropertyExpression = {
   sourceAlias: IRAlias;
   property: string;
   pathExpr?: import('../paths/PropertyPathExpr.js').PathExpr;
+  maxCount?: number;
 };
 
 export type IRContextPropertyExpression = {
@@ -285,7 +287,11 @@ export type ResultFieldValue =
   | null
   | undefined
   | ResultRow
-  | ResultRow[];
+  | ResultRow[]
+  | string[]
+  | number[]
+  | boolean[]
+  | Date[];
 
 /**
  * What `selectQuery` should return.
