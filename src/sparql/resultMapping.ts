@@ -252,7 +252,22 @@ function buildNestingDescriptor(query: IRSelectQuery): NestingDescriptor {
 
   for (const entry of resultMap) {
     const projItem = projectionByAlias.get(entry.alias);
-    if (!projItem) continue;
+
+    // When irToAlgebra renames an aggregate alias (e.g. a1 → a1_agg) to avoid
+    // collision with a traversal alias, it updates resultMap but not projection.
+    // In that case, use the resultMap alias directly as the SPARQL variable name
+    // and treat the expression as an aggregate (single-value, root-level).
+    if (!projItem) {
+      const resultKey = localName(entry.key);
+      const field: FieldDescriptor = {
+        key: resultKey,
+        sparqlVar: entry.alias,
+        expression: {kind: 'aggregate_expr', name: 'count', args: []} as any,
+        maxCount: 1,
+      };
+      descriptor.flatFields.push(field);
+      continue;
+    }
 
     const expression = projItem.expression;
     const sparqlVar = sparqlVarName(expression, entry.alias);

@@ -1403,3 +1403,64 @@ describe('mapSparqlUpdateResult', () => {
     expect((result.birthDate as Date).getFullYear()).toBe(2020);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Aggregate result mapping with traversal (GROUP BY)
+// ---------------------------------------------------------------------------
+
+describe('mapSparqlSelectResult — aggregate with traversal', () => {
+  test('renamed aggregate alias (a1 → a1_agg) produces correct count', () => {
+    // Simulates: Person.select(p => p.friends.friends.size())
+    // irToAlgebra renames aggregate alias a1 → a1_agg because a1 collides
+    // with the traverse alias. It updates resultMap but NOT projection.
+    // The result mapping must handle the missing projection entry.
+    const query: IRSelectQuery = {
+      kind: 'select',
+      root: {kind: 'shape_scan', shape: PERSON_SHAPE, alias: 'a0'},
+      patterns: [
+        {kind: 'traverse', from: 'a0', to: 'a1', property: PROP_HAS_FRIEND},
+      ],
+      projection: [
+        // Projection still has alias 'a1' (not renamed)
+        {
+          alias: 'a1',
+          expression: {
+            kind: 'aggregate_expr',
+            name: 'count',
+            args: [{kind: 'property_expr', sourceAlias: 'a1', property: PROP_HAS_FRIEND}],
+          },
+        },
+      ],
+      // resultMap was updated by irToAlgebra to use 'a1_agg'
+      resultMap: [{key: 'friends', alias: 'a1_agg'}],
+    };
+
+    // Fuseki GROUP BY result uses the renamed variable a1_agg
+    const json: SparqlJsonResults = {
+      head: {vars: ['a0', 'a1_agg']},
+      results: {
+        bindings: [
+          {
+            a0: {type: 'uri', value: E('p1')},
+            a1_agg: {type: 'typed-literal', value: '2', datatype: 'http://www.w3.org/2001/XMLSchema#integer'},
+          },
+          {
+            a0: {type: 'uri', value: E('p2')},
+            a1_agg: {type: 'typed-literal', value: '0', datatype: 'http://www.w3.org/2001/XMLSchema#integer'},
+          },
+        ],
+      },
+    };
+
+    const result = mapSparqlSelectResult(json, query) as ResultRow[];
+    expect(result.length).toBe(2);
+
+    const p1 = result.find((r) => r.id === E('p1'));
+    expect(p1).toBeDefined();
+    expect(p1!.friends).toBe(2);
+
+    const p2 = result.find((r) => r.id === E('p2'));
+    expect(p2).toBeDefined();
+    expect(p2!.friends).toBe(0);
+  });
+});
