@@ -10,20 +10,15 @@ import type {NodeShape} from '../shapes/SHACL.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import {walkPropertyPath} from './PropertyPath.js';
 import {ExpressionNode} from '../expressions/ExpressionNode.js';
-import {
-  WhereMethods,
-  type WherePath,
-  type WhereEvaluationPath,
-  type WhereAndOr,
-  type WhereExpressionPath,
-  type QueryPropertyPath,
-  type QueryStep,
-  type PropertyQueryStep,
-  type SizeStep,
-  type QueryArg,
-  type ArgPath,
-  type SortByPath,
-  type AndOrQueryToken,
+import type {
+  WherePath,
+  QueryPropertyPath,
+  QueryStep,
+  PropertyQueryStep,
+  SizeStep,
+  QueryArg,
+  ArgPath,
+  SortByPath,
 } from './SelectQuery.js';
 import type {ShapeReferenceValue, NodeReferenceValue} from './QueryFactory.js';
 import type {IRExpression} from './IntermediateRepresentation.js';
@@ -98,9 +93,8 @@ function serializeQueryStep(step: QueryStep): QueryStepJSON {
 }
 
 export function serializeWherePath(where: WherePath): WherePathJSON {
-  // WhereExpressionPath
   if ('expressionNode' in where) {
-    const expr = (where as WhereExpressionPath).expressionNode;
+    const expr = (where as {expressionNode: ExpressionNode}).expressionNode;
     const json: {kind: 'expression'; ir: IRExpression; refs?: Record<string, string[]>} = {
       kind: 'expression',
       ir: expr.ir,
@@ -112,9 +106,8 @@ export function serializeWherePath(where: WherePath): WherePathJSON {
     }
     return json;
   }
-  // WhereAndOr
   if ('firstPath' in where) {
-    const andOr = where as WhereAndOr;
+    const andOr = where as {firstPath: WherePath; andOr: {and?: WherePath; or?: WherePath}[]};
     return {
       kind: 'andOr',
       firstPath: serializeWherePath(andOr.firstPath),
@@ -126,8 +119,7 @@ export function serializeWherePath(where: WherePath): WherePathJSON {
       }),
     };
   }
-  // WhereEvaluationPath
-  const ev = where as WhereEvaluationPath;
+  const ev = where as {path: QueryPropertyPath; method: string; args: QueryArg[]};
   return {
     kind: 'evaluation',
     path: serializeQueryPropertyPath(ev.path),
@@ -242,20 +234,19 @@ export function deserializeWherePath(shape: NodeShape, json: WherePathJSON): Whe
   if (json.kind === 'andOr') {
     return {
       firstPath: deserializeWherePath(shape, json.firstPath),
-      andOr: json.andOr.map((token): AndOrQueryToken => {
-        const t: AndOrQueryToken = {};
+      andOr: json.andOr.map((token) => {
+        const t: {and?: WherePath; or?: WherePath} = {};
         if (token.and) t.and = deserializeWherePath(shape, token.and);
         if (token.or) t.or = deserializeWherePath(shape, token.or);
         return t;
       }),
-    };
+    } as WherePath;
   }
-  // evaluation
   return {
     path: deserializeQueryPropertyPath(shape, json.path),
-    method: json.method as WhereMethods,
+    method: json.method,
     args: json.args.map((a) => deserializeQueryArg(shape, a)),
-  };
+  } as WherePath;
 }
 
 function deserializeQueryArg(shape: NodeShape, json: QueryArgJSON): QueryArg {
