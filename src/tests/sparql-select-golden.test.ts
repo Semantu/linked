@@ -644,9 +644,7 @@ WHERE {
 SELECT DISTINCT ?a0 ?a0_name
 WHERE {
   ?a0 rdf:type <${P}> .
-  OPTIONAL {
-    ?a0 <${P}/name> ?a0_name .
-  }
+  ?a0 <${P}/name> ?a0_name .
   FILTER(!(?a0_name = "Alice"))
 }`);
   });
@@ -658,9 +656,7 @@ WHERE {
 SELECT DISTINCT ?a0 ?a0_name
 WHERE {
   ?a0 rdf:type <${P}> .
-  OPTIONAL {
-    ?a0 <${P}/name> ?a0_name .
-  }
+  ?a0 <${P}/name> ?a0_name .
   FILTER(!(EXISTS {
     ?a0 <${P}/friends> ?a1 .
     ?a1 <${P}/hobby> ?a1_hobby .
@@ -676,9 +672,7 @@ WHERE {
 SELECT DISTINCT ?a0 ?a0_name
 WHERE {
   ?a0 rdf:type <${P}> .
-  OPTIONAL {
-    ?a0 <${P}/name> ?a0_name .
-  }
+  ?a0 <${P}/name> ?a0_name .
   FILTER(?a0_name != "Alice")
 }`);
   });
@@ -690,12 +684,8 @@ WHERE {
 SELECT DISTINCT ?a0 ?a0_name
 WHERE {
   ?a0 rdf:type <${P}> .
-  OPTIONAL {
-    ?a0 <${P}/name> ?a0_name .
-  }
-  OPTIONAL {
-    ?a0 <${P}/hobby> ?a0_hobby .
-  }
+  ?a0 <${P}/name> ?a0_name .
+  ?a0 <${P}/hobby> ?a0_hobby .
   FILTER(!(?a0_name = "Alice" && ?a0_hobby = "Chess"))
 }`);
   });
