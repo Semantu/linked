@@ -357,6 +357,9 @@ export class FieldSet<R = any, Source = any> {
         }
         if (entry.subSelect) {
           field.subSelect = entry.subSelect.toJSON();
+        } else if (entry.preloadSubSelect) {
+          // Preloads produce identical IR to subSelect — serialize as subSelect.
+          field.subSelect = entry.preloadSubSelect.toJSON();
         }
         if (entry.aggregation) {
           field.aggregation = entry.aggregation;

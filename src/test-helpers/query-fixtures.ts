@@ -337,6 +337,9 @@ export const queryFactories = {
     Person.select((p) => p.name)
       .where((p) => p.name.equals('Semmy').or(p.name.equals('Moa')))
       .limit(1),
+  outerWhereDifferentPropsOr: () =>
+    Person.select((p) => [p.name, p.hobby])
+      .where((p) => p.name.equals('Jinx').or(p.hobby.equals('Jogging'))),
   sortByAsc: () => Person.select((p) => p.name).orderBy((p) => p.name),
   sortByDesc: () =>
     Person.select((p) => p.name).orderBy((p) => p.name, 'DESC'),

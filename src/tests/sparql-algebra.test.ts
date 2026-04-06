@@ -406,6 +406,11 @@ describe('selectToAlgebra — where clauses', () => {
       (f) => f.expression.kind === 'binary_expr',
     );
     expect(binaryFilter).toBeDefined();
+
+    const allTriples = collectAllTriples(plan.algebra);
+    const optionalTriples = collectOptionalTriples(plan.algebra);
+    expect(countTriplesByPredicate(allTriples, `${Person.shape.id}/name`)).toBe(1);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/name`)).toBe(0);
   });
 
   test('outerWhere has Filter wrapping the entire pattern', async () => {
@@ -425,6 +430,65 @@ describe('selectToAlgebra — where clauses', () => {
       // Left side should be a variable referencing name on root alias
       expect(binaryFilter.expression.left.kind).toBe('variable_expr');
     }
+
+    const allTriples = collectAllTriples(plan.algebra);
+    const optionalTriples = collectOptionalTriples(plan.algebra);
+    expect(countTriplesByPredicate(allTriples, `${Person.shape.id}/name`)).toBe(1);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/name`)).toBe(0);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/friends`)).toBe(1);
+  });
+
+  test('outerWhereLimit promotes same-property OR to a required triple', async () => {
+    const plan = await capturePlan(() => queryFactories.outerWhereLimit());
+
+    const allTriples = collectAllTriples(plan.algebra);
+    const optionalTriples = collectOptionalTriples(plan.algebra);
+    expect(countTriplesByPredicate(allTriples, `${Person.shape.id}/name`)).toBe(1);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/name`)).toBe(0);
+  });
+
+  test('outerWhereDifferentPropsOr keeps both properties optional', async () => {
+    const plan = await capturePlan(() => queryFactories.outerWhereDifferentPropsOr());
+
+    const optionalTriples = collectOptionalTriples(plan.algebra);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/name`)).toBe(1);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/hobby`)).toBe(1);
+  });
+
+  test('whereWithContext keeps projection optional but promotes filter binding', async () => {
+    const plan = await capturePlan(() => queryFactories.whereWithContext());
+
+    const allTriples = collectAllTriples(plan.algebra);
+    const optionalTriples = collectOptionalTriples(plan.algebra);
+    expect(countTriplesByPredicate(allTriples, `${Person.shape.id}/bestFriend`)).toBe(1);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/bestFriend`)).toBe(0);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/name`)).toBe(1);
+  });
+
+  test('whereSomeImplicit promotes the traversed filter property to required', async () => {
+    const plan = await capturePlan(() => queryFactories.whereSomeImplicit());
+
+    const allTriples = collectAllTriples(plan.algebra);
+    const optionalTriples = collectOptionalTriples(plan.algebra);
+    expect(countTriplesByPredicate(allTriples, `${Person.shape.id}/friends`)).toBe(1);
+    expect(countTriplesByPredicate(allTriples, `${Person.shape.id}/name`)).toBe(1);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/name`)).toBe(0);
+  });
+
+  test('whereExprStrlen promotes function-filter property bindings to required', async () => {
+    const plan = await capturePlan(() => queryFactories.whereExprStrlen());
+
+    const allTriples = collectAllTriples(plan.algebra);
+    const optionalTriples = collectOptionalTriples(plan.algebra);
+    expect(countTriplesByPredicate(allTriples, `${Person.shape.id}/name`)).toBe(1);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/name`)).toBe(0);
+  });
+
+  test('countEquals keeps aggregate inputs optional', async () => {
+    const plan = await capturePlan(() => queryFactories.countEquals());
+
+    const optionalTriples = collectOptionalTriples(plan.algebra);
+    expect(countTriplesByPredicate(optionalTriples, `${Person.shape.id}/friends`)).toBe(1);
   });
 });
 
