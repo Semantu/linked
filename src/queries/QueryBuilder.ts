@@ -12,14 +12,25 @@ import {
   evaluateSortCallback,
 } from './SelectQuery.js';
 import type {SortByPath, WherePath} from './SelectQuery.js';
-import type {PropertyPathSegment, RawSelectInput} from './IRDesugar.js';
+import type {PropertyPathSegment, RawMinusEntry, RawSelectInput} from './IRDesugar.js';
 import {buildSelectQuery} from './IRPipeline.js';
 import {getQueryDispatch} from './queryDispatch.js';
 import type {NodeReferenceValue} from './QueryFactory.js';
 import {resolveUriOrThrow} from '../utils/NodeReference.js';
-import {FieldSet, FieldSetJSON, FieldSetFieldJSON} from './FieldSet.js';
+import {FieldSet, FieldSetJSON, FieldSetFieldJSON, type FieldSetEntry} from './FieldSet.js';
 import {PendingQueryContext} from './QueryContext.js';
 import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
+import {
+  serializeWherePath,
+  serializeSortByPath,
+  serializeRawMinusEntry,
+  deserializeWherePath,
+  deserializeSortByPath,
+  deserializeRawMinusEntry,
+  type WherePathJSON,
+  type SortByPathJSON,
+  type RawMinusEntryJSON,
+} from './QueryBuilderSerialization.js';
 
 /** JSON representation of a QueryBuilder. */
 export type QueryBuilderJSON = {
@@ -31,6 +42,11 @@ export type QueryBuilderJSON = {
   subjects?: string[];
   singleResult?: boolean;
   orderDirection?: 'ASC' | 'DESC';
+  where?: WherePathJSON;
+  sortBy?: SortByPathJSON;
+  minusEntries?: RawMinusEntryJSON[];
+  nullSubject?: boolean;
+  pendingContextName?: string;
 };
 
 /** A preload entry binding a property path to a component's query. */
@@ -63,6 +79,10 @@ interface QueryBuilderInit<S extends Shape, R> {
   minusEntries?: MinusEntry<S>[];
   _nullSubject?: boolean;
   _pendingContextName?: string;
+  // Pre-evaluated data (restored from JSON; used when callbacks are not available)
+  _where?: WherePath;
+  _sortBy?: SortByPath;
+  _rawMinusEntries?: RawMinusEntry[];
 }
 
 /**
@@ -97,6 +117,10 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   private readonly _minusEntries?: MinusEntry<S>[];
   private readonly _nullSubject?: boolean;
   private readonly _pendingContextName?: string;
+  // Pre-evaluated data (restored from JSON; used when callbacks are not available)
+  private readonly _where?: WherePath;
+  private readonly _sortBy?: SortByPath;
+  private readonly _rawMinusEntries?: RawMinusEntry[];
 
   private constructor(init: QueryBuilderInit<S, R>) {
     this._shape = init.shape;
@@ -115,6 +139,9 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     this._minusEntries = init.minusEntries;
     this._nullSubject = init._nullSubject;
     this._pendingContextName = init._pendingContextName;
+    this._where = init._where;
+    this._sortBy = init._sortBy;
+    this._rawMinusEntries = init._rawMinusEntries;
   }
 
   /** Create a shallow clone with overrides. */
@@ -136,6 +163,9 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       minusEntries: this._minusEntries,
       _nullSubject: this._nullSubject,
       _pendingContextName: this._pendingContextName,
+      _where: this._where,
+      _sortBy: this._sortBy,
+      _rawMinusEntries: this._rawMinusEntries,
       ...overrides,
     });
   }
@@ -328,6 +358,60 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
   }
 
   // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
+  /** Return the FieldSet with preload entries merged in (if any). */
+  private _fieldsWithPreloads(): FieldSet | undefined {
+    let fs = this.fields();
+    if (this._preloads && this._preloads.length > 0) {
+      const preloadFn = (p: any) => {
+        return this._preloads!.map((entry) => p[entry.path].preloadFor(entry.component));
+      };
+      const preloadFs = FieldSet.for(this._shape, preloadFn);
+      if (fs) {
+        fs = FieldSet.createFromEntries(fs.shape, [
+          ...(fs.entries as FieldSetEntry[]),
+          ...(preloadFs.entries as FieldSetEntry[]),
+        ]);
+      } else {
+        fs = preloadFs;
+      }
+    }
+    return fs;
+  }
+
+  /** Evaluate minus entry callbacks into RawMinusEntry[] (plain data). */
+  private _evaluateMinusEntries(): RawMinusEntry[] {
+    const proxy = createProxiedPathBuilder(this._shape);
+    return this._minusEntries!.map((entry) => {
+      if (entry.shapeId) {
+        return {shapeId: entry.shapeId};
+      }
+      if (entry.whereFn) {
+        const result = (entry.whereFn as Function)(proxy);
+
+        if (Array.isArray(result)) {
+          const propertyPaths = result.map((item: any) => {
+            const segments = FieldSet.collectPropertySegments(item);
+            return segments.map((seg): PropertyPathSegment => ({propertyShapeId: seg.id}));
+          });
+          return {propertyPaths};
+        }
+
+        if (result && typeof result === 'object' && 'property' in result && 'subject' in result) {
+          const segments = FieldSet.collectPropertySegments(result);
+          return {propertyPaths: [segments.map((seg): PropertyPathSegment => ({propertyShapeId: seg.id}))]};
+        }
+
+        // WHERE-based exclusion
+        return {where: processWhereClause(entry.whereFn, this._shape)};
+      }
+      return {};
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Serialization
   // ---------------------------------------------------------------------------
 
@@ -338,8 +422,9 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
    * string[], selectAll, or callback). Callback-based selections are eagerly
    * evaluated through the proxy to produce a FieldSet.
    *
-   * The `where` and `orderBy` callbacks are not serialized (only the direction
-   * is preserved for orderBy).
+   * Where, orderBy, and minus clauses are evaluated through the proxy and
+   * serialized as plain data structures. Preloads are merged into the FieldSet
+   * as subSelect entries, producing identical IR on deserialization.
    */
   toJSON(): QueryBuilderJSON {
     const shapeId = this._shape.shape?.id || '';
@@ -347,9 +432,7 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       shape: shapeId,
     };
 
-    // Serialize fields — fields() already handles _selectAllLabels, so
-    // no separate branch is needed (T1: dead else-if removed).
-    const fs = this.fields();
+    const fs = this._fieldsWithPreloads();
     if (fs) {
       json.fields = fs.toJSON().fields;
     }
@@ -371,6 +454,33 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     }
     if (this._sortDirection) {
       json.orderDirection = this._sortDirection;
+    }
+
+    if (this._whereFn) {
+      json.where = serializeWherePath(processWhereClause(this._whereFn, this._shape));
+    } else if (this._where) {
+      json.where = serializeWherePath(this._where);
+    }
+
+    if (this._sortByFn) {
+      json.sortBy = serializeSortByPath(
+        evaluateSortCallback(this._shape, this._sortByFn as unknown as (p: any) => any, this._sortDirection || 'ASC'),
+      );
+    } else if (this._sortBy) {
+      json.sortBy = serializeSortByPath(this._sortBy);
+    }
+
+    if (this._minusEntries && this._minusEntries.length > 0) {
+      json.minusEntries = this._evaluateMinusEntries().map(serializeRawMinusEntry);
+    } else if (this._rawMinusEntries && this._rawMinusEntries.length > 0) {
+      json.minusEntries = this._rawMinusEntries.map(serializeRawMinusEntry);
+    }
+
+    if (this._nullSubject) {
+      json.nullSubject = true;
+    }
+    if (this._pendingContextName) {
+      json.pendingContextName = this._pendingContextName;
     }
 
     return json;
@@ -406,12 +516,43 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     if (json.singleResult && !json.subject) {
       builder = builder.one() as QueryBuilder<S>;
     }
-    // Restore orderDirection. The sort key callback isn't serializable,
-    // so we only store the direction. When a sort key is later re-applied
-    // via .orderBy(), the direction will be available.
-    if (json.orderDirection) {
-      // Access private clone() — safe because fromJSON is in the same class.
-      builder = (builder as any).clone({sortDirection: json.orderDirection}) as QueryBuilder<S>;
+
+    // Restore pre-evaluated data via clone — safe because fromJSON is in the same class.
+    const overrides: Partial<QueryBuilderInit<S, any>> = {};
+    const nodeShape = builder._shape.shape;
+
+    // Restore where clause
+    if (json.where && nodeShape) {
+      overrides._where = deserializeWherePath(nodeShape, json.where);
+    }
+
+    // Restore sort key + direction
+    if (json.sortBy && nodeShape) {
+      overrides._sortBy = deserializeSortByPath(nodeShape, json.sortBy);
+      overrides.sortDirection = json.sortBy.direction;
+    } else if (json.orderDirection) {
+      overrides.sortDirection = json.orderDirection;
+    }
+
+    // Restore minus entries
+    if (json.minusEntries && json.minusEntries.length > 0 && nodeShape) {
+      overrides._rawMinusEntries = json.minusEntries.map((e) =>
+        deserializeRawMinusEntry(nodeShape, e),
+      );
+    }
+
+    // Restore nullSubject flag
+    if (json.nullSubject) {
+      overrides._nullSubject = true;
+    }
+
+    // Restore pending context name
+    if (json.pendingContextName) {
+      overrides._pendingContextName = json.pendingContextName;
+    }
+
+    if (Object.keys(overrides).length > 0) {
+      builder = (builder as any).clone(overrides) as QueryBuilder<S>;
     }
 
     return builder;
@@ -430,41 +571,18 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     return this._buildDirectRawInput();
   }
 
-  /**
-   * Build RawSelectInput directly from FieldSet entries.
-   */
+  /** Build RawSelectInput directly from FieldSet entries. */
   private _buildDirectRawInput(): RawSelectInput {
-    let fs = this.fields();
-
-    // When preloads exist, trace them through the proxy and merge with the FieldSet.
-    if (this._preloads && this._preloads.length > 0) {
-      const preloadFn = (p: any) => {
-        const results: any[] = [];
-        for (const entry of this._preloads!) {
-          results.push(p[entry.path].preloadFor(entry.component));
-        }
-        return results;
-      };
-      const preloadFs = FieldSet.for(this._shape, preloadFn);
-      if (fs) {
-        fs = FieldSet.createFromEntries(fs.shape, [
-          ...(fs.entries as any[]),
-          ...(preloadFs.entries as any[]),
-        ]);
-      } else {
-        fs = preloadFs;
-      }
-    }
-
+    const fs = this._fieldsWithPreloads();
     const entries = fs ? fs.entries : [];
 
-    // Evaluate where callback
     let where: WherePath | undefined;
     if (this._whereFn) {
       where = processWhereClause(this._whereFn, this._shape);
+    } else if (this._where) {
+      where = this._where;
     }
 
-    // Evaluate sort callback
     let sortBy: SortByPath | undefined;
     if (this._sortByFn) {
       sortBy = evaluateSortCallback(
@@ -472,6 +590,8 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
         this._sortByFn as unknown as (p: any) => any,
         this._sortDirection || 'ASC',
       );
+    } else if (this._sortBy) {
+      sortBy = this._sortBy;
     }
 
     const input: RawSelectInput = {
@@ -496,39 +616,10 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
     if (this._subjects && this._subjects.length > 0) {
       input.subjects = this._subjects;
     }
-
-    // Process minus entries → convert callbacks to WherePaths or property paths
     if (this._minusEntries && this._minusEntries.length > 0) {
-      input.minusEntries = this._minusEntries.map((entry) => {
-        if (entry.shapeId) {
-          return {shapeId: entry.shapeId};
-        }
-        if (entry.whereFn) {
-          // Call the callback through the proxy and inspect the result type
-          const proxy = createProxiedPathBuilder(this._shape);
-          const result = (entry.whereFn as Function)(proxy);
-
-          // Array of QBOs → property existence paths
-          if (Array.isArray(result)) {
-            const propertyPaths = result.map((item: any) => {
-              const segments = FieldSet.collectPropertySegments(item);
-              return segments.map((seg): PropertyPathSegment => ({propertyShapeId: seg.id}));
-            });
-            return {propertyPaths};
-          }
-
-          // Single QBO (has .property field) → single property existence path
-          if (result && typeof result === 'object' && 'property' in result && 'subject' in result) {
-            const segments = FieldSet.collectPropertySegments(result);
-            const propertyPaths = [segments.map((seg): PropertyPathSegment => ({propertyShapeId: seg.id}))];
-            return {propertyPaths};
-          }
-
-          // Evaluation → existing WHERE-based path
-          return {where: processWhereClause(entry.whereFn, this._shape)};
-        }
-        return {};
-      });
+      input.minusEntries = this._evaluateMinusEntries();
+    } else if (this._rawMinusEntries && this._rawMinusEntries.length > 0) {
+      input.minusEntries = this._rawMinusEntries;
     }
 
     return input;
