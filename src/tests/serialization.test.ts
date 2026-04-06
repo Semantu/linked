@@ -471,3 +471,50 @@ describe('QueryBuilder — complex round-trip', () => {
     expect(sanitize(restored.build())).toEqual(sanitize(original.build()));
   });
 });
+
+// =============================================================================
+// Preload serialization tests
+// =============================================================================
+
+describe('QueryBuilder — preload serialization', () => {
+  const componentLike = {query: QueryBuilder.from(Person).select((p: any) => ({name: p.name}))};
+
+  test('toJSON — preload merges into fields as subSelect', () => {
+    const json = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .preload('bestFriend', componentLike)
+      .toJSON();
+
+    // Should have 2 fields: name + bestFriend (with subSelect from preload)
+    expect(json.fields!.length).toBe(2);
+    const bestFriendField = json.fields!.find((f) => f.path === 'bestFriend');
+    expect(bestFriendField).toBeDefined();
+    expect(bestFriendField!.subSelect).toBeDefined();
+    expect(bestFriendField!.subSelect!.fields.length).toBeGreaterThan(0);
+  });
+
+  test('round-trip — preload produces same IR', () => {
+    const original = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .preload('bestFriend', componentLike);
+
+    const json = original.toJSON();
+    const restored = QueryBuilder.fromJSON(json);
+
+    expect(sanitize(restored.build())).toEqual(sanitize(original.build()));
+  });
+
+  test('round-trip — preload with FieldSet component', () => {
+    const componentFs = FieldSet.for(personShape, ['name']);
+    const componentWithFs = {query: componentFs, fields: componentFs};
+
+    const original = QueryBuilder.from(Person)
+      .select((p) => [p.name])
+      .preload('bestFriend', componentWithFs);
+
+    const json = original.toJSON();
+    const restored = QueryBuilder.fromJSON(json);
+
+    expect(sanitize(restored.build())).toEqual(sanitize(original.build()));
+  });
+});

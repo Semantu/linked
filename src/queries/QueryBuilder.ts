@@ -379,7 +379,28 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
 
     // Serialize fields — fields() already handles _selectAllLabels, so
     // no separate branch is needed (T1: dead else-if removed).
-    const fs = this.fields();
+    // When preloads exist, merge them into the FieldSet before serializing
+    // (same merge logic as _buildDirectRawInput). Preloads become subSelect
+    // entries in the JSON, producing identical IR on deserialization.
+    let fs = this.fields();
+    if (this._preloads && this._preloads.length > 0) {
+      const preloadFn = (p: any) => {
+        const results: any[] = [];
+        for (const entry of this._preloads!) {
+          results.push(p[entry.path].preloadFor(entry.component));
+        }
+        return results;
+      };
+      const preloadFs = FieldSet.for(this._shape, preloadFn);
+      if (fs) {
+        fs = FieldSet.createFromEntries(fs.shape, [
+          ...(fs.entries as any[]),
+          ...(preloadFs.entries as any[]),
+        ]);
+      } else {
+        fs = preloadFs;
+      }
+    }
     if (fs) {
       json.fields = fs.toJSON().fields;
     }
