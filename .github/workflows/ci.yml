@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-test:
     name: Build & Test
+    if: ${{ !(github.event.pull_request.base.ref == 'main' && github.head_ref == 'changeset-release/main') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
