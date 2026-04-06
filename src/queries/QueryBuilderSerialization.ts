@@ -8,21 +8,22 @@
 
 import type {NodeShape} from '../shapes/SHACL.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
-import {PropertyPath, walkPropertyPath} from './PropertyPath.js';
+import {walkPropertyPath} from './PropertyPath.js';
 import {ExpressionNode} from '../expressions/ExpressionNode.js';
-import type {
-  WherePath,
-  WhereEvaluationPath,
-  WhereAndOr,
-  WhereExpressionPath,
-  QueryPropertyPath,
-  QueryStep,
-  PropertyQueryStep,
-  SizeStep,
-  QueryArg,
-  ArgPath,
-  SortByPath,
-  AndOrQueryToken,
+import {
+  WhereMethods,
+  type WherePath,
+  type WhereEvaluationPath,
+  type WhereAndOr,
+  type WhereExpressionPath,
+  type QueryPropertyPath,
+  type QueryStep,
+  type PropertyQueryStep,
+  type SizeStep,
+  type QueryArg,
+  type ArgPath,
+  type SortByPath,
+  type AndOrQueryToken,
 } from './SelectQuery.js';
 import type {ShapeReferenceValue, NodeReferenceValue} from './QueryFactory.js';
 import type {IRExpression} from './IntermediateRepresentation.js';
@@ -252,7 +253,7 @@ export function deserializeWherePath(shape: NodeShape, json: WherePathJSON): Whe
   // evaluation
   return {
     path: deserializeQueryPropertyPath(shape, json.path),
-    method: json.method as any,
+    method: json.method as WhereMethods,
     args: json.args.map((a) => deserializeQueryArg(shape, a)),
   };
 }
