@@ -247,11 +247,12 @@ describe('QueryBuilder — where clause serialization', () => {
       .toJSON();
 
     expect(json.where).toBeDefined();
-    expect(json.where!.kind).toBe('evaluation');
-    if (json.where!.kind === 'evaluation') {
-      expect(json.where!.method).toBe('=');
-      expect(json.where!.path).toHaveLength(1);
-      expect((json.where!.path[0] as any).label).toBe('name');
+    expect(json.where!.kind).toBe('expression');
+    if (json.where!.kind === 'expression') {
+      expect(json.where!.ir.kind).toBe('binary_expr');
+      if (json.where!.ir.kind === 'binary_expr') {
+        expect(json.where!.ir.operator).toBe('=');
+      }
     }
   });
 
@@ -262,10 +263,12 @@ describe('QueryBuilder — where clause serialization', () => {
       .toJSON();
 
     expect(json.where).toBeDefined();
-    expect(json.where!.kind).toBe('evaluation');
-    if (json.where!.kind === 'evaluation') {
-      expect(json.where!.args).toHaveLength(1);
-      expect(json.where!.args[0].kind).toBe('nodeRef');
+    expect(json.where!.kind).toBe('expression');
+    if (json.where!.kind === 'expression') {
+      expect(json.where!.ir.kind).toBe('binary_expr');
+      if (json.where!.ir.kind === 'binary_expr') {
+        expect(json.where!.ir.right.kind).toBe('reference_expr');
+      }
     }
   });
 
@@ -276,7 +279,13 @@ describe('QueryBuilder — where clause serialization', () => {
       .toJSON();
 
     expect(json.where).toBeDefined();
-    expect(json.where!.kind).toBe('andOr');
+    expect(json.where!.kind).toBe('expression');
+    if (json.where!.kind === 'expression') {
+      expect(json.where!.ir.kind).toBe('logical_expr');
+      if (json.where!.ir.kind === 'logical_expr') {
+        expect(json.where!.ir.operator).toBe('and');
+      }
+    }
   });
 
   test('round-trip — simple where equals produces same IR', () => {

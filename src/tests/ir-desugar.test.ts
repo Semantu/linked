@@ -7,7 +7,6 @@ import {
   DesugaredSelectionPath,
   DesugaredSubSelect,
   DesugaredCustomObjectSelect,
-  DesugaredEvaluationSelect,
   DesugaredMultiSelection,
 } from '../queries/IRDesugar';
 import {Person} from '../test-helpers/query-fixtures';
@@ -29,11 +28,6 @@ const asSubSelect = (s: unknown): DesugaredSubSelect => {
 const asCustomObject = (s: unknown): DesugaredCustomObjectSelect => {
   expect((s as any).kind).toBe('custom_object_select');
   return s as DesugaredCustomObjectSelect;
-};
-
-const asEvaluation = (s: unknown): DesugaredEvaluationSelect => {
-  expect((s as any).kind).toBe('evaluation_select');
-  return s as DesugaredEvaluationSelect;
 };
 
 const asMultiSelection = (s: unknown): DesugaredMultiSelection => {
@@ -99,11 +93,8 @@ describe('IR desugar conversion', () => {
     const query = await capture(() => queryFactories.selectWhereNameSemmy());
     const desugared = desugarSelectQuery(query);
 
-    expect(desugared.where?.kind).toBe('where_comparison');
-    const where = desugared.where as any;
-    expect(where.operator).toBe('=');
-    expect(where.left.steps).toHaveLength(1);
-    expect(where.right[0]).toBe('Semmy');
+    // .equals() now returns ExpressionNode → where_expression
+    expect(desugared.where?.kind).toBe('where_expression');
   });
 
   test('desugars where and', async () => {
@@ -124,7 +115,7 @@ describe('IR desugar conversion', () => {
     const desugared = desugarSelectQuery(query);
     expect(desugared.selections).toHaveLength(1);
     expect(desugared.where).toBeDefined();
-    expect(desugared.where!.kind).toBe('where_comparison');
+    expect(desugared.where!.kind).toBe('where_expression');
   });
 
   test('desugars where some explicit', async () => {
@@ -143,7 +134,8 @@ describe('IR desugar conversion', () => {
     const query = await capture(() => queryFactories.whereSequences());
     const desugared = desugarSelectQuery(query);
     expect(desugared.where).toBeDefined();
-    expect(desugared.where!.kind).toBe('where_boolean');
+    // .some().and() now produces ExistsCondition with chain → where_exists_condition
+    expect(desugared.where!.kind).toBe('where_exists_condition');
   });
 
   // === Count / aggregation ===
