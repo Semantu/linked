@@ -1,5 +1,68 @@
 # Changelog
 
+## 2.4.0
+
+### Minor Changes
+
+- [#53](https://github.com/Semantu/linked/pull/53) [`44da872`](https://github.com/Semantu/linked/commit/44da87295524226f430fdfb6cdf98e686d591913) Thanks [@flyon](https://github.com/flyon)! - ### New: `.none()` collection quantifier
+
+  Added `.none()` on `QueryShapeSet` for filtering where no elements match a condition:
+
+  ```typescript
+  // "People who have NO friends that play chess"
+  Person.select((p) => p.name).where((p) =>
+    p.friends.none((f) => f.hobby.equals("Chess"))
+  );
+  ```
+
+  Generates `FILTER(NOT EXISTS { ... })` in SPARQL. Equivalent to `.some(fn).not()`.
+
+  ### Changed: `.equals()` now returns `ExpressionNode` (was `Evaluation`)
+
+  `.equals()` on query proxies now returns `ExpressionNode` instead of `Evaluation`, enabling `.not()` chaining:
+
+  ```typescript
+  // Now works — .equals() chains with .not()
+  .where(p => p.name.equals('Alice').not())
+  .where(p => Expr.not(p.name.equals('Alice')))
+  ```
+
+  ### Changed: `.some()` / `.every()` now return `ExistsCondition` (was `SetEvaluation`)
+
+  `.some()` and `.every()` on collections now return `ExistsCondition` which supports `.not()`:
+
+  ```typescript
+  .where(p => p.friends.some(f => f.name.equals('Alice')).not()) // same as .none()
+  ```
+
+  ### Breaking: `Evaluation` class removed
+
+  The `Evaluation` class and related types (`SetEvaluation`, `WhereMethods`, `WhereEvaluationPath`) have been removed. Code that imported or depended on these types must migrate to `ExpressionNode` / `ExistsCondition`. The `WhereClause` type now accepts `ExpressionNode | ExistsCondition | callback`.
+
+  ### New exports
+
+  - `ExistsCondition` — from `@_linked/core/expressions/ExpressionNode`
+  - `isExistsCondition()` — type guard for ExistsCondition
+
+## 2.3.0
+
+### Minor Changes
+
+- [#47](https://github.com/Semantu/linked/pull/47) [`4917894`](https://github.com/Semantu/linked/commit/49178946a0a5fc95c71c69a430da6602e561c5f2) Thanks [@flyon](https://github.com/flyon)! - Fix maxCount-aware result mapping for single-value and multi-value properties
+
+  **Single-value properties** (`maxCount: 1`, e.g. `bestFriend`) now return a single `ResultRow` (or `null` when absent) instead of `ResultRow[]` when accessed via traversal queries like `Person.select(p => p.bestFriend.name)`.
+
+  **Multi-value object properties** (e.g. `friends`, without `maxCount`) now correctly return `ResultRow[]` arrays when selected via flat projections like `Person.select(p => p.friends)`. Previously, only the first entity reference was returned.
+
+  **Multi-value literal properties** (e.g. `nickNames: string[]`) now correctly return typed arrays (e.g. `string[]`). Previously, values were silently dropped and an empty array was returned.
+
+  **Behavioral changes:**
+
+  - If your code accesses single-value traversal results as arrays (e.g. `result.bestFriend[0]`), update to access the value directly (`result.bestFriend`).
+  - If your code expects multi-value flat select results as single objects (e.g. `result.friends.id`), update to handle arrays (`result.friends[0].id`).
+
+  The `maxCount` metadata from `PropertyShape` is now propagated through the full IR pipeline (`IRTraversePattern.maxCount`, `IRPropertyExpression.maxCount`) and used during SPARQL result mapping.
+
 ## 2.2.3
 
 ### Patch Changes

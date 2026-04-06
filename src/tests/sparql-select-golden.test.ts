@@ -601,6 +601,105 @@ WHERE {
 }`);
   });
 
+  test('whereNone', async () => {
+    const sparql = await goldenSelect(queryFactories.whereNone);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  FILTER(!(EXISTS {
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/hobby> ?a1_hobby .
+    FILTER(?a1_hobby = "Chess")
+  }))
+}`);
+  });
+
+  test('whereSomeNot — equivalent to whereNone', async () => {
+    const sparql = await goldenSelect(queryFactories.whereSomeNot);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  FILTER(!(EXISTS {
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/hobby> ?a1_hobby .
+    FILTER(?a1_hobby = "Chess")
+  }))
+}`);
+  });
+
+  test('whereEqualsNot — negated equality', async () => {
+    const sparql = await goldenSelect(queryFactories.whereEqualsNot);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  FILTER(!(?a0_name = "Alice"))
+}`);
+  });
+
+  test('whereNoneAndEquals — .none().and() chaining', async () => {
+    const sparql = await goldenSelect(queryFactories.whereNoneAndEquals);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  FILTER(!(EXISTS {
+    ?a0 <${P}/friends> ?a1 .
+    ?a1 <${P}/hobby> ?a1_hobby .
+    FILTER(?a1_hobby = "Chess")
+  }) && ?a0_name = "Bob")
+}`);
+  });
+
+  test('whereNeq — != operator', async () => {
+    const sparql = await goldenSelect(queryFactories.whereNeq);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  FILTER(?a0_name != "Alice")
+}`);
+  });
+
+  test('whereExprNot — Expr.not() wrapping compound condition', async () => {
+    const sparql = await goldenSelect(queryFactories.whereExprNot);
+    expect(sparql).toBe(
+`PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT DISTINCT ?a0 ?a0_name
+WHERE {
+  ?a0 rdf:type <${P}> .
+  OPTIONAL {
+    ?a0 <${P}/name> ?a0_name .
+  }
+  OPTIONAL {
+    ?a0 <${P}/hobby> ?a0_hobby .
+  }
+  FILTER(!(?a0_name = "Alice" && ?a0_hobby = "Chess"))
+}`);
+  });
+
   test('whereSequences', async () => {
     const sparql = await goldenSelect(queryFactories.whereSequences);
     expect(sparql).toBe(

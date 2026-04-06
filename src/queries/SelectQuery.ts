@@ -12,7 +12,7 @@ import {createProxiedPathBuilder} from './ProxiedPathBuilder.js';
 import {FieldSet} from './FieldSet.js';
 import {PropertyPath} from './PropertyPath.js';
 import type {QueryBuilder} from './QueryBuilder.js';
-import {ExpressionNode, isExpressionNode, tracedPropertyExpression} from '../expressions/ExpressionNode.js';
+import {ExpressionNode, ExistsCondition, isExpressionNode, isExistsCondition, tracedPropertyExpression, tracedAliasExpression} from '../expressions/ExpressionNode.js';
 
 /**
  * The canonical SelectQuery type — an IR AST node representing a select query.
@@ -50,9 +50,9 @@ export type AccessorReturnValue =
   | NodeReferenceValue;
 
 export type WhereClause<S extends Shape | AccessorReturnValue> =
-  | Evaluation
   | ExpressionNode
-  | ((s: ToQueryBuilderObject<S>) => Evaluation | ExpressionNode);
+  | ExistsCondition
+  | ((s: ToQueryBuilderObject<S>) => ExpressionNode | ExistsCondition);
 
 export type QueryBuildFn<T extends Shape, ResponseType> = (
   p: ToQueryBuilderObject<T>,
@@ -87,25 +87,6 @@ export type PropertyQueryStep = {
   property: PropertyShape;
   where?: WherePath;
 };
-
-export type WhereAndOr = {
-  firstPath: WherePath;
-  andOr: AndOrQueryToken[];
-};
-
-/**
- * A WhereQuery is a (sub)query that is used to filter down the results of its parent query.
- */
-export type AndOrQueryToken = {
-  and?: WherePath;
-  or?: WherePath;
-};
-
-export enum WhereMethods {
-  EQUALS = '=',
-  SOME = 'some',
-  EVERY = 'every',
-}
 
 /**
  * Maps all the return types of get/set methods of a Shape and maps their return types to QueryBuilderObjects
@@ -202,20 +183,11 @@ export type WhereExpressionPath = {
   expressionNode: ExpressionNode;
 };
 
-export type WherePath = WhereEvaluationPath | WhereAndOr | WhereExpressionPath;
-
-export type WhereEvaluationPath = {
-  path: QueryPropertyPath;
-  method: WhereMethods;
-  args: QueryArg[];
+export type WhereExistsPath = {
+  existsCondition: ExistsCondition;
 };
 
-// WherePath can also be an and/or wrapper; use this guard to safely access args.
-export const isWhereEvaluationPath = (
-  value: WherePath,
-): value is WhereEvaluationPath => {
-  return !!value && 'args' in value;
-};
+export type WherePath = WhereExpressionPath | WhereExistsPath;
 
 /**
  * An argument can be a direct reference to a node, a js primitive (boolean,number), a path to resolve (like from a query context variables)
@@ -304,7 +276,7 @@ export type QueryResponseToResultType<
     ? GetNestedQueryResultType<Response, Source>
     : T extends Array<infer Type>
       ? UnionToIntersection<QueryResponseToResultType<Type>>
-      : T extends Evaluation
+      : T extends ExpressionNode
         ? boolean
         : T extends Object
           ? QResult<QShapeType, Prettify<ObjectToPlainResult<T>>>
@@ -860,11 +832,16 @@ export const processWhereClause = (
     if (isExpressionNode(result)) {
       return {expressionNode: result};
     }
-    return result.getWherePath();
+    if (isExistsCondition(result)) {
+      return {existsCondition: result};
+    }
+    throw new Error('WHERE callback must return ExpressionNode or ExistsCondition');
   } else if (isExpressionNode(validation)) {
     return {expressionNode: validation};
+  } else if (isExistsCondition(validation)) {
+    return {existsCondition: validation};
   } else {
-    return (validation as Evaluation).getWherePath();
+    throw new Error('WHERE clause must be ExpressionNode, ExistsCondition, or a callback');
   }
 };
 
@@ -874,7 +851,7 @@ export const processWhereClause = (
 
 const EXPRESSION_METHODS = new Set([
   'plus', 'minus', 'times', 'divide', 'abs', 'round', 'ceil', 'floor', 'power',
-  'eq', 'neq', 'notEquals', 'gt', 'greaterThan', 'gte', 'greaterThanOrEqual',
+  'equals', 'eq', 'neq', 'notEquals', 'gt', 'greaterThan', 'gte', 'greaterThanOrEqual',
   'lt', 'lessThan', 'lte', 'lessThanOrEqual',
   'concat', 'contains', 'startsWith', 'endsWith', 'substr', 'before', 'after',
   'replace', 'ucase', 'lcase', 'strlen', 'encodeForUri', 'matches',
@@ -886,22 +863,87 @@ const EXPRESSION_METHODS = new Set([
 ]);
 
 /**
+ * Convert a QueryBuilderObject to a traced ExpressionNode by extracting its
+ * property path segments and creating a property expression reference.
+ * This is the bridge between the query proxy world and the expression IR world.
+ */
+function toExpressionNode(qbo: QueryBuilderObject): ExpressionNode {
+  // Check if this is a query context reference
+  const contextId = findContextId(qbo);
+  if (contextId) {
+    const segments = FieldSet.collectPropertySegments(qbo);
+    if (segments.length > 0) {
+      // Context property access (e.g. getQueryContext('user').name) → context_property_expr
+      const lastSegment = segments[segments.length - 1].id;
+      const ir = {kind: 'context_property_expr' as const, contextIri: contextId, property: lastSegment};
+      return new ExpressionNode(ir);
+    }
+    // Context root reference (e.g. getQueryContext('user')) → reference_expr with the context IRI
+    const ir = {kind: 'reference_expr' as const, value: contextId};
+    return new ExpressionNode(ir);
+  }
+
+  const segments = FieldSet.collectPropertySegments(qbo);
+  if (segments.length === 0) {
+    // Root shape or entity reference — produce alias expression (the entity itself)
+    return tracedAliasExpression([]);
+  }
+  const segmentIds = segments.map((s) => s.id);
+  return tracedPropertyExpression(segmentIds);
+}
+
+/** Walk up the QueryBuilderObject chain to find a query context ID. */
+function findContextId(qbo: QueryBuilderObject): string | undefined {
+  let current: QueryBuilderObject | undefined = qbo;
+  while (current) {
+    if (current instanceof QueryShape && (current.originalValue as any)?.__queryContextId) {
+      return (current.originalValue as any).__queryContextId;
+    }
+    current = current.subject as QueryBuilderObject | undefined;
+  }
+  return undefined;
+}
+
+/**
+ * A wrapper for inline `.where()` on primitives that produces alias-based expressions.
+ * When `p.hobby.where(h => h.equals('Jogging'))` is called, `h` should reference
+ * the hobby variable itself (alias), not traverse to a sub-property.
+ */
+class InlineWhereProxy extends QueryBuilderObject {
+  constructor(public readonly source: QueryPrimitive<any>) {
+    super(source.property, source.subject);
+  }
+
+  equals(otherValue: any): ExpressionNode {
+    // Empty traversal = "the current alias" — resolved by lowering
+    // against the property's own alias scope
+    const self = tracedAliasExpression([]);
+    return self.eq(otherValue);
+  }
+}
+
+/**
  * Wrap a QueryPrimitive in a Proxy that intercepts expression method calls.
- * When an expression method (e.g., `.plus()`, `.gt()`) is accessed, creates a
- * traced ExpressionNode based on the QueryPrimitive's property path.
- *
- * Note: `.equals()` is intentionally excluded — it's an existing QueryPrimitive
- * method that returns an Evaluation (for WHERE clauses). Use `.eq()` for the
- * expression form.
+ * When an expression method (e.g., `.plus()`, `.gt()`, `.equals()`) is accessed,
+ * creates a traced ExpressionNode based on the QueryPrimitive's property path.
  */
 function wrapWithExpressionProxy<T>(qp: QueryPrimitive<T>): QueryPrimitive<T> {
   return new Proxy(qp, {
     get(target, key, receiver) {
       if (typeof key === 'string' && EXPRESSION_METHODS.has(key)) {
         const segments = FieldSet.collectPropertySegments(target);
-        const segmentIds = segments.map((s) => s.id);
-        const baseNode = tracedPropertyExpression(segmentIds);
-        return (...args: any[]) => (baseNode as any)[key](...args);
+        // Only intercept if we have valid property segments to trace
+        if (segments.length > 0) {
+          const segmentIds = segments.map((s) => s.id);
+          const baseNode = tracedPropertyExpression(segmentIds);
+          return (...args: any[]) => {
+            // Convert QueryBuilderObject arguments to ExpressionNode
+            const convertedArgs = args.map((arg) =>
+              arg instanceof QueryBuilderObject ? (toExpressionNode(arg) ?? arg) : arg,
+            );
+            return (baseNode as any)[key](...convertedArgs);
+          };
+        }
       }
       return Reflect.get(target, key, receiver);
     },
@@ -1184,20 +1226,40 @@ export class QueryShapeSet<
     );
   }
 
-  some(validation: WhereClause<S>): SetEvaluation {
-    return this.someOrEvery(validation, WhereMethods.SOME);
+  some(validation: WhereClause<S>): ExistsCondition {
+    const predicate = this.buildPredicateExpression(validation);
+    const pathSegmentIds = FieldSet.collectPropertySegments(this).map(s => s.id);
+    return new ExistsCondition(pathSegmentIds, predicate, false);
   }
 
-  every(validation: WhereClause<S>): SetEvaluation {
-    return this.someOrEvery(validation, WhereMethods.EVERY);
+  every(validation: WhereClause<S>): ExistsCondition {
+    // every(fn) = NOT EXISTS(path WHERE NOT(fn))
+    const predicate = this.buildPredicateExpression(validation);
+    const pathSegmentIds = FieldSet.collectPropertySegments(this).map(s => s.id);
+    return new ExistsCondition(pathSegmentIds, predicate.not(), true);
   }
 
-  private someOrEvery(validation: WhereClause<S>, method: WhereMethods) {
-    let leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
-    //do we need to store this here? or are we accessing the evaluation and then going backwards?
-    //in that case just pass it to the evaluation and don't use this.wherePath
-    let wherePath = processWhereClause(validation, leastSpecificShape);
-    return new SetEvaluation(this, method, [wherePath]);
+  none(validation: WhereClause<S>): ExistsCondition {
+    // none(fn) = NOT EXISTS(path WHERE fn) = some(fn).not()
+    const predicate = this.buildPredicateExpression(validation);
+    const pathSegmentIds = FieldSet.collectPropertySegments(this).map(s => s.id);
+    return new ExistsCondition(pathSegmentIds, predicate, true);
+  }
+
+  private buildPredicateExpression(validation: WhereClause<S>): ExpressionNode {
+    const leastSpecificShape = this.getOriginalValue().getLeastSpecificShape();
+    if (validation instanceof Function) {
+      const proxy = createProxiedPathBuilder(leastSpecificShape) as any;
+      const result = validation(proxy);
+      if (isExpressionNode(result)) {
+        return result;
+      }
+      throw new Error('Validation callback must return an ExpressionNode or ExistsCondition');
+    }
+    if (isExpressionNode(validation)) {
+      return validation;
+    }
+    throw new Error('Expected a callback or ExpressionNode for some/every/none');
   }
 }
 
@@ -1292,8 +1354,12 @@ export class QueryShape<
     return this as any as QShape<InstanceType<ShapeClass>, Source, Property>;
   }
 
-  equals(otherValue: NodeReferenceValue | QShape<any>) {
-    return new Evaluation(this, WhereMethods.EQUALS, [otherValue]);
+  equals(otherValue: NodeReferenceValue | QShape<any>): ExpressionNode {
+    const self = toExpressionNode(this);
+    const arg = otherValue instanceof QueryBuilderObject
+      ? toExpressionNode(otherValue)
+      : otherValue;
+    return self.eq(arg as any);
   }
 
   select<QF = unknown>(
@@ -1332,77 +1398,6 @@ export class QueryShape<
   // }
 }
 
-export class Evaluation {
-  private _andOr: AndOrQueryToken[] = [];
-
-  constructor(
-    public value: QueryBuilderObject | QueryPrimitiveSet,
-    public method: WhereMethods,
-    public args: QueryArg[],
-  ) {}
-
-  getPropertyPath() {
-    return this.getWherePath();
-  }
-
-  processArgs(): QueryArg[] {
-    //if the args are not an array, then we convert them to an array
-    if (!this.args || !Array.isArray(this.args)) {
-      return [];
-    }
-    //convert each arg to a QueryBuilderObject
-    return this.args.map((arg) => {
-      if (arg instanceof QueryBuilderObject) {
-        let path = arg.getPropertyPath();
-        let subject;
-        if (path[0] && (path[0] as ShapeReferenceValue).id) {
-          subject = path.shift();
-        }
-        if ((!path || path.length === 0) && subject) {
-          return subject as ShapeReferenceValue;
-        }
-        return {
-          path,
-          subject,
-        } as ArgPath;
-      } else {
-        return arg;
-      }
-    });
-  }
-
-  getWherePath(): WherePath {
-    let evalPath: WhereEvaluationPath = {
-      path: this.value.getPropertyPath(),
-      method: this.method,
-      args: this.processArgs(),
-    };
-
-    if (this._andOr.length > 0) {
-      return {
-        firstPath: evalPath,
-        andOr: this._andOr,
-      };
-    }
-    return evalPath;
-  }
-
-  and(subQuery: WhereClause<any>) {
-    this._andOr.push({
-      and: processWhereClause(subQuery),
-    });
-    return this;
-  }
-
-  or(subQuery: WhereClause<any>) {
-    this._andOr.push({
-      or: processWhereClause(subQuery),
-    });
-    return this;
-  }
-}
-
-class SetEvaluation extends Evaluation {}
 
 /**
  * Concrete query wrapper for JS primitive values (string, number, boolean, Date).
@@ -1424,14 +1419,20 @@ export class QueryPrimitive<
     super(property, subject);
   }
 
-  equals(otherValue: JSPrimitive | QueryBuilderObject) {
-    //TODO: review types, this is working but currently QueryBuilderObject is not accepted as a type of args
-    return new Evaluation(this, WhereMethods.EQUALS, [otherValue as any]);
+  equals(otherValue: JSPrimitive | QueryBuilderObject): ExpressionNode {
+    const self = toExpressionNode(this);
+    const arg = otherValue instanceof QueryBuilderObject
+      ? toExpressionNode(otherValue)
+      : otherValue;
+    return self.eq(arg as any);
   }
 
   where(validation: WhereClause<string>): this {
-    // let nodeShape = this.subject.getOriginalValue().nodeShape;
-    this.wherePath = processWhereClause(validation, new QueryPrimitive(''));
+    // For inline where on a primitive (p.hobby.where(h => h.equals(...))),
+    // pass a clone that produces alias expressions (the bound value itself)
+    // rather than property traversals
+    const selfAsAlias = new InlineWhereProxy(this);
+    this.wherePath = processWhereClause(validation, selfAsAlias as any);
     //return this because after Shape.friends.where() we can call other methods of Shape.friends
     return this as any;
   }
@@ -1472,8 +1473,8 @@ export class QueryPrimitiveSet<
 
   //TODO: see if we can merge these methods of QueryPrimitive and QueryPrimitiveSet
   // so that they're only defined once
-  equals(other) {
-    return new Evaluation(this, WhereMethods.EQUALS, [other]);
+  equals(other): ExpressionNode {
+    return toExpressionNode(this).eq(other);
   }
 
   getPropertyStep(): QueryStep {
@@ -1521,6 +1522,20 @@ export class SetSize<Source = null> extends QueryPrimitive<number, Source> {
     public label?: string,
   ) {
     super();
+  }
+
+  // Build an aggregate_expr(count, ...) ExpressionNode for the counted property
+  equals(otherValue: any): ExpressionNode {
+    const countedSegments = FieldSet.collectPropertySegments(this.subject);
+    const countedIds = countedSegments.map(s => s.id);
+    const countedNode = tracedPropertyExpression(countedIds);
+    // Wrap in aggregate_expr(count)
+    const countExpr = new ExpressionNode({
+      kind: 'aggregate_expr',
+      name: 'count',
+      args: [countedNode.ir],
+    } as any, countedNode._refs);
+    return countExpr.eq(otherValue);
   }
 
   as(label: string) {
