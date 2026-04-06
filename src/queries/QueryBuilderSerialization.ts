@@ -10,6 +10,11 @@ import type {NodeShape} from '../shapes/SHACL.js';
 import {getShapeClass} from '../utils/ShapeClass.js';
 import {walkPropertyPath} from './PropertyPath.js';
 import {ExpressionNode} from '../expressions/ExpressionNode.js';
+// ExistsCondition only exists after the WherePath refactor; access dynamically
+// so this file compiles on branches where it doesn't exist yet.
+import * as _exprModule from '../expressions/ExpressionNode.js';
+const ExistsConditionCtor: (new (...args: any[]) => any) | undefined =
+  (_exprModule as any).ExistsCondition;
 import type {
   WherePath,
   QueryPropertyPath,
@@ -33,10 +38,19 @@ export type QueryStepJSON =
   | {kind: 'size'; count: QueryStepJSON[]; label?: string}
   | {kind: 'shapeRef'; id: string; shapeId: string};
 
+export type ExistsConditionJSON = {
+  kind: 'exists';
+  pathSegmentIds: string[];
+  predicate: {ir: IRExpression; refs?: Record<string, string[]>};
+  negated: boolean;
+  chain: {op: 'and' | 'or'; condition: ExistsConditionJSON | {kind: 'expression'; ir: IRExpression; refs?: Record<string, string[]>}}[];
+};
+
 export type WherePathJSON =
   | {kind: 'evaluation'; path: QueryStepJSON[]; method: string; args: QueryArgJSON[]}
   | {kind: 'andOr'; firstPath: WherePathJSON; andOr: {and?: WherePathJSON; or?: WherePathJSON}[]}
-  | {kind: 'expression'; ir: IRExpression; refs?: Record<string, string[]>};
+  | {kind: 'expression'; ir: IRExpression; refs?: Record<string, string[]>}
+  | ExistsConditionJSON;
 
 export type QueryArgJSON =
   | {kind: 'nodeRef'; id: string}
@@ -94,7 +108,7 @@ function serializeQueryStep(step: QueryStep): QueryStepJSON {
 
 export function serializeWherePath(where: WherePath): WherePathJSON {
   if ('expressionNode' in where) {
-    const expr = (where as {expressionNode: ExpressionNode}).expressionNode;
+    const expr = (where as unknown as {expressionNode: ExpressionNode}).expressionNode;
     const json: {kind: 'expression'; ir: IRExpression; refs?: Record<string, string[]>} = {
       kind: 'expression',
       ir: expr.ir,
@@ -107,7 +121,7 @@ export function serializeWherePath(where: WherePath): WherePathJSON {
     return json;
   }
   if ('firstPath' in where) {
-    const andOr = where as {firstPath: WherePath; andOr: {and?: WherePath; or?: WherePath}[]};
+    const andOr = where as unknown as {firstPath: WherePath; andOr: {and?: WherePath; or?: WherePath}[]};
     return {
       kind: 'andOr',
       firstPath: serializeWherePath(andOr.firstPath),
@@ -119,13 +133,39 @@ export function serializeWherePath(where: WherePath): WherePathJSON {
       }),
     };
   }
-  const ev = where as {path: QueryPropertyPath; method: string; args: QueryArg[]};
-  return {
-    kind: 'evaluation',
-    path: serializeQueryPropertyPath(ev.path),
-    method: ev.method,
-    args: ev.args.map(serializeQueryArg),
-  };
+  if ('path' in where && 'method' in where && 'args' in where) {
+    const ev = where as unknown as {path: QueryPropertyPath; method: string; args: QueryArg[]};
+    return {
+      kind: 'evaluation',
+      path: serializeQueryPropertyPath(ev.path),
+      method: ev.method,
+      args: ev.args.map(serializeQueryArg),
+    };
+  }
+  if ('existsCondition' in where) {
+    // WhereExistsPath — serialize the ExistsCondition structurally
+    const ec = (where as unknown as {existsCondition: any}).existsCondition;
+    return {
+      kind: 'exists',
+      pathSegmentIds: [...ec.pathSegmentIds],
+      predicate: {ir: ec.predicate.ir, refs: serializePropertyRefMap(ec.predicate._refs)},
+      negated: ec.negated ?? false,
+      chain: (ec.chain ?? []).map((c: any) => ({
+        op: c.op,
+        condition: 'pathSegmentIds' in c.condition
+          ? {kind: 'exists' as const, pathSegmentIds: [...c.condition.pathSegmentIds], predicate: {ir: c.condition.predicate.ir, refs: serializePropertyRefMap(c.condition.predicate._refs)}, negated: c.condition.negated ?? false, chain: []}
+          : {kind: 'expression' as const, ir: c.condition.ir, refs: serializePropertyRefMap(c.condition._refs)},
+      })),
+    };
+  }
+  throw new Error(`Cannot serialize WherePath: ${JSON.stringify(Object.keys(where))}`);
+}
+
+function serializePropertyRefMap(refs: ReadonlyMap<string, readonly string[]>): Record<string, string[]> | undefined {
+  if (!refs || refs.size === 0) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of refs) out[k] = [...v];
+  return out;
 }
 
 function serializeQueryArg(arg: QueryArg): QueryArgJSON {
@@ -136,8 +176,7 @@ function serializeQueryArg(arg: QueryArg): QueryArgJSON {
     return {kind: 'date', value: arg.toISOString()};
   }
   if (typeof arg === 'object' && arg !== null) {
-    // WhereExpressionPath, WhereAndOr, or WhereEvaluationPath (nested WherePath)
-    if ('expressionNode' in arg || 'firstPath' in arg || ('path' in arg && 'method' in arg && 'args' in arg)) {
+    if ('expressionNode' in arg || 'existsCondition' in arg || 'firstPath' in arg || ('path' in arg && 'method' in arg && 'args' in arg)) {
       return {kind: 'where', where: serializeWherePath(arg as WherePath)};
     }
     // ArgPath — has 'subject' and 'path'
@@ -231,6 +270,20 @@ export function deserializeWherePath(shape: NodeShape, json: WherePathJSON): Whe
     }
     return {expressionNode: new ExpressionNode(json.ir, refs)};
   }
+  if (json.kind === 'exists') {
+    if (!ExistsConditionCtor) throw new Error('ExistsCondition is not available on this build');
+    const predRefs = deserializeRefMap(json.predicate.refs);
+    const predicate = new ExpressionNode(json.predicate.ir, predRefs);
+    const chain = json.chain.map((c) => {
+      if (c.condition.kind === 'exists') {
+        const innerRefs = deserializeRefMap(c.condition.predicate.refs);
+        return {op: c.op, condition: new ExistsConditionCtor(c.condition.pathSegmentIds, new ExpressionNode(c.condition.predicate.ir, innerRefs), c.condition.negated)};
+      }
+      const exprRefs = deserializeRefMap(c.condition.refs);
+      return {op: c.op, condition: new ExpressionNode(c.condition.ir, exprRefs)};
+    });
+    return {existsCondition: new ExistsConditionCtor(json.pathSegmentIds, predicate, json.negated, chain)} as unknown as WherePath;
+  }
   if (json.kind === 'andOr') {
     return {
       firstPath: deserializeWherePath(shape, json.firstPath),
@@ -240,13 +293,22 @@ export function deserializeWherePath(shape: NodeShape, json: WherePathJSON): Whe
         if (token.or) t.or = deserializeWherePath(shape, token.or);
         return t;
       }),
-    } as WherePath;
+    } as unknown as WherePath;
   }
+  // evaluation (legacy)
   return {
     path: deserializeQueryPropertyPath(shape, json.path),
     method: json.method,
     args: json.args.map((a) => deserializeQueryArg(shape, a)),
-  } as WherePath;
+  } as unknown as WherePath;
+}
+
+function deserializeRefMap(refs?: Record<string, string[]>): Map<string, readonly string[]> {
+  const m = new Map<string, readonly string[]>();
+  if (refs) {
+    for (const [k, v] of Object.entries(refs)) m.set(k, v);
+  }
+  return m;
 }
 
 function deserializeQueryArg(shape: NodeShape, json: QueryArgJSON): QueryArg {
