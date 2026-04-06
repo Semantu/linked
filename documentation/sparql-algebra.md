@@ -181,7 +181,7 @@ Converts an `IRSelectQuery` to a `SparqlSelectPlan`. The algorithm:
 
 1. **Root type triple** — `?a0 rdf:type <ShapeURI>` becomes the required BGP.
 2. **Traverse patterns** — each `IRTraversePattern` becomes a triple: `?from <property> ?to`. Filtered traversals (inline `.where()`) are collected separately.
-3. **Property discovery** — walks all projection, where, and orderBy expressions to find `property_expr` references. Each unique property becomes an OPTIONAL triple: `OPTIONAL { ?alias <property> ?var }`.
+3. **Property discovery** — walks all projection, where, and orderBy expressions to find `property_expr` references. Projection-only and conditionally-needed bindings stay OPTIONAL, but top-level WHERE bindings that are mandatory for row survival are emitted as required triples in the main BGP.
 4. **Filtered OPTIONAL blocks** — inline `.where()` filters produce OPTIONAL blocks containing the traverse triple, filter property triples, and FILTER expression together.
 5. **WHERE clause** — `query.where` becomes either a FILTER (for non-aggregate expressions) or HAVING (for expressions containing aggregates like COUNT > N).
 6. **Subject targeting** — `query.subjectId` becomes an additional FILTER: `?a0 = <subjectUri>`.
@@ -205,6 +205,23 @@ SparqlSelectPlan {
   distinct: true
 }
 ```
+
+#### Example: outer where promotion
+
+DSL: `Person.select().where((p) => p.name.equals('Semmy'))`
+
+Because the outer filter rejects rows when `?a0_name` is unbound, the `name` triple is emitted as required instead of `OPTIONAL`:
+
+```sparql
+SELECT DISTINCT ?a0
+WHERE {
+  ?a0 rdf:type <Person> .
+  ?a0 <name> ?a0_name .
+  FILTER(?a0_name = "Semmy")
+}
+```
+
+For `OR` filters, only bindings required by every branch are promoted. For example, `p.name.equals('Jinx').or(p.hobby.equals('Jogging'))` keeps both bindings optional because either branch can satisfy the filter on its own.
 
 Serialized SPARQL:
 ```sparql

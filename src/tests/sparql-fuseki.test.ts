@@ -831,6 +831,20 @@ describe('Fuseki SELECT — outer where (FILTER)', () => {
     expect(rows.length).toBeLessThanOrEqual(1);
   });
 
+  test('outerWhereDifferentPropsOr — different-property OR still matches rows with only one side bound', async () => {
+    if (!fusekiAvailable) return;
+
+    const result = await runSelectMapped('outerWhereDifferentPropsOr');
+    expect(Array.isArray(result)).toBe(true);
+    const rows = result as ResultRow[];
+
+    // name = Jinx matches p3 even though hobby is missing.
+    // hobby = Jogging matches p2.
+    expect(rows.length).toBe(2);
+    expect(rows.some((row) => row.id.includes('p2'))).toBe(true);
+    expect(rows.some((row) => row.id.includes('p3'))).toBe(true);
+  });
+
   test('whereWithContext — filter bestFriend = context user (p3)', async () => {
     if (!fusekiAvailable) return;
 
