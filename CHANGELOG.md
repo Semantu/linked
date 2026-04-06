@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.4.1
+
+### Patch Changes
+
+- [#60](https://github.com/Semantu/linked/pull/60) [`ec239d3`](https://github.com/Semantu/linked/commit/ec239d301d38580b3e58eee1227090dd5f831c2a) Thanks [@flyon](https://github.com/flyon)! - Fix QueryBuilder.toJSON() to serialize where, orderBy, minus, and preload clauses that were previously silently dropped during JSON round-trips
+
+- [#64](https://github.com/Semantu/linked/pull/64) [`a8d9ad9`](https://github.com/Semantu/linked/commit/a8d9ad955579418388649b524b4bb30ce2654d67) Thanks [@flyon](https://github.com/flyon)! - Refine SPARQL select lowering so top-level null-rejecting filters emit required triples instead of redundant `OPTIONAL` bindings. Queries like `Person.select().where((p) => p.name.equals('Semmy'))` now lower to a required `?a0 <name> ?a0_name` triple, while cases that still need nullable behavior such as `p.name.equals('Jinx').or(p.hobby.equals('Jogging'))` remain optional.
+
+  This change does not add new DSL APIs, but it does change the generated SPARQL shape for some outer `where()` clauses to better match hand-written intent. Inline traversal `.where(...)`, `EXISTS` filters, and aggregate `HAVING` paths keep their previous behavior.
+
+  See `documentation/sparql-algebra.md` for the updated lowering rules and examples.
+
 ## 2.4.0
 
 ### Minor Changes
