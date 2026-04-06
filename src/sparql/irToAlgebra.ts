@@ -145,6 +145,39 @@ function joinNodes(
   return {type: 'join', left, right};
 }
 
+function bindingKey(alias: string, property: string): string {
+  return `${alias}::${property}`;
+}
+
+function contextAliasKey(contextIri: string): string {
+  return `__ctx__${contextIri}`;
+}
+
+function mergeKeySets(...sets: ReadonlySet<string>[]): Set<string> {
+  const merged = new Set<string>();
+  for (const set of sets) {
+    for (const key of set) {
+      merged.add(key);
+    }
+  }
+  return merged;
+}
+
+function intersectKeySets(sets: ReadonlySet<string>[]): Set<string> {
+  if (sets.length === 0) {
+    return new Set<string>();
+  }
+
+  const [first, ...rest] = sets;
+  const intersection = new Set(first);
+  for (const value of intersection) {
+    if (!rest.every((set) => set.has(value))) {
+      intersection.delete(value);
+    }
+  }
+  return intersection;
+}
+
 // ---------------------------------------------------------------------------
 // Pattern helpers
 // ---------------------------------------------------------------------------
@@ -184,7 +217,7 @@ class VariableRegistry {
   private usedVarNames = new Set<string>();
 
   private key(alias: string, property: string): string {
-    return `${alias}::${property}`;
+    return bindingKey(alias, property);
   }
 
   has(alias: string, property: string): boolean {
@@ -255,6 +288,14 @@ export function selectToAlgebra(
 ): SparqlSelectPlan {
   const registry = new VariableRegistry();
 
+  // Promote bindings only when the top-level WHERE would reject rows without
+  // them. This keeps human-like SPARQL for null-rejecting filters without
+  // over-constraining OR cases that can still match through other branches.
+  const requiredPropertyKeys = query.where
+    ? collectRequiredBindingKeys(query.where)
+    : new Set<string>();
+
+  const requiredPropertyTriples: SparqlTriple[] = [];
   // Track property triples that need to be added as OPTIONAL
   const optionalPropertyTriples: SparqlTriple[] = [];
 
@@ -307,6 +348,8 @@ export function selectToAlgebra(
       item.expression,
       registry,
       optionalPropertyTriples,
+      requiredPropertyTriples,
+      requiredPropertyKeys,
     );
   }
 
@@ -315,6 +358,8 @@ export function selectToAlgebra(
       query.where,
       registry,
       optionalPropertyTriples,
+      requiredPropertyTriples,
+      requiredPropertyKeys,
     );
   }
 
@@ -324,6 +369,8 @@ export function selectToAlgebra(
         orderItem.expression,
         registry,
         optionalPropertyTriples,
+        requiredPropertyTriples,
+        requiredPropertyKeys,
       );
     }
   }
@@ -333,7 +380,7 @@ export function selectToAlgebra(
   //    - Wrap each optional property triple in a LeftJoin
   const requiredBgp: SparqlBGP = {
     type: 'bgp',
-    triples: [...requiredTriples, ...traverseTriples],
+    triples: [...requiredTriples, ...traverseTriples, ...requiredPropertyTriples],
   };
 
   let algebra: SparqlAlgebraNode = requiredBgp;
@@ -603,45 +650,84 @@ function processExpressionForProperties(
   expr: IRExpression,
   registry: VariableRegistry,
   optionalPropertyTriples: SparqlTriple[],
+  requiredPropertyTriples: SparqlTriple[] = [],
+  requiredPropertyKeys = new Set<string>(),
 ): void {
   switch (expr.kind) {
     case 'property_expr': {
       if (!registry.has(expr.sourceAlias, expr.property)) {
-        // Create a new OPTIONAL triple for this property
         const varName = registry.getOrCreate(expr.sourceAlias, expr.property);
         const predicate = expr.pathExpr
           ? {kind: 'path' as const, value: pathExprToSparql(expr.pathExpr), uris: collectPathUris(expr.pathExpr)}
           : iriTerm(expr.property);
-        optionalPropertyTriples.push(
-          tripleOf(
-            varTerm(expr.sourceAlias),
-            predicate,
-            varTerm(varName),
-          ),
+        const triple = tripleOf(
+          varTerm(expr.sourceAlias),
+          predicate,
+          varTerm(varName),
         );
+        const triples = requiredPropertyKeys.has(bindingKey(expr.sourceAlias, expr.property))
+          ? requiredPropertyTriples
+          : optionalPropertyTriples;
+        triples.push(triple);
       }
       break;
     }
     case 'binary_expr':
-      processExpressionForProperties(expr.left, registry, optionalPropertyTriples);
-      processExpressionForProperties(expr.right, registry, optionalPropertyTriples);
+      processExpressionForProperties(
+        expr.left,
+        registry,
+        optionalPropertyTriples,
+        requiredPropertyTriples,
+        requiredPropertyKeys,
+      );
+      processExpressionForProperties(
+        expr.right,
+        registry,
+        optionalPropertyTriples,
+        requiredPropertyTriples,
+        requiredPropertyKeys,
+      );
       break;
     case 'logical_expr':
       for (const sub of expr.expressions) {
-        processExpressionForProperties(sub, registry, optionalPropertyTriples);
+        processExpressionForProperties(
+          sub,
+          registry,
+          optionalPropertyTriples,
+          requiredPropertyTriples,
+          requiredPropertyKeys,
+        );
       }
       break;
     case 'not_expr':
-      processExpressionForProperties(expr.expression, registry, optionalPropertyTriples);
+      processExpressionForProperties(
+        expr.expression,
+        registry,
+        optionalPropertyTriples,
+        requiredPropertyTriples,
+        requiredPropertyKeys,
+      );
       break;
     case 'function_expr':
       for (const arg of expr.args) {
-        processExpressionForProperties(arg, registry, optionalPropertyTriples);
+        processExpressionForProperties(
+          arg,
+          registry,
+          optionalPropertyTriples,
+          requiredPropertyTriples,
+          requiredPropertyKeys,
+        );
       }
       break;
     case 'aggregate_expr':
       for (const arg of expr.args) {
-        processExpressionForProperties(arg, registry, optionalPropertyTriples);
+        processExpressionForProperties(
+          arg,
+          registry,
+          optionalPropertyTriples,
+          requiredPropertyTriples,
+          requiredPropertyKeys,
+        );
       }
       break;
     case 'exists_expr':
@@ -653,16 +739,18 @@ function processExpressionForProperties(
       // Context entity property — emit a triple with fixed IRI as subject.
       // Use raw IRI as registry key to avoid collision between IRIs that
       // sanitize to the same string (e.g. ctx-1 vs ctx_1).
-      const ctxKey = `__ctx__${expr.contextIri}`;
+      const ctxKey = contextAliasKey(expr.contextIri);
       if (!registry.has(ctxKey, expr.property)) {
         const varName = registry.getOrCreate(ctxKey, expr.property);
-        optionalPropertyTriples.push(
-          tripleOf(
-            iriTerm(expr.contextIri),
-            iriTerm(expr.property),
-            varTerm(varName),
-          ),
+        const triple = tripleOf(
+          iriTerm(expr.contextIri),
+          iriTerm(expr.property),
+          varTerm(varName),
         );
+        const triples = requiredPropertyKeys.has(bindingKey(ctxKey, expr.property))
+          ? requiredPropertyTriples
+          : optionalPropertyTriples;
+        triples.push(triple);
       }
       break;
     }
@@ -671,6 +759,41 @@ function processExpressionForProperties(
     case 'alias_expr':
       // No property references to discover
       break;
+  }
+}
+
+/**
+ * Compute which bindings are mandatory for a top-level FILTER to keep a row.
+ * AND makes either side required; OR only keeps bindings required by every branch.
+ */
+function collectRequiredBindingKeys(expr: IRExpression): Set<string> {
+  switch (expr.kind) {
+    case 'property_expr':
+      return new Set([bindingKey(expr.sourceAlias, expr.property)]);
+    case 'context_property_expr':
+      return new Set([bindingKey(contextAliasKey(expr.contextIri), expr.property)]);
+    case 'binary_expr':
+      return mergeKeySets(
+        collectRequiredBindingKeys(expr.left),
+        collectRequiredBindingKeys(expr.right),
+      );
+    case 'function_expr':
+      return mergeKeySets(...expr.args.map((arg) => collectRequiredBindingKeys(arg)));
+    case 'not_expr':
+      return collectRequiredBindingKeys(expr.expression);
+    case 'logical_expr': {
+      const childSets = expr.expressions.map((sub) => collectRequiredBindingKeys(sub));
+      if (expr.operator === 'and') {
+        return mergeKeySets(...childSets);
+      }
+      return intersectKeySets(childSets);
+    }
+    case 'aggregate_expr':
+    case 'exists_expr':
+    case 'literal_expr':
+    case 'reference_expr':
+    case 'alias_expr':
+      return new Set<string>();
   }
 }
 
