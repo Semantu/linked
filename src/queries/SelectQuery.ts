@@ -1355,6 +1355,11 @@ export class QueryShape<
   }
 
   equals(otherValue: NodeReferenceValue | QShape<any>): ExpressionNode {
+    //validate the value is formed correctly
+    if(!otherValue.id) {
+      throw Error(`Invalid value for .equals(). ${JSON.stringify(otherValue)}`);  
+    }
+    
     const self = toExpressionNode(this);
     const arg = otherValue instanceof QueryBuilderObject
       ? toExpressionNode(otherValue)
