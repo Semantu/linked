@@ -1293,6 +1293,11 @@ export class QueryShape<
   }
 
   equals(otherValue: NodeReferenceValue | QShape<any>) {
+    //validate the value is formed correctly
+    if(!otherValue.id) {
+      throw Error(`Invalid value for .equals(). ${JSON.stringify(otherValue)}`);  
+    }
+    
     return new Evaluation(this, WhereMethods.EQUALS, [otherValue]);
   }
 

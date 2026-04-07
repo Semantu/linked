@@ -549,7 +549,17 @@ export class QueryBuilder<S extends Shape = Shape, R = any, Result = any>
       // Pending context hasn't resolved yet — return null rather than querying without a subject.
       return Promise.resolve(null as Result);
     }
-    return getQueryDispatch().selectQuery(this.build()) as Promise<Result>;
+    let query: SelectQuery;
+    try {
+      query = this.build();
+    } catch (err) {
+      return Promise.reject(
+        Error(`Error while building query: ${err.stack}.\n\nQuery related to this error: ${JSON.stringify(this.toJSON())}`)
+      );
+    }
+    return getQueryDispatch().selectQuery(query).catch(err => {
+      throw Error(`Error while executing query: ${err.stack}.\n\nQuery related to this error: ${JSON.stringify(this.toJSON())}`)
+    }) as Promise<Result>;
   }
 
   // ---------------------------------------------------------------------------
