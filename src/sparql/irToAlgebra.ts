@@ -14,6 +14,7 @@ import {
 } from '../queries/IntermediateRepresentation.js';
 import {NodeReferenceValue} from '../utils/NodeReference.js';
 import {pathExprToSparql, collectPathUris} from '../paths/pathExprToSparql.js';
+import {isPathRef, type PathExpr} from '../paths/PropertyPathExpr.js';
 import {
   SparqlSelectPlan,
   SparqlInsertDataPlan,
@@ -37,26 +38,9 @@ import {
   deleteInsertPlanToSparql,
   deleteWherePlanToSparql,
 } from './algebraToString.js';
-// Lazy-loaded to avoid circular dependency:
-// irToAlgebra → ShapeClass → Shape → CreateBuilder → … → SHACL → Shape (circular)
-let _getShapeClass: typeof import('../utils/ShapeClass.js').getShapeClass | undefined;
-function lazyGetShapeClass(id: string) {
-  if (!_getShapeClass) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    _getShapeClass = require('../utils/ShapeClass.js').getShapeClass;
-  }
-  return _getShapeClass!(id);
-}
-
-let _shacl: typeof import('../ontologies/shacl.js').shacl | undefined;
-function lazyShacl() {
-  if (!_shacl) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    _shacl = require('../ontologies/shacl.js').shacl;
-  }
-  return _shacl!;
-}
+import {getAllShapeClasses, getShapeClass} from '../utils/ShapeClass.js';
 import {rdf} from '../ontologies/rdf.js';
+import {shacl} from '../ontologies/shacl.js';
 import {xsd} from '../ontologies/xsd.js';
 
 // ---------------------------------------------------------------------------
@@ -75,6 +59,78 @@ const XSD_DOUBLE = xsd.double.id;
 
 function iriTerm(value: string): SparqlTerm {
   return {kind: 'iri', value};
+}
+
+function isSimplePathRef(path: PathExpr): path is string | {id: string} {
+  return isPathRef(path);
+}
+
+function resolveShapeTypeIri(shapeId: string): string {
+  const shapeClass = getShapeClass(shapeId) as
+    | ({targetClass?: {id?: string}} & Function)
+    | undefined;
+  return shapeClass?.targetClass?.id || shapeId;
+}
+
+function resolvePredicateTerm(propertyId: string): SparqlTerm {
+  const propertyShape = getRegisteredPropertyShape(propertyId);
+  if (propertyShape?.path) {
+    if (isSimplePathRef(propertyShape.path)) {
+      return iriTerm(
+        typeof propertyShape.path === 'string'
+          ? propertyShape.path
+          : propertyShape.path.id,
+      );
+    }
+    return {
+      kind: 'path',
+      value: pathExprToSparql(propertyShape.path),
+      uris: collectPathUris(propertyShape.path),
+    };
+  }
+  return iriTerm(propertyId);
+}
+
+function getRegisteredPropertyShape(propertyId: string) {
+  for (const shapeClass of getAllShapeClasses().values()) {
+    const propertyShape = shapeClass.shape
+      ?.getPropertyShapes(true)
+      .find((prop) => prop.id === propertyId);
+    if (propertyShape) {
+      return propertyShape;
+    }
+  }
+  return undefined;
+}
+
+function isRequiredTraverse(propertyId: string): boolean {
+  return (getRegisteredPropertyShape(propertyId)?.minCount || 0) >= 1;
+}
+
+// If an alias is reached through an optional traverse, properties selected
+// from that alias must stay in the same optional branch.
+function aliasDependsOnOptionalTraverse(
+  alias: string,
+  traversePatterns: ReadonlyArray<IRGraphPattern>,
+): boolean {
+  let currentAlias = alias;
+
+  while (true) {
+    const traverse = traversePatterns.find(
+      (pattern): pattern is Extract<IRGraphPattern, {kind: 'traverse'}> =>
+        pattern.kind === 'traverse' && pattern.to === currentAlias,
+    );
+
+    if (!traverse) {
+      return false;
+    }
+
+    if (!isRequiredTraverse(traverse.property)) {
+      return true;
+    }
+
+    currentAlias = traverse.from;
+  }
 }
 
 function varTerm(name: string): SparqlTerm {
@@ -132,6 +188,34 @@ function wrapOptional(
   right: SparqlAlgebraNode,
 ): SparqlLeftJoin {
   return {type: 'left_join', left, right};
+}
+
+// Child triples of an optional traverse should only bind when the parent alias
+// is already present; otherwise Fuseki may match unrelated rows.
+function optionalTripleNode(
+  triple: SparqlTriple,
+  traversePatterns: ReadonlyArray<IRGraphPattern>,
+): SparqlAlgebraNode {
+  const inner: SparqlAlgebraNode = {type: 'bgp', triples: [triple]};
+  if (
+    triple.subject.kind === 'variable' &&
+    aliasDependsOnOptionalTraverse(triple.subject.name, traversePatterns)
+  ) {
+    return {
+      type: 'filter',
+      expression: {
+        kind: 'function_expr',
+        name: 'BOUND',
+        args: [{kind: 'variable_expr', name: triple.subject.name}],
+      },
+      inner,
+    };
+  }
+  return inner;
+}
+
+function variableName(term: SparqlTerm): string | null {
+  return term.kind === 'variable' ? term.name : null;
 }
 
 /**
@@ -314,7 +398,7 @@ export function selectToAlgebra(
     );
   }
   const rootAlias = query.root.alias;
-  const shapeUri = query.root.shape;
+  const shapeUri = resolveShapeTypeIri(query.root.shape);
   const typeTriple = tripleOf(
     varTerm(rootAlias),
     iriTerm(RDF_TYPE),
@@ -336,7 +420,14 @@ export function selectToAlgebra(
   const filterPropertyTriplesMap = new Map<number, SparqlTriple[]>();
   filteredTraverseBlocks.forEach((block, idx) => {
     const filterPropertyTriples: SparqlTriple[] = [];
-    processExpressionForProperties(block.filter, registry, filterPropertyTriples);
+    processExpressionForProperties(
+      block.filter,
+      registry,
+      filterPropertyTriples,
+      [],
+      new Set<string>(),
+      query.patterns,
+    );
     filterPropertyTriplesMap.set(idx, filterPropertyTriples);
   });
 
@@ -350,6 +441,7 @@ export function selectToAlgebra(
       optionalPropertyTriples,
       requiredPropertyTriples,
       requiredPropertyKeys,
+      query.patterns,
     );
   }
 
@@ -360,6 +452,7 @@ export function selectToAlgebra(
       optionalPropertyTriples,
       requiredPropertyTriples,
       requiredPropertyKeys,
+      query.patterns,
     );
   }
 
@@ -371,9 +464,68 @@ export function selectToAlgebra(
         optionalPropertyTriples,
         requiredPropertyTriples,
         requiredPropertyKeys,
+        query.patterns,
       );
     }
   }
+
+  const optionalTraversePatterns = query.patterns.filter(
+    (pattern): pattern is Extract<IRGraphPattern, {kind: 'traverse'}> =>
+      pattern.kind === 'traverse' && !isRequiredTraverse(pattern.property),
+  );
+
+  const optionalTraverseTripleByAlias = new Map<string, SparqlTriple>();
+  const optionalTraverseChildrenByParent = new Map<string, string[]>();
+  const consumedOptionalTriples = new Set<SparqlTriple>();
+
+  // Rebuild the optional traverse tree from the flat IR so nested traverses
+  // can be emitted as nested OPTIONAL blocks.
+  for (const traverse of optionalTraversePatterns) {
+    const triple = optionalPropertyTriples.find((candidate) => {
+      const subjectAlias = variableName(candidate.subject);
+      const objectAlias = variableName(candidate.object);
+      return subjectAlias === traverse.from && objectAlias === traverse.to;
+    });
+
+    if (!triple) {
+      continue;
+    }
+
+    optionalTraverseTripleByAlias.set(traverse.to, triple);
+    consumedOptionalTriples.add(triple);
+
+    const children = optionalTraverseChildrenByParent.get(traverse.from) || [];
+    children.push(traverse.to);
+    optionalTraverseChildrenByParent.set(traverse.from, children);
+  }
+
+  // Preserve parent/child scoping for optional traverses like:
+  // OPTIONAL { ?event schema:image ?image . OPTIONAL { ?image schema:contentUrl ?url } }
+  const buildOptionalTraverseBlock = (alias: string): SparqlAlgebraNode => {
+    const traverseTriple = optionalTraverseTripleByAlias.get(alias);
+    if (!traverseTriple) {
+      throw new Error(`Missing optional traverse triple for alias ${alias}`);
+    }
+
+    let block: SparqlAlgebraNode = {type: 'bgp', triples: [traverseTriple]};
+
+    for (const triple of optionalPropertyTriples) {
+      if (consumedOptionalTriples.has(triple)) {
+        continue;
+      }
+      if (variableName(triple.subject) !== alias) {
+        continue;
+      }
+      consumedOptionalTriples.add(triple);
+      block = wrapOptional(block, {type: 'bgp', triples: [triple]});
+    }
+
+    for (const childAlias of optionalTraverseChildrenByParent.get(alias) || []) {
+      block = wrapOptional(block, buildOptionalTraverseBlock(childAlias));
+    }
+
+    return block;
+  };
 
   // 5. Build the algebra tree
   //    - Start with the required BGP (type triple + traverse triples)
@@ -397,18 +549,31 @@ export function selectToAlgebra(
     let blockInner: SparqlAlgebraNode = {type: 'bgp', triples: [block.traverseTriple]};
     // Wrap each filter property triple in its own nested OPTIONAL
     for (const propTriple of filterPropertyTriples) {
-      blockInner = wrapOptional(blockInner, {type: 'bgp', triples: [propTriple]});
+      blockInner = wrapOptional(
+        blockInner,
+        optionalTripleNode(propTriple, query.patterns),
+      );
     }
     const filteredBlock: SparqlFilter = {type: 'filter', expression: filterExpr, inner: blockInner};
     algebra = wrapOptional(algebra, filteredBlock);
   }
 
-  // Wrap each optional property triple in its own OPTIONAL (LeftJoin)
+  // Only attach top-level optional traverses here; nested ones are attached
+  // recursively inside their parent optional block above.
+  const rootOptionalTraverseAliases = optionalTraversePatterns
+    .filter((pattern) => !optionalTraverseTripleByAlias.has(pattern.from))
+    .map((pattern) => pattern.to);
+
+  for (const alias of rootOptionalTraverseAliases) {
+    algebra = wrapOptional(algebra, buildOptionalTraverseBlock(alias));
+  }
+
+  // Wrap remaining optional property triples in their own OPTIONAL (LeftJoin)
   for (const propTriple of optionalPropertyTriples) {
-    algebra = wrapOptional(algebra, {
-      type: 'bgp',
-      triples: [propTriple],
-    });
+    if (consumedOptionalTriples.has(propTriple)) {
+      continue;
+    }
+    algebra = wrapOptional(algebra, optionalTripleNode(propTriple, query.patterns));
   }
 
   // 5. Where clause → Filter wrapping (or HAVING if aggregate-containing)
@@ -432,7 +597,14 @@ export function selectToAlgebra(
       let minusAlgebra = convertExistsPattern(pattern.pattern, registry);
       if (pattern.filter) {
         const minusPropertyTriples: SparqlTriple[] = [];
-        processExpressionForProperties(pattern.filter, registry, minusPropertyTriples);
+        processExpressionForProperties(
+          pattern.filter,
+          registry,
+          minusPropertyTriples,
+          [],
+          new Set<string>(),
+          query.patterns,
+        );
         // Add property triples into the MINUS block
         if (minusPropertyTriples.length > 0) {
           minusAlgebra = joinNodes(minusAlgebra, {type: 'bgp', triples: minusPropertyTriples});
@@ -592,7 +764,7 @@ function processPattern(
       // Add traverse triple to required pattern (or filtered block if inline where)
       const predicate = pattern.pathExpr
         ? {kind: 'path' as const, value: pathExprToSparql(pattern.pathExpr), uris: collectPathUris(pattern.pathExpr)}
-        : iriTerm(pattern.property);
+        : resolvePredicateTerm(pattern.property);
       const triple = tripleOf(
         varTerm(pattern.from),
         predicate,
@@ -604,6 +776,8 @@ function processPattern(
           filter: pattern.filter,
           toAlias: pattern.to,
         });
+      } else if (!isRequiredTraverse(pattern.property)) {
+        optionalPropertyTriples.push(triple);
       } else {
         traverseTriples.push(triple);
       }
@@ -652,6 +826,7 @@ function processExpressionForProperties(
   optionalPropertyTriples: SparqlTriple[],
   requiredPropertyTriples: SparqlTriple[] = [],
   requiredPropertyKeys = new Set<string>(),
+  traversePatterns: ReadonlyArray<IRGraphPattern> = [],
 ): void {
   switch (expr.kind) {
     case 'property_expr': {
@@ -659,13 +834,19 @@ function processExpressionForProperties(
         const varName = registry.getOrCreate(expr.sourceAlias, expr.property);
         const predicate = expr.pathExpr
           ? {kind: 'path' as const, value: pathExprToSparql(expr.pathExpr), uris: collectPathUris(expr.pathExpr)}
-          : iriTerm(expr.property);
+          : resolvePredicateTerm(expr.property);
         const triple = tripleOf(
           varTerm(expr.sourceAlias),
           predicate,
           varTerm(varName),
         );
-        const triples = requiredPropertyKeys.has(bindingKey(expr.sourceAlias, expr.property))
+        // A top-level filter can promote a property to "required", except when
+        // the property depends on an optional traverse. Those properties must
+        // remain optional to preserve the traversal scope.
+        const shouldBeRequired =
+          requiredPropertyKeys.has(bindingKey(expr.sourceAlias, expr.property)) &&
+          !aliasDependsOnOptionalTraverse(expr.sourceAlias, traversePatterns);
+        const triples = shouldBeRequired
           ? requiredPropertyTriples
           : optionalPropertyTriples;
         triples.push(triple);
@@ -679,6 +860,7 @@ function processExpressionForProperties(
         optionalPropertyTriples,
         requiredPropertyTriples,
         requiredPropertyKeys,
+        traversePatterns,
       );
       processExpressionForProperties(
         expr.right,
@@ -686,6 +868,7 @@ function processExpressionForProperties(
         optionalPropertyTriples,
         requiredPropertyTriples,
         requiredPropertyKeys,
+        traversePatterns,
       );
       break;
     case 'logical_expr':
@@ -696,6 +879,7 @@ function processExpressionForProperties(
           optionalPropertyTriples,
           requiredPropertyTriples,
           requiredPropertyKeys,
+          traversePatterns,
         );
       }
       break;
@@ -706,6 +890,7 @@ function processExpressionForProperties(
         optionalPropertyTriples,
         requiredPropertyTriples,
         requiredPropertyKeys,
+        traversePatterns,
       );
       break;
     case 'function_expr':
@@ -716,6 +901,7 @@ function processExpressionForProperties(
           optionalPropertyTriples,
           requiredPropertyTriples,
           requiredPropertyKeys,
+          traversePatterns,
         );
       }
       break;
@@ -727,6 +913,7 @@ function processExpressionForProperties(
           optionalPropertyTriples,
           requiredPropertyTriples,
           requiredPropertyKeys,
+          traversePatterns,
         );
       }
       break;
@@ -744,7 +931,7 @@ function processExpressionForProperties(
         const varName = registry.getOrCreate(ctxKey, expr.property);
         const triple = tripleOf(
           iriTerm(expr.contextIri),
-          iriTerm(expr.property),
+          resolvePredicateTerm(expr.property),
           varTerm(varName),
         );
         const triples = requiredPropertyKeys.has(bindingKey(ctxKey, expr.property))
@@ -956,7 +1143,7 @@ function convertExistsPattern(
     case 'traverse': {
       const existsPredicate = pattern.pathExpr
         ? {kind: 'path' as const, value: pathExprToSparql(pattern.pathExpr), uris: collectPathUris(pattern.pathExpr)}
-        : iriTerm(pattern.property);
+        : resolvePredicateTerm(pattern.property);
       const triple = tripleOf(
         varTerm(pattern.from),
         existsPredicate,
@@ -981,7 +1168,7 @@ function convertExistsPattern(
           tripleOf(
             varTerm(pattern.alias),
             iriTerm(RDF_TYPE),
-            iriTerm(pattern.shape),
+            iriTerm(resolveShapeTypeIri(pattern.shape)),
           ),
         ],
       };
@@ -1104,11 +1291,13 @@ function generateNodeDataTriples(
   const subjectTerm = iriTerm(uri);
 
   // Type triple
-  triples.push(tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(data.shape)));
+  triples.push(
+    tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(resolveShapeTypeIri(data.shape))),
+  );
 
   // Field triples
   for (const field of data.fields) {
-    const propertyTerm = iriTerm(field.property);
+    const propertyTerm = resolvePredicateTerm(field.property);
 
     if (field.value === null || field.value === undefined) {
       continue;
@@ -1188,7 +1377,7 @@ function processUpdateFields(
   const extends_: Array<{variable: string; expression: SparqlExpression}> = [];
 
   for (const field of data.fields) {
-    const propertyTerm = iriTerm(field.property);
+    const propertyTerm = resolvePredicateTerm(field.property);
     const suffix = propertySuffix(field.property);
 
     // Check for set modification ({add, remove})
@@ -1372,7 +1561,7 @@ export function updateToAlgebra(
         trav.from === '__mutation_subject__' ? subjectTerm : varTerm(trav.from);
       const traversalTriple = tripleOf(
         fromTerm,
-        iriTerm(trav.property),
+        resolvePredicateTerm(trav.property),
         varTerm(trav.to),
       );
       whereAlgebra = {
@@ -1418,7 +1607,11 @@ export function deleteToAlgebra(
 
     const subjWild = tripleOf(subjectTerm, varTerm(`p${idx}`), varTerm(`o${idx}`));
     const objWild = tripleOf(varTerm(`s${idx}`), varTerm(`p2${idx}`), subjectTerm);
-    const typeGuard = tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(query.shape));
+    const typeGuard = tripleOf(
+      subjectTerm,
+      iriTerm(RDF_TYPE),
+      iriTerm(resolveShapeTypeIri(query.shape)),
+    );
 
     // DELETE block: all patterns (subject-wildcard, object-wildcard, type)
     deletePatterns.push(subjWild, objWild, typeGuard);
@@ -1459,8 +1652,7 @@ export function deleteToAlgebra(
 function isBlankNodeProperty(prop: {nodeKind?: {id?: string}}): boolean {
   const nk = prop.nodeKind?.id;
   if (!nk) return false;
-  const s = lazyShacl();
-  return nk === s.BlankNode.id || nk === s.BlankNodeOrIRI.id;
+  return nk === shacl.BlankNode.id || nk === shacl.BlankNodeOrIRI.id;
 }
 
 /**
@@ -1479,7 +1671,7 @@ function walkBlankNodeTree(
   depth: number,
   deletePatterns: SparqlTriple[],
 ): SparqlAlgebraNode | null {
-  const shapeClass = lazyGetShapeClass(shapeId);
+  const shapeClass = getShapeClass(shapeId);
   if (!shapeClass?.shape) return null;
 
   let optionals: SparqlAlgebraNode | null = null;
@@ -1498,7 +1690,7 @@ function walkBlankNodeTree(
     // WHERE: parent --<property>--> ?bnVar
     const traverseTriple = tripleOf(
       varTerm(parentVar),
-      iriTerm(prop.path[0].id),
+      resolvePredicateTerm(prop.id),
       varTerm(bnVar),
     );
     // FILTER(isBlank(?bnVar))
@@ -1561,7 +1753,11 @@ export function deleteAllToAlgebra(
   ];
 
   // WHERE: type triple + root wildcard
-  const typeTriple = tripleOf(varTerm(subjectVar), iriTerm(RDF_TYPE), iriTerm(query.shape));
+  const typeTriple = tripleOf(
+    varTerm(subjectVar),
+    iriTerm(RDF_TYPE),
+    iriTerm(resolveShapeTypeIri(query.shape)),
+  );
   const rootWildcard = tripleOf(varTerm(subjectVar), varTerm('p'), varTerm('o'));
   let whereAlgebra: SparqlAlgebraNode = {type: 'bgp', triples: [typeTriple, rootWildcard]};
 
@@ -1597,7 +1793,11 @@ export function deleteWhereToAlgebra(
   ];
 
   // WHERE: type triple + root wildcard
-  const typeTriple = tripleOf(varTerm(subjectVar), iriTerm(RDF_TYPE), iriTerm(query.shape));
+  const typeTriple = tripleOf(
+    varTerm(subjectVar),
+    iriTerm(RDF_TYPE),
+    iriTerm(resolveShapeTypeIri(query.shape)),
+  );
   const rootWildcard = tripleOf(varTerm(subjectVar), varTerm('p'), varTerm('o'));
   let whereAlgebra: SparqlAlgebraNode = {type: 'bgp', triples: [typeTriple, rootWildcard]};
 
@@ -1654,7 +1854,11 @@ export function updateWhereToAlgebra(
   const result = processUpdateFields(query.data, subjectTerm, options);
 
   // WHERE: type triple is always required
-  const typeTriple = tripleOf(subjectTerm, iriTerm(RDF_TYPE), iriTerm(query.data.shape));
+  const typeTriple = tripleOf(
+    subjectTerm,
+    iriTerm(RDF_TYPE),
+    iriTerm(resolveShapeTypeIri(query.data.shape)),
+  );
   let whereAlgebra: SparqlAlgebraNode = {type: 'bgp', triples: [typeTriple]};
 
   // Process where filter conditions (if any)
@@ -1691,7 +1895,7 @@ export function updateWhereToAlgebra(
         trav.from === '__mutation_subject__' ? varTerm('a0') : varTerm(trav.from);
       const traversalTriple = tripleOf(
         fromTerm,
-        iriTerm(trav.property),
+        resolvePredicateTerm(trav.property),
         varTerm(trav.to),
       );
       whereAlgebra = {
